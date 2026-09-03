@@ -15,7 +15,7 @@
 
 import Schema from '@deepseek-ai/schemastery'
 import { z } from 'zod'
-import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync, rmSync, cpSync, statSync, readdirSync, realpathSync } from 'node:fs'
+import { readFileSync, writeFileSync, renameSync, chmodSync, existsSync, mkdirSync, rmSync, cpSync, statSync, readdirSync, realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
 import { tmpdir, homedir } from 'node:os'
@@ -213,8 +213,11 @@ const loadPersistedState = () => {
 const savePersistedState = (state) => {
   try {
     const merged = { ...loadPersistedState(), ...state }
-    writeFileSync(STATE_FILE + '.tmp', JSON.stringify(merged, null, 2), 'utf8')
+    // mode 0o600: 状态文件含自定义中转站/模型的 API Key 明文, 必须限定本用户可读
+    // (不能依赖 umask —— 默认 umask 0022 的桌面机会落成 0644); chmod 兜底修正旧文件
+    writeFileSync(STATE_FILE + '.tmp', JSON.stringify(merged, null, 2), { encoding: 'utf8', mode: 0o600 })
     renameSync(STATE_FILE + '.tmp', STATE_FILE)
+    try { chmodSync(STATE_FILE, 0o600) } catch { /* 平台不支持或已是 0600, 忽略 */ }
     return true
   } catch { return false }
 }
@@ -376,7 +379,8 @@ export function computeProviderKinds(text) {
   return kinds
 }
 
-/** 用户填的官方直连名单规范化: 接受数组或「逗号/换行/空格分隔」的字符串 */
+/** 用户填的官方直连名单规范化: 接受数组或「逗号/换行/空格分隔」的字符串。
+ *  上限 64 条 × 64 字符 —— 名单会持久化并随每次 /balances 下发, 防超大输入撑爆状态文件。 */
 export const normalizeOfficialProviders = (input) => {
   const list = Array.isArray(input)
     ? input
@@ -384,8 +388,9 @@ export const normalizeOfficialProviders = (input) => {
   const seen = new Set()
   const out = []
   for (const item of list) {
+    if (out.length >= 64) break
     if (typeof item !== 'string') continue
-    const name = item.trim()
+    const name = item.trim().slice(0, 64)
     if (name === '' || seen.has(name.toLowerCase())) continue
     seen.add(name.toLowerCase())
     out.push(name)
@@ -600,6 +605,24 @@ async function fetchWithTimeout(url, headers, timeoutMs, method = 'GET') {
   } finally {
     clearTimeout(timer)
   }
+}
+
+/** 读取请求体并限制大小 (默认 256KB) —— 防持有 token 者灌大包打爆内存。超限抛错。 */
+async function readBody(req, limit = 256 * 1024) {
+  let body = ''
+  for await (const chunk of req) {
+    body += chunk
+    if (body.length > limit) throw Object.assign(new Error('request body too large'), { statusCode: 413 })
+  }
+  return body
+}
+
+/** 字符串清洗: 截断到 max 长度 (设置面板传入的任意字段统一过这里) */
+const cleanStr = (value, max) => String(value ?? '').trim().slice(0, max)
+/** URL 清洗: 只接受 http/https 协议 (防 file: 等混淆 scheme 进配置), 失败返回空串 */
+const cleanUrl = (value) => {
+  const s = cleanStr(value, 512)
+  return /^https?:\/\//i.test(s) ? s : ''
 }
 
 // ============================================================
@@ -1528,8 +1551,7 @@ export function apply(ctx, config) {
         if (req.method === 'GET') { sendJson(res, 200, { ok: true, settings: runtimeConfig.whaleSettings }); return }
         if (req.method === 'PUT' || req.method === 'POST') {
           try {
-            let raw = ''
-            for await (const chunk of req) { raw += chunk }
+            let raw = await readBody(req)
             const body = raw ? JSON.parse(raw) : {}
             const cur = runtimeConfig.whaleSettings
             const num = (v, lo, hi, dflt) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(Math.max(v, lo), hi) : dflt)
@@ -1561,7 +1583,10 @@ export function apply(ctx, config) {
               whaleSettings: runtimeConfig.whaleSettings,
             })
             sendJson(res, 200, { ok: true, settings: runtimeConfig.whaleSettings })
-          } catch (err) { sendJson(res, 400, { ok: false, error: err instanceof Error ? err.message : String(err) }) }
+          } catch (err) {
+            const code = err && err.statusCode === 413 ? 413 : 400
+            sendJson(res, code, { ok: false, error: err instanceof Error ? err.message : String(err) })
+          }
           return
         }
         res.writeHead(405, { Allow: 'GET, PUT, POST' }); res.end()
@@ -1588,26 +1613,31 @@ export function apply(ctx, config) {
         }
         if (req.method === 'POST') {
           try {
-            let body = ''
-            for await (const chunk of req) { body += chunk }
+            let body = await readBody(req)
             body = body ? JSON.parse(body) : {}
+            // 数组规模上限: 状态文件与每次轮询都要带它们, 防垃圾数据无限膨胀
+            const MAX_ITEMS = 64
+            const cleanId = (v) => cleanStr(v, 64).replace(/[^a-zA-Z0-9_-]/g, '')
+            const cleanQueryType = (v) => { const s = cleanStr(v, 32); return /^[a-zA-Z0-9_-]+$/.test(s) ? s : 'auto' }
             if (Array.isArray(body.customRelays)) {
-              runtimeConfig.customRelays = body.customRelays.map(r => {
+              runtimeConfig.customRelays = body.customRelays.slice(0, MAX_ITEMS).map(r => {
                 const prev = runtimeConfig.customRelays.find(x => x.id === r.id)
+                const rk = cleanStr(r.apiKey, 256)   // '***' / 空 = 保留旧 key (掩码回填约定)
                 return {
-                  id: r.id || Math.random().toString(36).slice(2), name: r.name || '中转站',
-                  baseUrl: (r.baseUrl || '').replace(/\/+$/, ''), apiKey: r.apiKey && r.apiKey !== '***' ? r.apiKey : (prev?.apiKey || ''), queryType: r.queryType || 'auto',
+                  id: cleanId(r.id) || Math.random().toString(36).slice(2), name: cleanStr(r.name, 128) || '中转站',
+                  baseUrl: cleanUrl(r.baseUrl).replace(/\/+$/, ''), apiKey: (rk && rk !== '***') ? rk : (prev?.apiKey || ''), queryType: cleanQueryType(r.queryType),
                 }
               })
             }
             if (Array.isArray(body.customModels)) {
-              runtimeConfig.customModels = body.customModels.map(m => {
+              runtimeConfig.customModels = body.customModels.slice(0, MAX_ITEMS).map(m => {
                 const prev = runtimeConfig.customModels.find(x => x.id === m.id)
+                const mk = cleanStr(m.apiKey, 256)
                 return {
-                  id: m.id || Math.random().toString(36).slice(2), name: m.name || '自定义模型',
-                  apiUrl: (m.apiUrl || '').trim(), apiKey: m.apiKey && m.apiKey !== '***' ? m.apiKey : (prev?.apiKey || ''),
-                  queryType: m.queryType || 'auto', totalPath: (m.totalPath || '').trim(), usedPath: (m.usedPath || '').trim(),
-                  currency: (m.currency || '').trim() || 'CNY',
+                  id: cleanId(m.id) || Math.random().toString(36).slice(2), name: cleanStr(m.name, 128) || '自定义模型',
+                  apiUrl: cleanUrl(m.apiUrl), apiKey: mk !== '***' && mk !== '' ? mk : (prev?.apiKey || ''),
+                  queryType: cleanQueryType(m.queryType), totalPath: cleanStr(m.totalPath, 128), usedPath: cleanStr(m.usedPath, 128),
+                  currency: cleanStr(m.currency, 8) || 'CNY',
                 }
               })
             }
@@ -1654,7 +1684,10 @@ export function apply(ctx, config) {
               officialProviders: runtimeConfig.officialProviders,
               providerKinds: readProviderKinds(),
             })
-          } catch (err) { sendJson(res, 400, { ok: false, error: err instanceof Error ? err.message : String(err) }) }
+          } catch (err) {
+            const code = err && err.statusCode === 413 ? 413 : 400
+            sendJson(res, code, { ok: false, error: err instanceof Error ? err.message : String(err) })
+          }
           return
         }
         res.writeHead(405, { Allow: 'GET, POST' })
