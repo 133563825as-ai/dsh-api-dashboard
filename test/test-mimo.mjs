@@ -1,0 +1,6 @@
+const m = await import(new URL('../src/index.js', import.meta.url).pathname + '?v=' + Date.now())
+const pUsd = (model) => m.resolveModelPrice({ currency: 'USD' }, model)
+const pCny = (model) => m.resolveModelPrice({ currency: 'CNY' }, model)
+console.log("MiMo V2.5 (USD):", JSON.stringify(pUsd("mimo-v2.5")))
+console.log("MiMo V2.5 Pro (USD):", JSON.stringify(pUsd("mimo-v2.5-pro")))
+console.log("MiMo V2.5 Pro (CNY):", JSON.stringify(pCny("mimo-v2.5-pro")))

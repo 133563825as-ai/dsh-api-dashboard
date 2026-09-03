@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Local state & secrets (never commit!)
+*.json.tmp
+dsh-api-dashboard.json
+.dsh/
+credentials*.yaml
+.env
+*.env
+
+# Backup files (may contain local edits/secrets)
+*.bak*
+*.bak-*
+
+# Build artifacts
+*.tgz
+*.tar.gz
+*.log
+.DS_Store
+
+# Editor
+.idea/
+.vscode/

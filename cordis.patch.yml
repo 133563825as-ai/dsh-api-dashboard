@@ -1,0 +1,8 @@
+# dsh-api-dashboard bundle patch
+- insert:
+    - id: dsh-api-dashboard
+      name: dsh-api-dashboard
+      config:
+        refreshIntervalMs: 300000
+        clientPollIntervalMs: 30000
+        timeoutMs: 8000

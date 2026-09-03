@@ -1,0 +1,2118 @@
+/**
+ * dsh-api-dashboard — browser half (v4 精致UI版).
+ *
+ * 三层 + 分组抽屉结构:
+ *  一层「状态条 bar」: 输入框下方, 显示当前选中平台 [图标]平台名 余额 三色灯。
+ *  二层「看板 drawer」: 底部抽屉, 分【国内】【海外】两个折叠区(默认收起), 点开展示平台。
+ *  三层「详情 detail」: 点平台卡片 → 总充值/总使用/备注。
+ *
+ * 借鉴 dsh-balance:
+ *  - 三色阈值灯: 余额>safe 绿 / >warn 黄 / 否则红 (可设置)
+ *  - 单例轮询器: 页面隐藏暂停, 前台恢复刷新, 手动强刷。
+ *  - 完整设置面板(安全值/货币/中转站管理)。
+ *  - 精致 SVG 图标(无 emoji)。
+ */
+window.__ModuleLoader__.load({
+  id: "dsh-api-dashboard",
+  factory: (require) => {
+    var module = { exports: {} };
+    var exports = module.exports;
+    Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
+    let react = require("react");
+    let _ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives");
+
+    //#region 品牌官方 SVG 图标
+    const ICONS = {
+      'alibaba': '<svg fill="#FF6A00" xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24"><path d="M3.996 4.517h5.291L8.01 6.324L4.153 7.506a1.67 1.67 0 0 0-1.165 1.601v5.786a1.67 1.67 0 0 0 1.165 1.6l3.857 1.183l1.277 1.807H3.996A3.996 3.996 0 0 1 0 15.487V8.513a3.996 3.996 0 0 1 3.996-3.996m16.008 0h-5.291l1.277 1.807l3.857 1.182c.715.227 1.17.889 1.165 1.601v5.786a1.67 1.67 0 0 1-1.165 1.6l-3.857 1.183l-1.277 1.807h5.291A3.996 3.996 0 0 0 24 15.487V8.513a3.996 3.996 0 0 0-3.996-3.996m-4.007 8.345H8.002v-1.804h7.995Z"/></svg>',
+      'claude': '<svg fill="#D97757" xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24"><path d="m4.714 15.956l4.718-2.648l.079-.23l-.08-.128h-.23l-.79-.048l-2.695-.073l-2.337-.097l-2.265-.122l-.57-.121l-.535-.704l.055-.353l.48-.321l.685.06l1.518.104l2.277.157l1.651.098l2.447.255h.389l.054-.158l-.133-.097l-.103-.098l-2.356-1.596l-2.55-1.688l-1.336-.972l-.722-.491L2 6.223l-.158-1.008l.656-.722l.88.06l.224.061l.893.686l1.906 1.476l2.49 1.833l.364.304l.146-.104l.018-.072l-.164-.274l-1.354-2.446l-1.445-2.49l-.644-1.032l-.17-.619a3 3 0 0 1-.103-.729L6.287.133L6.7 0l.995.134l.42.364l.619 1.415L9.735 4.14l1.555 3.03l.455.898l.243.832l.09.255h.159V9.01l.127-1.706l.237-2.095l.23-2.695l.08-.76l.376-.91l.747-.492l.583.28l.48.685l-.067.444l-.286 1.851l-.558 2.903l-.365 1.942h.213l.243-.242l.983-1.306l1.652-2.064l.728-.82l.85-.904l.547-.431h1.032l.759 1.129l-.34 1.166l-1.063 1.347l-.88 1.142l-1.263 1.7l-.79 1.36l.074.11l.188-.02l2.853-.606l1.542-.28l1.84-.315l.832.388l.09.395l-.327.807l-1.967.486l-2.307.462l-3.436.813l-.043.03l.049.061l1.548.146l.662.036h1.62l3.018.225l.79.522l.473.638l-.08.485l-1.213.62l-1.64-.389l-3.825-.91l-1.31-.329h-.183v.11l1.093 1.068l2.003 1.81l2.508 2.33l.127.578l-.321.455l-.34-.049l-2.204-1.657l-.85-.747l-1.925-1.62h-.127v.17l.443.649l2.343 3.521l.122 1.08l-.17.353l-.607.213l-.668-.122l-1.372-1.924l-1.415-2.168l-1.141-1.943l-.14.08l-.674 7.254l-.316.37l-.728.28l-.607-.461l-.322-.747l.322-1.476l.388-1.924l.316-1.53l.285-1.9l.17-.632l-.012-.042l-.14.018l-1.432 1.967l-2.18 2.945l-1.724 1.845l-.413.164l-.716-.37l.066-.662l.401-.589l2.386-3.036l1.439-1.882l.929-1.086l-.006-.158h-.055L4.138 18.56l-1.13.146l-.485-.456l.06-.746l.231-.243l1.907-1.312Z"/></svg>',
+      'deepseek': '<svg fill="#4D6BFE" xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24"><path d="M23.748 4.651c-.254-.124-.364.113-.512.233c-.051.04-.094.09-.137.137c-.372.397-.806.657-1.373.626c-.829-.046-1.537.214-2.163.848c-.133-.782-.575-1.248-1.247-1.548c-.352-.155-.708-.311-.955-.65c-.172-.24-.219-.509-.305-.774c-.055-.16-.11-.323-.293-.35c-.2-.031-.278.136-.356.276c-.313.572-.434 1.202-.422 1.84c.027 1.436.633 2.58 1.838 3.393c.137.094.172.187.129.323c-.082.28-.18.553-.266.833c-.055.179-.137.218-.328.14a5.5 5.5 0 0 1-1.737-1.179c-.857-.828-1.631-1.743-2.597-2.46a12 12 0 0 0-.689-.47c-.985-.957.13-1.743.387-1.836c.27-.098.094-.433-.778-.428c-.872.003-1.67.295-2.687.685a3 3 0 0 1-.465.136a9.6 9.6 0 0 0-2.883-.101c-1.885.21-3.39 1.1-4.497 2.622C.082 8.776-.231 10.854.152 13.02c.403 2.284 1.568 4.175 3.36 5.653c1.857 1.533 3.997 2.284 6.438 2.14c1.482-.085 3.132-.284 4.994-1.86c.47.234.962.328 1.78.398c.629.058 1.235-.031 1.705-.129c.735-.155.684-.836.418-.961c-2.155-1.004-1.682-.595-2.112-.926c1.095-1.295 2.768-3.598 3.284-6.733c.05-.346.115-.834.108-1.114c-.004-.171.035-.238.23-.257a4.2 4.2 0 0 0 1.545-.475c1.397-.763 1.96-2.016 2.093-3.517c.02-.23-.004-.467-.247-.588M11.58 18.168c-2.088-1.642-3.101-2.183-3.52-2.16c-.39.024-.32.472-.234.763c.09.288.207.487.371.74c.114.167.192.416-.113.603c-.673.416-1.842-.14-1.897-.168c-1.361-.801-2.5-1.86-3.301-3.306c-.775-1.393-1.225-2.888-1.299-4.482c-.02-.385.094-.522.477-.592a4.7 4.7 0 0 1 1.53-.038c2.131.311 3.946 1.264 5.467 2.774c.868.86 1.525 1.887 2.202 2.89c.72 1.066 1.494 2.082 2.48 2.915c.348.291.626.513.892.677c-.802.09-2.14.109-3.055-.615zm1.001-6.44a.306.306 0 0 1 .415-.287a.3.3 0 0 1 .113.074a.3.3 0 0 1 .086.214c0 .17-.136.307-.308.307a.303.303 0 0 1-.306-.307m3.11 1.596c-.2.081-.4.151-.591.16a1.25 1.25 0 0 1-.798-.254c-.274-.23-.47-.358-.551-.758a1.7 1.7 0 0 1 .015-.588c.07-.327-.007-.537-.238-.727c-.188-.156-.426-.199-.689-.199a.6.6 0 0 1-.254-.078a.253.253 0 0 1-.114-.358a1 1 0 0 1 .192-.21c.356-.202.767-.136 1.146.016c.352.144.618.408 1.001.782c.392.451.462.576.685.915c.176.264.336.536.446.848c.066.194-.02.353-.25.45"/></svg>',
+      'gemini': '<svg fill="#4285F4" xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24"><path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68q.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58a12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68q-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96q2.19.93 3.81 2.55t2.55 3.81"/></svg>',
+      'groq': '<svg fill="#F55036" xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24"><path d="M3 3v18h18V3zm11.72 13.37c-.41.38-.82.66-1.33.87l-.21.09c-.83.3-1.82.21-2.63-.1c-.45-.21-.82-.46-1.19-.8c.33-.41.66-.75 1.07-1.07l.27.21c.5.35 1 .47 1.61.41c.62-.12 1.12-.4 1.52-.9c.37-.61.41-1.09.41-1.8V10.4c0-.72-.15-1.18-.6-1.74c-.61-.49-1.17-.74-1.96-.7c-.66.11-1.19.42-1.59.95c-.33.53-.48 1.07-.37 1.69c.2.68.45 1.25 1.07 1.61c.52.27.98.32 1.56.33h.25c.2.02.4.02.61.03V14c-1.49.06-2.65.06-3.84-.97a4.22 4.22 0 0 1-1.23-2.8c.04-.88.35-1.6.86-2.32l.15-.23c1.43-1.51 3.7-1.61 5.31-.31l.17.14c.58.52.96 1.25 1.08 2.01c0 .16.01.33.01.49v3.6c0 1.05-.3 1.95-1.02 2.74Z"/></svg>',
+      'mistral': '<svg fill="#FA520F" xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24"><path d="M17.143 3.429v3.428h-3.429v3.429h-3.428V6.857H6.857V3.43H3.43v13.714H0v3.428h10.286v-3.428H6.857v-3.429h3.429v3.429h3.429v-3.429h3.428v3.429h-3.428v3.428H24v-3.428h-3.43V3.429z"/></svg>',
+      'moonshot': '<svg fill="#000000" xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 256 256"><path d="m11.222 180.43l101.75 27.218a224 224 0 0 0 .64 21.683l63.53 16.99a128 128 0 0 1-59.584 9.226l-1.92-.17l-.47-.044l-.896-.095l-1.002-.107q-.838-.101-1.675-.213l-1.141-.15l-1.174-.17q-1.71-.25-3.413-.544l-.448-.086l-.8-.138l-1.141-.214l-.747-.16l-.992-.202l-.8-.17l-1.013-.214l-1.035-.246l-1.003-.234l-.725-.182l-.939-.234l-.96-.256l-1.013-.267l-.874-.245l-1.163-.32l-.661-.213l-.896-.267l-.992-.299l-1.12-.362l-.62-.203l-.852-.277l-.96-.33l-.704-.257l-.47-.16l-.725-.266l-1.077-.395l-.608-.235l-.854-.32l-.928-.373l-.938-.373l-.843-.342l-1.013-.426l-.672-.299l-.672-.288l-.438-.192l-.704-.32l-1.098-.501l-.555-.256l-1.024-.49l-.661-.32l-.896-.427l-.918-.47l-.992-.5l-.554-.289l-1.1-.586l-.607-.32l-.619-.342l-.49-.277l-1.003-.565l-.64-.363l-.544-.32l-.768-.437l-.875-.533l-.992-.598l-.554-.34l-.896-.566l-.651-.416l-.843-.533l-.746-.502l-.566-.373l-.576-.384l-.469-.32l-.47-.32l-.426-.299l-.608-.426l-.81-.576l-.737-.533l-.789-.576l-.597-.448l-.811-.608l-.81-.63l-.918-.714l-.48-.373l-.683-.555l-.789-.64l-.95-.778l-.49-.416l-.49-.416l-.46-.395l-.48-.427l-.65-.565l-.747-.661l-.725-.64l-.661-.619l-.715-.661l-.565-.533l-.939-.896q-.531-.514-1.056-1.035l-.31-.298l-.437-.448l-.736-.747l-.533-.544l-.533-.565a69 69 0 0 1-1.792-1.91l-.854-.938l-.661-.746l-.757-.854l-.448-.522l-.566-.662l-.618-.725l-.491-.597l-.288-.352l-.48-.587l-.704-.874l-.437-.555l-.534-.682l-.213-.267a128 128 0 0 1-15.36-25.619M.342 118.632l121.098 32.391a218 218 0 0 0-5.002 21.449l115.38 30.866a128.8 128.8 0 0 1-19.68 21.384L7.009 169.838l-.17-.49l-.373-1.11q-.273-.813-.534-1.631l-.074-.246a127 127 0 0 1-2.208-7.903l-.32-1.344l-.192-.853l-.224-1.034l-.192-.864l-.192-.96l-.182-.896l-.192-1.003a126 126 0 0 1-.757-4.543l-.181-1.259l-.118-.885l-.138-1.088a128 128 0 0 1-.203-1.717l-.053-.501c-.797-7.6-.919-15.256-.363-22.878m16.992-54.928L144.78 97.793a218 218 0 0 0-10.773 19.997l120.48 32.232a126.4 126.4 0 0 1-7.126 25.224l-123.2-32.957L1.323 109.44l.16-1.066l.086-.523l.106-.714l.16-.928l.192-1.046c.278-1.578.598-3.146.94-4.714l.298-1.322l.213-.907l.256-1.034c.235-.96.48-1.92.747-2.859l.298-1.088l.246-.885l.32-1.066l.266-.875l.32-1.024l.278-.875l.33-1.013a127 127 0 0 1 10.774-23.805zm47.381-46.928l120.373 32.189a222 222 0 0 0-18.005 18.355l83.445 22.323A127.8 127.8 0 0 1 256 118.068L22.465 55.61l.48-.693l.288-.427l.426-.586l.491-.694l.587-.81l.576-.768l.682-.917l.534-.694l.608-.778l.586-.747l.64-.789l.587-.736l.693-.821l.576-.704l.704-.821l.566-.64l.768-.875l.565-.64l.715-.789l.576-.619l.778-.832l.619-.64l.672-.714l1.792-1.813l1.067-1.045l.629-.598l.81-.757a129 129 0 0 1 24.235-17.886M128.182.01h1.034l.875.01l.736.011l.576.021l.725.022l.491.01l.81.032l.502.022l.64.032l.576.021l.928.053l1.12.075l1.536.117l.939.075l.469.043l.821.085l.875.085l.501.054l1.088.128l.534.064l1.152.149l.864.107l.448.064l.693.106l2.208.341l.747.128l.693.118l1.493.277l.982.192l1.173.235l.49.106l.8.171l.438.107l.661.138l.448.107l.694.16l.522.128l.758.181l1.024.256l1.194.32l1.206.32l1.205.341l.533.16l.747.214l.832.256l.779.245l.533.17l.533.171l.81.267l1.057.352l1.088.384l.512.181l.683.246l.992.362l1.173.437l1.237.48l1.067.427l.501.213l.64.256l.438.192l.672.278l.426.192l.608.266l1.174.512l1.066.49l.79.374l.8.384l.64.299l.98.49l.972.48l1.088.555l.565.298l.523.278l.49.256l.64.352l.438.234l.554.31l.939.533l1.13.64l.929.544l.608.362l.565.342l1.024.629l.939.587l1.045.66l.384.257l.683.437l.896.597l.426.288l.662.448l.66.459l.246.181c.576.395 1.152.8 1.717 1.216l.886.64l.693.512l.597.459l.918.693l.874.683l.427.32l.533.437l.918.736l.842.693l.907.757a129 129 0 0 1 20.363 21.662L77.035 10.612l.662-.288l.693-.298l.864-.363l.917-.373c1.206-.48 2.422-.96 3.638-1.397l1.024-.374l.992-.352l.896-.32l1.024-.33c.928-.32 1.877-.619 2.816-.907l.97-.288l.918-.267l1.088-.32l.906-.245l1.067-.277l.917-.256l.96-.245l.97-.235l1.014-.235l.96-.213l1.045-.224l.971-.213l1.013-.192l.982-.192l1.066-.192l.971-.17l1.045-.182l.982-.15l1.034-.16l.982-.138l1.088-.139l.97-.128l1.12-.128l.96-.106l1.12-.107a69 69 0 0 1 2.987-.256l1.13-.085l.96-.054l1.174-.064l.992-.042l1.067-.043l1.034-.021L126.08.02l2.102-.02z"/></svg>',
+      'ollama': '<svg fill="#000000" xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24"><path d="M16.361 10.26a.9.9 0 0 0-.558.47l-.072.148l.001.207c0 .193.004.217.059.353c.076.193.152.312.291.448c.24.238.51.3.872.205a.86.86 0 0 0 .517-.436a.75.75 0 0 0 .08-.498c-.064-.453-.33-.782-.724-.897a1.1 1.1 0 0 0-.466 0m-9.203.005c-.305.096-.533.32-.65.639a1.2 1.2 0 0 0-.06.52c.057.309.31.59.598.667c.362.095.632.033.872-.205c.14-.136.215-.255.291-.448c.055-.136.059-.16.059-.353l.001-.207l-.072-.148a.9.9 0 0 0-.565-.472a1 1 0 0 0-.474.007m4.184 2c-.131.071-.223.25-.195.383c.031.143.157.288.353.407c.105.063.112.072.117.136c.004.038-.01.146-.029.243c-.02.094-.036.194-.036.222c.002.074.07.195.143.253c.064.052.076.054.255.059c.164.005.198.001.264-.03c.169-.082.212-.234.15-.525c-.052-.243-.042-.28.087-.355c.137-.08.281-.219.324-.314a.365.365 0 0 0-.175-.48a.4.4 0 0 0-.181-.033c-.126 0-.207.03-.355.124l-.085.053l-.053-.032c-.219-.13-.259-.145-.391-.143a.4.4 0 0 0-.193.032m.39-2.195c-.373.036-.475.05-.654.086a4.5 4.5 0 0 0-.951.328c-.94.46-1.589 1.226-1.787 2.114c-.04.176-.045.234-.045.53c0 .294.005.357.043.524c.264 1.16 1.332 2.017 2.714 2.173c.3.033 1.596.033 1.896 0c1.11-.125 2.064-.727 2.493-1.571c.114-.226.169-.372.22-.602c.039-.167.044-.23.044-.523c0-.297-.005-.355-.045-.531c-.288-1.29-1.539-2.304-3.072-2.497a7 7 0 0 0-.855-.031zm.645.937a3.3 3.3 0 0 1 1.44.514c.223.148.537.458.671.662c.166.251.26.508.303.82c.02.143.01.251-.043.482c-.08.345-.332.705-.672.957a3 3 0 0 1-.689.348c-.382.122-.632.144-1.525.138c-.582-.006-.686-.01-.853-.042q-.856-.16-1.35-.68c-.264-.28-.385-.535-.45-.946c-.03-.192.025-.509.137-.776c.136-.326.488-.73.836-.963c.403-.269.934-.46 1.422-.512c.187-.02.586-.02.773-.002m-5.503-11a1.65 1.65 0 0 0-.683.298C5.617.74 5.173 1.666 4.985 2.819c-.07.436-.119 1.04-.119 1.503c0 .544.064 1.24.155 1.721c.02.107.031.202.023.208l-.187.152a5.3 5.3 0 0 0-.949 1.02a5.5 5.5 0 0 0-.94 2.339a6.6 6.6 0 0 0-.023 1.357c.091.78.325 1.438.727 2.04l.13.195l-.037.064c-.269.452-.498 1.105-.605 1.732c-.084.496-.095.629-.095 1.294c0 .67.009.803.088 1.266c.095.555.288 1.143.503 1.534c.071.128.243.393.264.407c.007.003-.014.067-.046.141a7.4 7.4 0 0 0-.548 1.873a5 5 0 0 0-.071.991c0 .56.031.832.148 1.279L3.42 24h1.478l-.05-.091c-.297-.552-.325-1.575-.068-2.597c.117-.472.25-.819.498-1.296l.148-.29v-.177c0-.165-.003-.184-.057-.293a.9.9 0 0 0-.194-.25a1.7 1.7 0 0 1-.385-.543c-.424-.92-.506-2.286-.208-3.451c.124-.486.329-.918.544-1.154a.8.8 0 0 0 .223-.531c0-.195-.07-.355-.224-.522a3.14 3.14 0 0 1-.817-1.729c-.14-.96.114-2.005.69-2.834c.563-.814 1.353-1.336 2.237-1.475c.199-.033.57-.028.776.01c.226.04.367.028.512-.041c.179-.085.268-.19.374-.431c.093-.215.165-.333.36-.576c.234-.29.46-.489.822-.729c.413-.27.884-.467 1.352-.561c.17-.035.25-.04.569-.04s.398.005.569.04a4.07 4.07 0 0 1 1.914.997c.117.109.398.457.488.602c.034.057.095.177.132.267c.105.241.195.346.374.43c.14.068.286.082.503.045c.343-.058.607-.053.943.016c1.144.23 2.14 1.173 2.581 2.437c.385 1.108.276 2.267-.296 3.153c-.097.15-.193.27-.333.419c-.301.322-.301.722-.001 1.053c.493.539.801 1.866.708 3.036c-.062.772-.26 1.463-.533 1.854a2 2 0 0 1-.224.258a.9.9 0 0 0-.194.25c-.054.109-.057.128-.057.293v.178l.148.29c.248.476.38.823.498 1.295c.253 1.008.231 2.01-.059 2.581a1 1 0 0 0-.044.098c0 .006.329.009.732.009h.73l.02-.074l.036-.134c.019-.076.057-.3.088-.516a9 9 0 0 0 0-1.258c-.11-.875-.295-1.57-.597-2.226c-.032-.074-.053-.138-.046-.141a1.4 1.4 0 0 0 .108-.152c.376-.569.607-1.284.724-2.228c.031-.26.031-1.378 0-1.628c-.083-.645-.182-1.082-.348-1.525a6 6 0 0 0-.329-.7l-.038-.064l.131-.194c.402-.604.636-1.262.727-2.04a6.6 6.6 0 0 0-.024-1.358a5.5 5.5 0 0 0-.939-2.339a5.3 5.3 0 0 0-.95-1.02l-.186-.152a.7.7 0 0 1 .023-.208c.208-1.087.201-2.443-.017-3.503c-.19-.924-.535-1.658-.98-2.082c-.354-.338-.716-.482-1.15-.455c-.996.059-1.8 1.205-2.116 3.01a7 7 0 0 0-.097.726c0 .036-.007.066-.015.066a1 1 0 0 1-.149-.078A4.86 4.86 0 0 0 12 3.03c-.832 0-1.687.243-2.456.698a1 1 0 0 1-.148.078c-.008 0-.015-.03-.015-.066a7 7 0 0 0-.097-.725C8.997 1.392 8.337.319 7.46.048a2 2 0 0 0-.585-.041Zm.293 1.402c.248.197.523.759.682 1.388c.03.113.06.244.069.292c.007.047.026.152.041.233c.067.365.098.76.102 1.24l.002.475l-.12.175l-.118.178h-.278c-.324 0-.646.041-.954.124l-.238.06c-.033.007-.038-.003-.057-.144a8.4 8.4 0 0 1 .016-2.323c.124-.788.413-1.501.696-1.711c.067-.05.079-.049.157.013m9.825-.012c.17.126.358.46.498.888c.28.854.36 2.028.212 3.145c-.019.14-.024.151-.057.144l-.238-.06a3.7 3.7 0 0 0-.954-.124h-.278l-.119-.178l-.119-.175l.002-.474c.004-.669.066-1.19.214-1.772c.157-.623.434-1.185.68-1.382c.078-.062.09-.063.159-.012"/></svg>',
+      'openai': '<svg fill="#10A37F" xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24"><path d="M22.282 9.821a6 6 0 0 0-.516-4.91a6.05 6.05 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a6 6 0 0 0-3.998 2.9a6.05 6.05 0 0 0 .743 7.097a5.98 5.98 0 0 0 .51 4.911a6.05 6.05 0 0 0 6.515 2.9A6 6 0 0 0 13.26 24a6.06 6.06 0 0 0 5.772-4.206a6 6 0 0 0 3.997-2.9a6.06 6.06 0 0 0-.747-7.073M13.26 22.43a4.48 4.48 0 0 1-2.876-1.04l.141-.081l4.779-2.758a.8.8 0 0 0 .392-.681v-6.737l2.02 1.168a.07.07 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494M3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085l4.783 2.759a.77.77 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646M2.34 7.896a4.5 4.5 0 0 1 2.366-1.973V11.6a.77.77 0 0 0 .388.677l5.815 3.354l-2.02 1.168a.08.08 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.08.08 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667m2.01-3.023l-.141-.085l-4.774-2.782a.78.78 0 0 0-.785 0L9.409 9.23V6.897a.07.07 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.8.8 0 0 0-.393.681zm1.097-2.365l2.602-1.5l2.607 1.5v2.999l-2.597 1.5l-2.607-1.5Z"/></svg>',
+      'openrouter': '<svg fill="#6469FF" xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24"><path d="M16.778 1.844v1.919q-.569-.026-1.138-.032q-.708-.008-1.415.037c-1.93.126-4.023.728-6.149 2.237c-2.911 2.066-2.731 1.95-4.14 2.75c-.396.223-1.342.574-2.185.798c-.841.225-1.753.333-1.751.333v4.229s.768.108 1.61.333c.842.224 1.789.575 2.185.799c1.41.798 1.228.683 4.14 2.75c2.126 1.509 4.22 2.11 6.148 2.236c.88.058 1.716.041 2.555.005v1.918l7.222-4.168l-7.222-4.17v2.176c-.86.038-1.611.065-2.278.021c-1.364-.09-2.417-.357-3.979-1.465c-2.244-1.593-2.866-2.027-3.68-2.508c.889-.518 1.449-.906 3.822-2.59c1.56-1.109 2.614-1.377 3.978-1.466c.667-.044 1.418-.017 2.278.02v2.176L24 6.014Z"/></svg>',
+      'qwen': '<svg fill="#623AE7" xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24"><path d="M23.919 14.545L20.817 9.17l1.47-2.544a.56.56 0 0 0 0-.566l-1.633-2.83a.57.57 0 0 0-.49-.283h-6.207L12.487.402a.57.57 0 0 0-.49-.284H8.732a.56.56 0 0 0-.49.284L5.139 5.775h-2.94a.56.56 0 0 0-.49.284L.077 8.887a.56.56 0 0 0 0 .567L3.18 14.83l-1.47 2.545a.56.56 0 0 0 0 .566l1.634 2.83a.57.57 0 0 0 .49.283h6.205l1.47 2.545a.57.57 0 0 0 .49.284h3.266a.57.57 0 0 0 .49-.284l3.104-5.375h2.94a.57.57 0 0 0 .49-.283l1.634-2.828a.55.55 0 0 0-.004-.568M8.733.686l1.634 2.828l-1.634 2.828H21.8L20.164 9.17H7.425L5.63 6.06Zm1.306 19.801l-6.205-.002l1.634-2.83h3.265L2.201 6.344h3.267q3.182 5.517 6.367 11.032zm10.124-5.66L18.53 12l-6.532 11.315l-1.634-2.83c2.129-3.673 4.25-7.351 6.373-11.028h3.592l3.102 5.374z"/></svg>',
+      'relay': '<svg fill="#64748B" xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24"><path d="M13 19h1a1 1 0 0 1 1 1h7v2h-7a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1H2v-2h7a1 1 0 0 1 1-1h1v-2H4a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-7zM4 3h16a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1m5 4h1V5H9zm0 8h1v-2H9zM5 5v2h2V5zm0 8v2h2v-2z"/></svg>',
+      'siliconflow': '<svg fill="#6E29F6" xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M22.956 6.521H12.522c-.577 0-1.044.468-1.044 1.044v3.13c0 .577-.466 1.044-1.043 1.044H1.044c-.577 0-1.044.467-1.044 1.044v4.174C0 17.533.467 18 1.044 18h10.434c.577 0 1.044-.467 1.044-1.043v-3.13c0-.578.466-1.044 1.043-1.044h9.391c.577 0 1.044-.467 1.044-1.044V7.565c0-.576-.467-1.044-1.044-1.044" clip-rule="evenodd"/></svg>',
+      'together': '<svg fill="#0F6FFF" xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24"><g fill-rule="evenodd"><path d="M17.385 11.23a4.615 4.615 0 1 0 0-9.23a4.615 4.615 0 0 0 0 9.23m0 10.77a4.615 4.615 0 1 0 0-9.23a4.615 4.615 0 0 0 0 9.23m-10.77 0a4.615 4.615 0 1 0 0-9.23a4.615 4.615 0 0 0 0 9.23" opacity=".2"/><circle cx="6.615" cy="6.615" r="4.615"/></g></svg>',
+      'zhipu': '<svg fill="#3859FF" xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24"><path d="M11.991 23.503a.24.24 0 0 0-.244.248a.24.24 0 0 0 .244.249a.24.24 0 0 0 .245-.249a.24.24 0 0 0-.22-.247zM9.671 5.365a1.697 1.697 0 0 1 1.099 2.132l-.071.172l-.016.04l-.018.054c-.07.16-.104.32-.104.498c-.035.71.47 1.279 1.186 1.314h.366c1.309.053 2.338 1.173 2.286 2.523c-.052 1.332-1.152 2.38-2.478 2.327h-.174c-.715.018-1.274.64-1.239 1.368c0 .124.018.23.053.337c.209.373.54.658.96.8c.75.23 1.517-.125 1.9-.782l.018-.035c.402-.64 1.17-.96 1.92-.711c.854.284 1.378 1.226 1.099 2.167a1.66 1.66 0 0 1-2.077 1.102a1.7 1.7 0 0 1-.907-.711l-.017-.035c-.2-.323-.463-.58-.851-.711l-.056-.018a1.646 1.646 0 0 0-1.954.746a1.66 1.66 0 0 1-1.065.764a1.677 1.677 0 0 1-1.989-1.279c-.209-.906.332-1.83 1.257-2.043a1.5 1.5 0 0 1 .296-.035h.018c.68-.071 1.151-.622 1.116-1.333a1.3 1.3 0 0 0-.227-.693a2.5 2.5 0 0 1-.366-1.403a2.4 2.4 0 0 1 .366-1.208c.14-.195.21-.444.227-.693c.018-.71-.506-1.261-1.186-1.332l-.07-.018a1.4 1.4 0 0 1-.299-.07l-.05-.019a1.7 1.7 0 0 1-1.047-2.114a1.68 1.68 0 0 1 2.094-1.101m-5.575 10.11c.26-.264.639-.367.994-.27s.633.379.728.74c.095.362-.007.748-.267 1.013c-.402.41-1.053.41-1.455 0a1.06 1.06 0 0 1 0-1.482zm14.845-.294c.359-.09.738.024.992.297c.254.274.344.665.237 1.025s-.396.634-.756.718c-.551.128-1.1-.22-1.23-.781a1.05 1.05 0 0 1 .757-1.26zm-.064-4.39c.314.32.49.753.49 1.206s-.176.886-.49 1.206c-.315.32-.74.5-1.185.5c-.444 0-.87-.18-1.184-.5a1.727 1.727 0 0 1 0-2.412a1.654 1.654 0 0 1 2.369 0m-11.243.163c.364.484.447 1.128.218 1.691a1.665 1.665 0 0 1-2.188.923c-.855-.36-1.26-1.358-.907-2.228a1.68 1.68 0 0 1 1.33-1.038a1.66 1.66 0 0 1 1.547.652m11.545-4.221c.368 0 .708.2.892.524s.184.724 0 1.048a1.03 1.03 0 0 1-.892.524a1.04 1.04 0 0 1-1.03-1.048a1.04 1.04 0 0 1 1.03-1.048m-14.358 0c.368 0 .707.2.891.524s.184.724 0 1.048a1.03 1.03 0 0 1-.891.524a1.04 1.04 0 0 1-1.03-1.048c0-.579.461-1.048 1.03-1.048m10.031-1.475c.925 0 1.675.764 1.675 1.706s-.75 1.705-1.675 1.705s-1.674-.763-1.674-1.705s.75-1.706 1.674-1.706m-2.626-.684c.362-.082.653-.356.761-.718a1.06 1.06 0 0 0-.238-1.028a1.02 1.02 0 0 0-.996-.294c-.547.14-.881.7-.752 1.257c.13.558.675.907 1.225.783m0 16.876c.359-.087.644-.36.75-.72a1.06 1.06 0 0 0-.237-1.019a1.02 1.02 0 0 0-.985-.301a1.04 1.04 0 0 0-.762.717c-.108.361-.017.754.239 1.028c.245.263.606.377.953.305zM17.19 3.5a.63.63 0 0 0 .628-.64a.63.63 0 0 0-.628-.64a.63.63 0 0 0-.628.64c0 .355.28.64.628.64m-10.38 0a.63.63 0 0 0 .628-.64c0-.355-.28-.64-.628-.64a.63.63 0 0 0-.628.64c0 .355.279.64.628.64m-5.182 7.852a.63.63 0 0 0-.628.64c0 .354.28.639.628.639a.63.63 0 0 0 .627-.606l.001-.034a.62.62 0 0 0-.628-.64zm5.182 9.13a.63.63 0 0 0-.628.64c0 .355.279.64.628.64a.63.63 0 0 0 .628-.64c0-.355-.28-.64-.628-.64m10.38.018a.63.63 0 0 0-.628.64c0 .355.28.64.628.64a.63.63 0 0 0 .628-.64a.63.63 0 0 0-.628-.64m5.182-9.148a.63.63 0 0 0-.628.64c0 .354.279.639.628.639a.63.63 0 0 0 .628-.64c0-.355-.28-.64-.628-.64zm-.384-4.992a.24.24 0 0 0 .244-.249a.24.24 0 0 0-.244-.249a.24.24 0 0 0-.244.249c0 .142.122.249.244.249M11.991.497a.24.24 0 0 0 .245-.248A.24.24 0 0 0 11.99 0a.24.24 0 0 0-.244.249c0 .133.108.236.223.247zM2.011 6.36a.24.24 0 0 0 .245-.249a.24.24 0 0 0-.244-.249a.24.24 0 0 0-.244.249a.24.24 0 0 0 .244.249zm0 11.263a.24.24 0 0 0-.243.248a.24.24 0 0 0 .244.249a.24.24 0 0 0 .244-.249a.25.25 0 0 0-.244-.248zm19.995-.018a.24.24 0 0 0-.245.248a.24.24 0 0 0 .245.25a.24.24 0 0 0 .244-.25a.25.25 0 0 0-.244-.248"/></svg>',
+    };
+    //#endregion
+
+    //#region 品牌元数据
+    const BRAND_META = {
+      deepseek: { name: "DeepSeek", color: "#4D6BFE", cat: "国内" },
+      zhipu: { name: "智谱 GLM", color: "#3859FF", cat: "国内" },
+      moonshot: { name: "Kimi", color: "#000000", cat: "国内" },
+      stepfun: { name: "阶跃星辰", color: "#FA520F", cat: "国内" },
+      siliconflow: { name: "硅基流动", color: "#6E29F6", cat: "国内" },
+      minimax: { name: "MiniMax", color: "#1E40AF", cat: "国内" },
+      openrouter: { name: "OpenRouter", color: "#6469FF", cat: "海外" },
+      novita: { name: "Novita", color: "#FA520F", cat: "海外" },
+      xai: { name: "xAI Grok", color: "#000000", cat: "海外" },
+      openai: { name: "OpenAI", color: "#10A37F", cat: "海外" },
+      claude: { name: "Anthropic Claude", color: "#D97757", cat: "海外" },
+      gemini: { name: "Google Gemini", color: "#4285F4", cat: "海外" },
+      qwen: { name: "通义千问", color: "#623AE7", cat: "国内" },
+      mimo: { name: "MiMo", color: "#FF6900", cat: "国内" },
+      relay: { name: "中转站", color: "#64748B", cat: "中转站" },
+    };
+    /** 平台 id → 图标文件名 映射 (服务端 icon 字段即文件名) */
+    const ICON_ALIAS = {
+      stepfun: "mistral", novita: "together", minimax: "together", xai: "mistral", relay: "relay",
+    };
+    /** 无官方图标、用文字名代替的平台 */
+    const TEXT_ONLY = new Set(["stepfun", "novita", "minimax", "xai", "mimo", "relay"]);
+    /** 文字图标: 取平台名的首字符做一个彩色圆圈字 */
+    function textIcon(id, meta) {
+      const color = meta.color || "#64748B";
+      const name = meta.name || id;
+      const c = name.trim()[0] ? name.trim()[0].toUpperCase() : "?";
+      return react.createElement("span", { className: "dshadb_texticon", style: { background: color } }, c);
+    }
+    function metaFor(id) { return BRAND_META[id] || { name: id, color: "#64748B", cat: "中转站" }; }
+    function iconFor(id) { const key = ICON_ALIAS[id] || id; return ICONS[key] || ICONS.relay; }
+    function iconOf(b) {
+      if (b && b.icon && ICONS[b.icon]) return ICONS[b.icon];
+      if (b) return iconFor(b.platform);
+      return ICONS.relay;
+    }
+    function renderLogo(b) {
+      const meta = metaFor(b ? b.platform : "");
+      if (TEXT_ONLY.has(b ? b.platform : "")) return textIcon(b ? b.platform : "?", meta);
+      return react.createElement("span", { className: "dshadb_imglogo", dangerouslySetInnerHTML: { __html: iconOf(b) } });
+    }
+    //#endregion
+
+    //#region 精致 SVG 图标组件
+    function IconTitle() {
+      return react.createElement("img", { src: "/api-dashboard/icon", alt: "哦鲸鲸", style: { width: "100%", height: "100%", borderRadius: "6px", objectFit: "cover" } });
+    }
+    function IconGear() {
+      return react.createElement("svg", { width: 14, height: 14, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+        react.createElement("circle", { cx: 12, cy: 12, r: 3 }),
+        react.createElement("path", { d: "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" }));
+    }
+    function IconClose() {
+      return react.createElement("svg", { width: 14, height: 14, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2.2, strokeLinecap: "round" },
+        react.createElement("path", { d: "M18 6 6 18M6 6l12 12" }));
+    }
+        function IconBack() {
+      return react.createElement("svg", { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2.2, strokeLinecap: "round", strokeLinejoin: "round" },
+        react.createElement("path", { d: "M19 12H5M12 19l-7-7 7-7" }));
+    }
+    function IconTrash() {
+      return react.createElement("svg", { width: 14, height: 14, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+        react.createElement("path", { d: "M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" }));
+    }
+    function IconChevron({ open }) {
+      return react.createElement("svg", { width: 12, height: 12, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2.4, strokeLinecap: "round", strokeLinejoin: "round", style: { transition: "transform .2s ease", transform: open ? "rotate(180deg)" : "none" } },
+        react.createElement("path", { d: "m6 9 6 6 6-6" }));
+    }
+    function IconPlus() {
+      return react.createElement("svg", { width: 13, height: 13, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2.4, strokeLinecap: "round" },
+        react.createElement("path", { d: "M12 5v14M5 12h14" }));
+    }
+    //#endregion
+
+    //#region styles (A 风格)
+    const CSS_ID = "dsh-api-dashboard/styles.css";
+    if (typeof document !== "undefined" && document.querySelector('style[data-plugin-css="' + CSS_ID + '"]') === null) {
+      const tag = document.createElement("style");
+      tag.dataset.plugin = "dsh-api-dashboard";
+      tag.dataset.pluginCss = CSS_ID;
+      tag.textContent = `/* ===== 动画 ===== */
+@keyframes dshadb-fadein{from{opacity:0}to{opacity:1}}
+@keyframes dshadb-slideup{from{transform:translateY(100%)}to{transform:translateY(0)}}
+
+/* ===== 状态条（顶部小条） ===== */
+.dshadb_bar{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:4px 10px 4px 6px;border-radius:10px;background:#f5f6f8;border:1px solid #e7e8ec;color:#777b84;cursor:pointer;white-space:nowrap;user-select:none;-webkit-tap-highlight-color:transparent}
+.dshadb_bar:active{opacity:0.8}
+.dshadb_bar_logo{width:16px;height:16px;border-radius:5px;background:#eef2ff;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;color:#4f7cff}
+.dshadb_bar_name{font-weight:700;color:#17181c;font-size:11px}
+.dshadb_bar_amount{font-weight:800;font-variant-numeric:tabular-nums;color:#17181c}
+.dshadb_bar_dot{width:6px;height:6px;border-radius:50%;flex:none}
+.dshadb_bar_dot_ok{background:#35b56b}
+.dshadb_bar_dot_warn{background:#e6a72f}
+.dshadb_bar_dot_err{background:#e05252}
+.dshadb_bar_peak{font-size:10px;padding:2px 7px;border-radius:999px;font-weight:700}
+.dshadb_bar_peak.peak{background:rgba(230,167,47,0.12);color:#b07d1a;border:1px solid rgba(230,167,47,0.2)}
+.dshadb_bar_peak.valley{background:rgba(79,124,255,0.10);color:#3d5fcc;border:1px solid rgba(79,124,255,0.18)}
+
+/* ===== 遮罩 ===== */
+.dshadb_scrim{position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,0.35);animation:dshadb-fadein .15s ease-out}
+
+/* ===== 抽屉 ===== */
+.dshadb_drawer{position:fixed;left:0;right:0;bottom:0;z-index:99999;max-height:85vh;background:#f5f6f8;border-radius:20px 20px 0 0;box-shadow:0 -8px 32px rgba(0,0,0,0.12);display:flex;flex-direction:column;animation:dshadb-slideup .22s cubic-bezier(.16,1,.3,1);overflow:hidden}
+.dshadb_handle{display:flex;align-items:center;justify-content:center;padding:10px 0 6px;flex:none}
+.dshadb_handle_bar{width:38px;height:4px;border-radius:9px;background:#c9cad0}
+
+/* ===== 头部 ===== */
+.dshadb_header{padding:12px 18px 10px;flex:none;display:flex;align-items:center;justify-content:space-between}
+.dshadb_header_left{flex:1}
+.dshadb_header_meta{font-size:11px;font-weight:600;color:#777b84}
+.dshadb_header_title{font-size:22px;font-weight:800;color:#17181c;letter-spacing:-0.5px;line-height:1.15}
+.dshadb_header_sub{font-size:11px;color:#777b84;margin-top:3px}
+.dshadb_header_settings{width:38px;height:38px;border-radius:13px;background:#ffffff;border:0;box-shadow:0 10px 30px rgba(0,0,0,0.07);display:flex;align-items:center;justify-content:center;color:#777b84;cursor:pointer;-webkit-tap-highlight-color:transparent}
+        .dshadb_header_back{width:38px;height:38px;border-radius:13px;background:#ffffff;border:0;box-shadow:0 10px 30px rgba(0,0,0,0.07);display:flex;align-items:center;justify-content:center;color:#777b84;cursor:pointer;-webkit-tap-highlight-color:transparent}.dshadb_header_back:active{opacity:0.8;transform:scale(0.95)}
+.dshadb_header_settings:active{opacity:0.8;transform:scale(0.95)}
+.dshadb_refresh_btn{display:inline-flex;align-items:center;gap:4px;background:transparent;border:none;padding:0;font-size:11px;font-weight:600;color:#777b84;cursor:pointer;font-family:inherit}
+.dshadb_refresh_btn:active{opacity:0.7}
+
+/* ===== 内容区 ===== */
+.dshadb_body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 14px max(16px,env(safe-area-inset-bottom))}
+
+/* ===== 分组头 ===== */
+.dshadb_group{margin-top:4px}
+.dshadb_group_head{display:flex;align-items:center;justify-content:space-between;padding:14px 4px 8px;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;transition:opacity .15s ease}
+.dshadb_group_head:active{opacity:0.7}
+.dshadb_group_label{font-size:13px;font-weight:750;color:#17181c}
+.dshadb_group_meta{font-size:10px;font-weight:600;color:#777b84}
+
+/* ===== 卡片（核心） ===== */
+.dshadb_card{display:flex;align-items:center;gap:10px;padding:13px 14px;margin-bottom:9px;border-radius:18px;background:#ffffff;border:1px solid #e7e8ec;box-shadow:0 6px 20px rgba(0,0,0,0.03);cursor:pointer;position:relative;transition:transform .12s ease,box-shadow .2s ease,border-color .2s ease;-webkit-tap-highlight-color:transparent;animation:dshadb-fadein .2s ease-out}
+.dshadb_card:active{transform:scale(0.985);box-shadow:0 6px 20px rgba(0,0,0,0.05)}
+@media(hover:hover){.dshadb_card:hover{box-shadow:0 8px 25px rgba(0,0,0,0.06);border-color:#d0d2d8}}
+.dshadb_card_active{background:#f0f4ff;border-color:rgba(79,124,255,0.25);box-shadow:0 6px 20px rgba(79,124,255,0.06);transition:all .2s ease}
+.dshadb_card_logo{width:35px;height:35px;border-radius:12px;background:#eef2ff;display:flex;align-items:center;justify-content:center;flex:none;font-size:16px;font-weight:800;color:#17181c;overflow:hidden}
+.dshadb_card_logo svg{width:22px;height:22px;display:block}
+.dshadb_imglogo{display:flex;align-items:center;justify-content:center;width:100%;height:100%}
+.dshadb_texticon{display:flex;align-items:center;justify-content:center;width:100%;height:100%;border-radius:8px;color:#fff;font-weight:800;font-size:13px;line-height:1}
+.dshadb_card_info{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.dshadb_card_name{font-size:14px;font-weight:750;color:#17181c;line-height:1.25}
+.dshadb_card_desc{font-size:10px;color:#777b84;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dshadb_card_right{display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex:none}
+.dshadb_card_amount{font-size:16px;font-weight:850;font-variant-numeric:tabular-nums;color:#17181c;letter-spacing:-0.3px;line-height:1.1}
+.dshadb_card_amount_sub{font-size:13px;font-weight:700;color:#777b84}
+.dshadb_card_status{display:flex;align-items:center;gap:4px;font-size:9px;font-weight:600}
+.dshadb_card_status_ok{color:#35b56b}
+.dshadb_card_status_warn{color:#e6a72f}
+.dshadb_card_status_err{color:#e05252}
+.dshadb_status_dot{width:7px;height:7px;border-radius:50%;flex:none}
+.dshadb_status_dot_ok{background:#35b56b}
+.dshadb_status_dot_warn{background:#e6a72f}
+.dshadb_status_dot_err{background:#e05252}
+.dshadb_card_chevron{color:#9ca0aa;font-size:18px;margin-left:2px}
+
+/* ===== 底部按钮 ===== */
+.dshadb_add_btn{display:flex;align-items:center;justify-content:center;gap:5px;padding:10px;border-radius:12px;background:#ffffff;color:#17181c;font-size:12px;font-weight:700;border:1px solid #e7e8ec;cursor:pointer;font-family:inherit;box-shadow:0 6px 20px rgba(0,0,0,0.03);transition:transform .12s ease,box-shadow .2s ease}
+.dshadb_add_btn:active{transform:scale(0.97);opacity:0.9}
+
+/* ===== 空状态 ===== */
+.dshadb_empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 20px;color:#777b84;font-size:13px;gap:10px;text-align:center}
+
+/* ===== 骨架屏 ===== */
+.dshadb_skeleton{display:flex;align-items:center;gap:10px;padding:13px 14px;margin-bottom:9px;border-radius:18px;background:#ffffff;border:1px solid #e7e8ec}
+.dshadb_skeleton_logo{width:35px;height:35px;border-radius:12px;background:#eef2ff;flex:none}
+.dshadb_skeleton_lines{flex:1;display:flex;flex-direction:column;gap:6px}
+.dshadb_skeleton_line{height:10px;border-radius:999px;background:#e7e8ec}
+.dshadb_skeleton_line_short{width:45%}
+.dshadb_skeleton_line_long{width:70%}
+
+/* ===== Footer ===== */
+.dshadb_footer{text-align:center;font-size:10px;color:#9ca0aa;padding:12px 14px 8px}
+
+/* ===== 分组折叠动画 ===== */
+.dshadb_group_body{max-height:0;opacity:0;overflow:hidden;transition:max-height .3s cubic-bezier(.4,0,.2,1),opacity .2s ease-out;will-change:max-height,opacity}
+.dshadb_group_body_open{max-height:2000px;opacity:1}
+.dshadb_group_body_inner>div{padding-top:2px}
+.dshadb_group_body_inner>div:first-child{padding-top:0}
+
+/* ===== 设置面板 ===== */
+.dshadb_settings_body{padding:4px 14px}
+.dshadb_settings_section{margin-bottom:14px}
+.dshadb_settings_group_title{font-size:11px;color:#777b84;font-weight:750;margin:13px 5px 7px;text-transform:uppercase;letter-spacing:0.4px}
+.dshadb_switch{margin-left:auto;width:42px;height:25px;border-radius:20px;background:#c8cad0;padding:3px;cursor:pointer;transition:background .2s ease;border:none;flex:none}
+.dshadb_switch_on{background:#4f7cff}
+.dshadb_switch_knob{display:block;width:19px;height:19px;background:white;border-radius:50%;transition:transform .18s ease}
+.dshadb_switch_on .dshadb_switch_knob{transform:translateX(17px)}
+
+/* Tab 导航 */
+.dshadb_tabs{display:flex;gap:7px;padding:4px 0 12px;overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none}
+.dshadb_tabs::-webkit-scrollbar{display:none}
+.dshadb_tab{flex:none;border:0;background:#e9eaf0;border-radius:12px;padding:8px 13px;font-size:11px;color:#686c76;white-space:nowrap;cursor:pointer;font-family:inherit;transition:all .12s ease}
+.dshadb_tab_active{background:#4f7cff;color:#fff}
+
+/* 输入框 */
+.dshadb_field{width:100%;padding:11px 14px;border-radius:12px;border:1px solid #e7e8ec;background:#ffffff;color:#17181c;font-size:13px;font-family:inherit;box-sizing:border-box;margin-bottom:10px;transition:border-color .15s ease}
+.dshadb_field:focus{outline:none;border-color:#4f7cff}
+.dshadb_textarea{resize:vertical;min-height:56px;line-height:1.5;margin-bottom:6px}
+/* provider 自动判定结果标签 */
+.dshadb_kinds{margin:8px 0 4px}
+.dshadb_kinds_title{display:block;font-size:10px;font-weight:700;color:#9ca0aa;margin-bottom:5px}
+.dshadb_kinds_empty{display:block;font-size:10px;color:#9ca0aa;line-height:1.5}
+.dshadb_kinds_list{display:flex;flex-wrap:wrap;gap:5px}
+.dshadb_kind{font-size:10px;font-weight:600;padding:3px 8px;border-radius:999px;border:1px solid;white-space:nowrap}
+.dshadb_kind_official{background:rgba(52,199,89,0.10);border-color:rgba(52,199,89,0.28);color:#2a8c4a}
+.dshadb_kind_relay{background:rgba(142,142,147,0.10);border-color:rgba(142,142,147,0.26);color:#6f737c}
+.dshadb_label{font-size:11px;font-weight:700;color:#777b84;margin-bottom:4px;display:block}
+.dshadb_grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.dshadb_save_btn{width:100%;padding:14px;border-radius:15px;background:#17181c;color:#fff;font-size:15px;font-weight:800;border:none;cursor:pointer;font-family:inherit;transition:opacity .1s ease}
+.dshadb_save_btn:active{opacity:0.85}
+
+/* ===== 详情页 ===== */
+.dshadb_detail{display:flex;flex-direction:column;gap:12px;padding:4px 2px}
+.dshadb_detail_head{display:flex;align-items:center;gap:12px;padding:2px 2px 0;border-bottom:none}
+.dshadb_detail_logo{display:flex;align-items:center;justify-content:center;width:48px;height:48px;border-radius:14px;flex:none;background:#f0f2f8;padding:10px}
+.dshadb_detail_logo svg{width:100%;height:100%;display:block}
+.dshadb_detail_name{font-size:18px;font-weight:800;color:#17181c}
+.dshadb_detail_name_sub{font-size:11px;color:#777b84}
+.dshadb_detail_bigwrap{display:flex;flex-direction:column;gap:2px;padding:8px 0 4px}
+.dshadb_detail_big{font-size:36px;font-weight:800;font-variant-numeric:tabular-nums;color:#17181c;letter-spacing:-1px;line-height:1.1}
+.dshadb_detail_label{font-size:11px;color:#777b84}
+.dshadb_detail_metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:4px 0}
+.dshadb_detail_metric{display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 8px;border-radius:12px;background:#ffffff;border:1px solid #e7e8ec;animation:dshadb-fadein .25s ease-out}
+.dshadb_detail_metric_val{font-size:16px;font-weight:700;color:#17181c;font-variant-numeric:tabular-nums}
+.dshadb_detail_metric_label{font-size:10px;color:#777b84}
+.dshadb_peakcard{display:flex;flex-direction:column;gap:5px;padding:12px 14px;border-radius:12px;margin-top:7px;border:1px solid;transition:all .2s ease}
+.dshadb_peakcard.peak{background:rgba(230,167,47,0.08);border-color:rgba(230,167,47,0.25)}
+.dshadb_peakcard.valley{background:rgba(79,124,255,0.06);border-color:rgba(79,124,255,0.20)}
+.dshadb_peakcard_title{font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px}
+.dshadb_peakcard.peak .dshadb_peakcard_title{color:#b07d1a}
+.dshadb_peakcard.valley .dshadb_peakcard_title{color:#3d5fcc}
+.dshadb_peakcard_sub{font-size:10px;color:#777b84}
+.dshadb_peakcard_slogan{font-size:11px;font-weight:600;color:#777b84;margin-top:3px;font-style:italic}
+.dshadb_pricelist{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-radius:12px;background:#ffffff;border:1px solid #e7e8ec}
+.dshadb_pricelist_title{display:flex;align-items:center;justify-content:space-between;font-size:11px;font-weight:700;color:#777b84}
+.dshadb_price_nowtag{font-size:9px;padding:1px 7px;border-radius:999px;font-weight:600}
+.dshadb_price_nowtag.peak{background:rgba(230,167,47,0.12);color:#b07d1a}
+.dshadb_price_nowtag.valley{background:rgba(79,124,255,0.10);color:#3d5fcc}
+.dshadb_price_row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.dshadb_price_model{font-size:11px;font-weight:600;color:#17181c;flex:none}
+.dshadb_price_seg{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:8px;background:#f5f6f8;border:1px solid #e7e8ec;opacity:.75}
+.dshadb_price_seg_now{opacity:1;border-color:#4f7cff}
+.dshadb_price_seg_label{font-size:10px}
+.dshadb_price_seg_val{font-size:10.5px;font-weight:700;font-variant-numeric:tabular-nums;color:#17181c}
+
+/* ===== 补缺失CSS ===== */
+.dshadb_bar_cost{display:inline-flex;align-items:center;margin-left:2px;padding-left:8px;border-left:1px solid #e7e8ec;color:#9ca0aa;font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.dshadb_footer_dot{width:4px;height:4px;border-radius:50%;background:#c9cad0;opacity:0.5}
+.dshadb_group_divider{height:1px;background:#eef0f4;margin:2px 6px 4px}
+.dshadb_icon_btn{display:inline-flex;align-items:center;justify-content:center;min-width:38px;min-height:38px;padding:8px;border-radius:10px;background:transparent;border:none;color:#777b84;cursor:pointer;transition:background .1s ease}
+.dshadb_icon_btn:active{background:#f0f2f8;opacity:0.85}
+.dshadb_refresh_badge{font-size:9.5px;font-weight:600;color:#9ca0aa;background:#f0f2f8;padding:1px 7px;border-radius:999px;line-height:15px;white-space:nowrap}
+.dshadb_title_ic{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:7px;overflow:hidden;flex:none}
+/* ===== 设置面板 · 开关行 (v1.1.0) ===== */
+.dshadb_settings_row{display:flex;align-items:center;gap:12px;padding:12px 14px;margin:14px 0 4px;border-radius:16px;background:#ffffff;border:1px solid #e7e8ec;box-shadow:0 6px 20px rgba(0,0,0,0.03)}
+.dshadb_settings_row_main{flex:1;min-width:0}
+.dshadb_settings_row_title{display:block;font-size:13px;font-weight:750;color:#17181c;line-height:1.3}
+.dshadb_settings_row_sub{display:block;font-size:10.5px;font-weight:500;color:#9ca0aa;line-height:1.45;margin-top:3px}
+/* ===== 设置面板 · 大肥鱼页 (v1.1.0) ===== */
+.dshadb_wf_row{display:flex;align-items:center;gap:10px;padding:11px 14px;margin-bottom:8px;border-radius:14px;background:#ffffff;border:1px solid #e7e8ec}
+.dshadb_wf_row_col{display:block;padding:11px 14px;margin-bottom:8px;border-radius:14px;background:#ffffff;border:1px solid #e7e8ec}
+.dshadb_wf_name{font-size:12.5px;font-weight:700;color:#17181c;flex:none}
+.dshadb_wf_sub{display:block;font-size:10px;font-weight:500;color:#9ca0aa;line-height:1.4;margin-top:2px}
+.dshadb_wf_head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+.dshadb_wf_val{font-size:11px;font-weight:800;color:#4f7cff;font-variant-numeric:tabular-nums;flex:none}
+.dshadb_wf_range{width:100%;height:24px;accent-color:#4f7cff;margin:0}
+.dshadb_wf_seg{display:flex;gap:6px;margin-left:auto;flex:none}
+.dshadb_wf_segbtn{font-size:11px;font-weight:700;font-family:inherit;padding:6px 11px;border-radius:10px;border:1px solid #e7e8ec;background:#f5f6f8;color:#9ca0aa;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background .15s ease,color .15s ease}
+.dshadb_wf_segbtn_on{background:#4f7cff;border-color:#4f7cff;color:#ffffff}
+.dshadb_wf_disabled{opacity:.45;pointer-events:none}
+.dshadb_wf_tip{font-size:10.5px;color:#9ca0aa;line-height:1.5;padding:2px 4px 0}
+.dshadb_wf_avatar{flex:none;width:34px;height:34px;object-fit:contain;object-position:center;display:block;-webkit-user-drag:none;filter:drop-shadow(0 2px 4px rgba(0,0,0,.12))}
+@media (prefers-color-scheme:dark){
+.dshadb_wf_row,.dshadb_wf_row_col{background:#262a33;border-color:#363c48}
+.dshadb_wf_name{color:#f2f4f8}
+.dshadb_wf_segbtn{background:#1e222a;border-color:#363c48;color:#8b91a0}
+.dshadb_wf_segbtn_on{background:#4f7cff;border-color:#4f7cff;color:#fff}}
+/* ===== 大肥鱼互动挂件 (v1.1.0) ===== */
+.dshadb-whale{position:fixed;left:0;top:60vh;z-index:9600;--dshw-scale:1;--dshw-size:clamp(calc(96px * var(--dshw-scale)),calc(min(150px,min(100vw,100vh) * 0.30) * var(--dshw-scale)),420px);width:var(--dshw-size);height:var(--dshw-size);pointer-events:none;-webkit-user-select:none;user-select:none;touch-action:none;transition:transform .45s cubic-bezier(.34,1.4,.64,1),left .3s ease,top .3s ease}
+.dshadb-whale.dshadb-whale-dragging{transition:none}
+.dshadb-whale.dshadb-whale-flip .dshadb-whale-sprite{transform:scaleX(-1)}
+.dshadb-whale-sprite{position:absolute;left:0;top:0;width:100%;height:100%;transition:transform .3s ease}
+.dshadb-whale-body{position:absolute;left:0;top:0;width:100%;height:100%;transform-origin:50% 92%;transition:transform .2s cubic-bezier(.34,1.56,.64,1);pointer-events:auto;cursor:grab;-webkit-tap-highlight-color:transparent}
+.dshadb-whale-press .dshadb-whale-body{transform:scale(1.1,.88);cursor:grabbing}
+.dshadb-whale-img{width:100%;height:100%;object-fit:contain;display:block;pointer-events:none;-webkit-user-drag:none;filter:drop-shadow(0 6px 14px rgba(0,0,0,.18))}
+.dshadb-whale-bubble{position:absolute;left:50%;bottom:calc(100% - 6px);--dshw-bdx:0px;--dshw-btx:50%;transform:translateX(calc(-50% + var(--dshw-bdx))) translateY(10px) scale(.82);transform-origin:var(--dshw-btx) 100%;opacity:0;pointer-events:none;background:#fff;border-radius:16px;padding:10px 14px;min-width:112px;max-width:min(74vw,248px);box-shadow:0 8px 28px rgba(0,0,0,.16);transition:opacity .2s ease,transform .26s cubic-bezier(.34,1.5,.64,1);z-index:2;text-align:center;box-sizing:border-box}
+.dshadb-whale-bubble::after{content:"";position:absolute;left:var(--dshw-btx);top:100%;transform:translateX(-50%);border:8px solid transparent;border-top-color:#fff}
+.dshadb-whale-bubble-on{opacity:1;transform:translateX(calc(-50% + var(--dshw-bdx))) translateY(0) scale(1)}
+/* 连点时气泡不做淡出淡入的来回, 只跟位置走 —— 避免闪烁 */
+.dshadb-whale-bubble-on.dshadb-whale-bubble-keep{transition:transform .16s ease}
+/* 气泡在上方放不下时改到下方, 尾巴翻到顶边 */
+.dshadb-whale-bubble-below{bottom:auto;top:calc(100% - 6px);transform-origin:var(--dshw-btx) 0}
+.dshadb-whale-bubble-below::after{top:auto;bottom:100%;border-top-color:transparent;border-bottom-color:#fff}
+/* 镜像只作用于鲸鱼本体, 气泡与文字保持正向 */
+.dshadb-whale-flip .dshadb-whale-bubble{transform:translateX(calc(-50% + var(--dshw-bdx))) translateY(10px) scale(.82)}
+.dshadb-whale-flip .dshadb-whale-bubble-on{transform:translateX(calc(-50% + var(--dshw-bdx))) translateY(0) scale(1)}
+.dshadb-whale-btext{display:block}
+.dshadb-whale-gif{display:none;width:100%;max-width:190px;border-radius:10px}
+.dshadb-whale-l-a{font-size:12.5px;font-weight:600;color:#3b4356;letter-spacing:.02em;line-height:1.4;white-space:nowrap}
+.dshadb-whale-l-b{font-size:21px;font-weight:800;color:#17181c;line-height:1.15;white-space:nowrap}
+.dshadb-whale-l-p{font-size:18px;font-weight:800;line-height:1.2;white-space:nowrap}
+.dshadb-whale-l-c{font-size:11px;font-weight:600;color:#9ca0aa;line-height:1.4;white-space:nowrap}
+.dshadb-whale-wrap{white-space:normal;word-break:break-word}
+@media (prefers-color-scheme:dark){
+.dshadb-whale-bubble{background:#262a33}.dshadb-whale-bubble::after{border-top-color:#262a33}
+.dshadb-whale-l-a{color:#d3d7e0}.dshadb-whale-l-b{color:#f2f4f8}.dshadb-whale-l-c{color:#9298a6}}`
+
+      document.head.appendChild(tag);
+    }
+    //#endregion
+
+    //#region locale
+    const NS = "apiDashboard";
+    const zh = {
+      "bar.hint": "点击切换", "title": "哦鲸鲸", "refresh": "刷新", "refreshing": "刷新中",
+      "close": "关闭", "back": "返回", "status.ok": "正常", "status.warn": "偏低", "status.err": "异常",
+      "status.nokey": "未配置", "status.loading": "查询中", "status.noBalance": "未开放",
+      "status.auth": "认证失败", "status.local": "本地", "amount.free": "免费",
+      "all.ok": "{n} 正常", "domestic": "国内平台", "abroad": "海外平台", "local": "本地", "relay": "中转站", "custom": "自定义模型",
+      "selectedTag": "当前", "add.relay": "添加中转站", "add.custom": "添加自定义模型", "settings.title": "哦鲸鲸设置",
+      "detail.total": "当前余额", "detail.topup": "总充值", "detail.used": "总使用", "detail.note": "类型",
+      "detail.sessionCost": "本会话消耗", "detail.noBalance": "该平台未开放余额查询",
+      "settings.safe": "安全阈值(绿)", "settings.warn": "预警阈值(黄)", "settings.currency": "计价货币",
+      "settings.safeHint": "余额高于此值显示绿色(安全)",
+      "settings.warnHint": "余额低于此值显示黄色(偏低)，再低显示红",
+      "settings.refresh": "刷新间隔(秒)", "settings.refreshHint": "5~60 秒，最高一分钟",
+      "settings.save": "保存并生效", "settings.saved": "已保存",
+      "update.title": "版本与更新", "update.current": "当前版本",
+      "update.check": "检查更新", "update.checking": "检查中…",
+      "update.latest": "已是最新版本 ✓", "update.available": "发现新版本",
+      "update.install": "一键更新", "update.installing": "下载安装中…",
+      "update.done": "已更新, 重启 Web GUI 生效", "update.fail": "更新失败, 已保持原版本",
+      "update.checkfail": "检查失败 (网络异常)",
+      "settings.section.basic": "基础设置", "settings.section.relays": "中转站", "settings.section.models": "自定义模型",
+      "settings.section.whale": "大肥鱼",
+      "whale.enable": "收养大肥鱼", "whale.enableHint": "在屏幕边缘养一只会探头的大肥鱼（纯互动，不显示余额）",
+      "whale.scale": "身体大小", "whale.peek": "探出多少",
+      "whale.sound": "按压音效", "whale.soundSet": "音效组", "whale.volume": "音量",
+      "whale.bubble": "台词气泡", "whale.peakMode": "峰谷文案", "whale.snap": "自动靠边",
+      "whale.snapHint": "松手后吸附到最近的屏幕边缘；关掉就停在你放的位置",
+      "whale.on": "开", "whale.off": "关",
+      "whale.duck": "小黄鸭", "whale.fx1": "音效1",
+      "whale.peak.default": "默认", "whale.peak.liangwen": "梁文峰谷", "whale.peak.qiangqiang": "!?强强?!",
+      "whale.tip": "拖着大肥鱼可以在屏幕上随意移动；点一下弹全身和台词，再点一下收回。",
+      "whale.offTip": "先打开上面的「收养大肥鱼」，才能调下面这些。",
+      "brands": "模型品牌",
+      "settings.showBrands": "显示模型品牌", "settings.showBrandsHint": "在看板中显示 OpenAI / Claude / Gemini / Qwen / MiMo 等无余额接口的品牌",
+      "settings.official": "官方直连 provider",
+      "settings.officialHint": "逗号或换行分隔。写在这里的 provider 名一律按官方直连处理，状态条显示官方余额；留空则自动判定（按 settings.yaml 里 baseURL 的域名，识别不出按中转站显示「—」）",
+      "settings.officialAuto": "自动判定结果",
+      "settings.officialKindOfficial": "官方", "settings.officialKindRelay": "中转",
+      "settings.officialAutoEmpty": "settings.yaml 里没有写 baseURL 的 provider，无法自动判定",
+      "settings.modelName": "模型名称", "settings.apiUrl": "余额接口 URL", "settings.queryType": "解析方式",
+      "settings.totalPath": "总余额字段(可选)", "settings.usedPath": "已用字段(可选)",
+      "settings.modelHint": "填你的余额接口(返回 JSON)，可选填 API Key 与字段路径，如 data.balance",
+      "qt.auto": "自动探测", "qt.openai": "OpenAI 格式", "qt.quota": "OneAPI/NewAPI quota", "qt.deepseek": "DeepSeek 格式", "qt.openai-billing": "OpenAI 订阅", "qt.custom": "手动映射",
+      "cmn": "人民币 ¥", "usd": "美元 $",
+      "peak.now": "梁文峰 ☀️ 峰时计费",
+      "valley.now": "梁文谷 🌙 谷时 5 折",
+      "valley.weekend": "梁文谷 🌙 周末全天特惠",
+      "peak.hint": "09:00~12:00 / 14:00~18:00",
+      "valley.hint": "其余时段 / 周末全天",
+      "peak.slogan": "打工人的黄金档，趁午休速跑大任务！",
+      "valley.slogan": "夜猫子福利，错峰用 AI 物美价廉 ~",
+      "weekend.slogan": "周末静静嗨，5 折用 DeepSeek 真香！",
+      "error.timeout": "超时", "error.network": "网络错误", "error.unknown": "未知",
+    };
+    const en = {
+      "bar.hint": "Tap to switch", "title": "哦鲸鲸", "refresh": "Refresh", "refreshing": "Refreshing",
+      "close": "Close", "back": "Back", "status.ok": "OK", "status.warn": "Low", "status.err": "Error",
+      "status.nokey": "No Key", "status.loading": "Loading", "status.noBalance": "No API",
+      "status.auth": "Auth", "status.local": "Local", "amount.free": "Free",
+      "all.ok": "{n} OK", "domestic": "Domestic", "abroad": "Global", "local": "Local", "relay": "Relay", "custom": "Custom",
+      "selectedTag": "Now", "add.relay": "Add Relay", "add.custom": "Add Custom", "settings.title": "哦鲸鲸 Settings",
+      "detail.total": "Balance", "detail.topup": "Top-up", "detail.used": "Used", "detail.note": "Type",
+      "detail.sessionCost": "Session cost", "detail.noBalance": "No balance API",
+      "settings.safe": "Safe (green)", "settings.warn": "Warn (yellow)", "settings.currency": "Currency",
+      "settings.safeHint": "Above this = green (safe)",
+      "settings.warnHint": "Below this = yellow, lower = red",
+      "settings.refresh": "Refresh (sec)", "settings.refreshHint": "5-60s, max one minute",
+      "settings.save": "Save", "settings.saved": "Saved",
+      "update.title": "Version & Updates", "update.current": "Current",
+      "update.check": "Check updates", "update.checking": "Checking…",
+      "update.latest": "Up to date ✓", "update.available": "New version available",
+      "update.install": "Update now", "update.installing": "Installing…",
+      "update.done": "Updated. Restart Web GUI to apply", "update.fail": "Update failed, version unchanged",
+      "update.checkfail": "Check failed (network)",
+      "settings.section.basic": "Basic", "settings.section.relays": "Relays", "settings.section.models": "Custom Models",
+      "settings.section.whale": "Whale",
+      "whale.enable": "Adopt Big Whale", "whale.enableHint": "Keep a peeking whale on the screen edge (interactive only)",
+      "whale.scale": "Body size", "whale.peek": "Peek amount",
+      "whale.sound": "Press sound", "whale.soundSet": "Sound set", "whale.volume": "Volume",
+      "whale.bubble": "Speech bubble", "whale.peakMode": "Peak wording", "whale.snap": "Snap to edge",
+      "whale.snapHint": "Snaps to the nearest edge on release; turn off to keep it where you drop it",
+      "whale.on": "On", "whale.off": "Off",
+      "whale.duck": "Duck", "whale.fx1": "FX 1",
+      "whale.peak.default": "Default", "whale.peak.liangwen": "Liangwen", "whale.peak.qiangqiang": "!?Qiang?!",
+      "whale.tip": "Drag the whale anywhere on screen; tap once for full body and a line, tap again to tuck it back.",
+      "whale.offTip": "Turn on \"Adopt Big Whale\" above to edit these.",
+      "brands": "Model Brands",
+      "settings.showBrands": "Show model brands", "settings.showBrandsHint": "Show OpenAI / Claude / Gemini / Qwen / MiMo etc. (no balance API) in dashboard",
+      "settings.official": "Official-direct providers",
+      "settings.officialHint": "Comma or newline separated. Providers listed here always count as official direct connections and show their official balance; leave empty to auto-detect from the baseURL host in settings.yaml (undetected ones are treated as relays and show \"—\")",
+      "settings.officialAuto": "Auto-detected",
+      "settings.officialKindOfficial": "official", "settings.officialKindRelay": "relay",
+      "settings.officialAutoEmpty": "No provider in settings.yaml declares a baseURL, so nothing can be auto-detected",
+      "settings.modelName": "Model name", "settings.apiUrl": "Balance API URL", "settings.queryType": "Parse type",
+      "settings.totalPath": "Total field (opt)", "settings.usedPath": "Used field (opt)",
+      "settings.modelHint": "A JSON endpoint for your balance; optional API key & field paths like data.balance",
+      "qt.auto": "Auto", "qt.openai": "OpenAI", "qt.quota": "OneAPI quota", "qt.deepseek": "DeepSeek", "qt.openai-billing": "OpenAI sub", "qt.custom": "Manual map",
+      "cmn": "CNY ¥", "usd": "USD $",
+      "peak.now": "Peak ☀️ full rate",
+      "valley.now": "Off-peak 🌙 50% off",
+      "valley.weekend": "Weekend 🌙 all-day off",
+      "peak.hint": "09:00-12:00 / 14:00-18:00",
+      "valley.hint": "other time / weekends",
+      "peak.slogan": "Lunch break is peak, run big jobs now!",
+      "valley.slogan": "Night-owl deal, use AI cheap at off-peak~",
+      "weekend.slogan": "Weekend vibes, 50% off DeepSeek!",
+      "error.timeout": "Timeout", "error.network": "Network error", "error.unknown": "Unknown",
+    };
+    //#endregion
+
+    //#region store (单例轮询器)
+    const DEFAULT_POLL_MS = 30000;
+    let snapshot = { status: "loading", balances: [], config: { safeThreshold: 50, warnThreshold: 10 } };
+    const listeners = new Set();
+    let timer = null, pollMs = DEFAULT_POLL_MS, inflight = null, started = false;
+    function notify() { for (const fn of [...listeners]) fn(); }
+    async function refresh(force = false) {
+      if (inflight !== null && !force) return inflight;
+      if (force && snapshot.isRefreshing !== true) { snapshot = { ...snapshot, isRefreshing: true }; notify(); }
+      inflight = (async () => {
+        try {
+          const url = force ? "/api-dashboard/balances?force=1&_t=" + Date.now() : "/api-dashboard/balances";
+          // v0.5.0: 走浏览器默认缓存 (配合服务端 ETag), 数据没变时 304 空响应; force 用独立 URL + no-store 强刷
+          const res = await fetch(url, { headers: { accept: "application/json" }, cache: force ? "no-store" : "default" });
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          const data = await res.json();
+          if (data.config?.clientPollIntervalMs >= 5000) pollMs = Math.min(data.config.clientPollIntervalMs, 3600000);
+          // v0.5.0 性能适配: 内容无变化就不重建快照引用, useSyncExternalStore 判定 Object.is 相同直接跳过整棵树重渲
+          const newBalances = data.balances || [];
+          const oldBalances = Array.isArray(snapshot.balances) ? snapshot.balances : [];
+          const changed = JSON.stringify(newBalances) !== JSON.stringify(oldBalances) || snapshot.status !== "ok";
+          const nextFetchedAt = data.fetchedAt || Date.now();
+          if (!changed) {
+            // v1.1.0: config 必须始终跟随最新响应 —— 旧写法在余额未变时保留旧 config,
+            // 导致设置里改完开关(如 whaleEnabled)后前端永远读不到新值, 表现为"开了又变回关"
+            snapshot = { ...snapshot, config: data.config || snapshot.config, fetchedAt: nextFetchedAt, isRefreshing: false };
+          } else {
+            snapshot = { status: "ok", balances: newBalances, config: data.config || snapshot.config, fetchedAt: nextFetchedAt, isRefreshing: false };
+          }
+        } catch (error) {
+          snapshot = { ...snapshot, status: "error", balances: snapshot.balances || [], message: error instanceof Error ? error.message : String(error), isRefreshing: false };
+        }
+        inflight = null; notify();
+      })();
+      return inflight;
+    }
+    function schedule() {
+      if (timer !== null) return;
+      timer = setTimeout(() => { timer = null; if (document.hidden) return; refresh().then(schedule, schedule); }, pollMs);
+    }
+    const store = {
+      subscribe(fn) { listeners.add(fn); if (!started) { started = true; refresh(true).then(schedule, schedule); } return () => { listeners.delete(fn); if (listeners.size === 0) { started = false; if (timer !== null) { clearTimeout(timer); timer = null; } } }; },
+      getSnapshot() { return snapshot; },
+      forceRefresh() { return refresh(true); },
+    };
+    //#endregion
+
+    //#region helpers
+    const CURRENCY_SYMBOLS = { CNY: "¥", USD: "$", EUR: "€" };
+    const currencySymbol = (c) => { if (c === "%" || c === "tokens") return ""; return CURRENCY_SYMBOLS[c] || c + " "; };
+    function formatMoney(amount, currency) {
+      if (typeof amount !== "number" || isNaN(amount)) return currencySymbol(currency) + "0";
+      if (currency === "%") return Math.round(amount) + "%";
+      if (currency === "tokens") return (amount >= 1e6 ? (amount/1e6).toFixed(1)+"M" : amount >= 1e3 ? (amount/1e3).toFixed(1)+"K" : Math.round(amount) + " tok");
+      const abs = Math.abs(amount);
+      const fixed = abs === 0 || abs >= 1 ? 2 : abs >= 0.01 ? 3 : 4;
+      return currencySymbol(currency) + amount.toFixed(fixed);
+    }
+    function formatTime(ms) { if (!ms || ms <= 0) return "—"; return new Date(ms).toLocaleTimeString(); }
+    /** 状态条金额文字 (供 BarReadout 的 rAF 节流 state 使用)
+     *  viaRelay=true 时走的是中转站, 官方余额与当前用量无关 → 一律显示「—」 */
+    function barAmountText(current, t, viaRelay) {
+      if (!current) return "";
+      if (viaRelay) return "—";
+      if (current.status === "ok") {
+        const cur = current.currency || "USD";
+        const num = typeof current.total === "number" ? current.total : 0;
+        if (String(cur).trim() === "%") return formatMoney(num, "%");
+        if (String(cur).trim() === "tokens") return formatMoney(num, "tokens");
+        return formatMoney(num, cur);
+      }
+      if (current.status === "no-key") return t("status.nokey");
+      if (current.status === "no-balance-api") return "—";
+      if (current.status === "local") return t("status.local");
+      return t("status.err");
+    }
+    /** 当前 provider 是否为中转站 (非官方直连) —— 中转站无余额接口, 金额显示「—」
+     *
+     *  三层判定, 优先级由高到低 (与服务端注释一致):
+     *   1) 用户在设置里显式声明的官方直连名单 config.officialProviders (兜住一切误判)
+     *   2) 服务端读 settings.yaml 按 baseURL **域名** 判定的 config.providerKinds
+     *      (官方域名白名单命中→official, 不命中→relay; 没写 baseURL 的 provider 不在表里)
+     *   3) DSH 官方插件命名约定: `-official` / `_official` 后缀 (如 deepseek-official)
+     *  都不命中 → 按中转站处理。保守取向: 宁可不显示余额, 也不显示错的余额。
+     *  (provider 为空表示还不知道走哪条路 → 不判中转站, 照常显示所选平台余额) */
+    function isRelayProvider(provider, config) {
+      if (typeof provider !== "string" || provider === "") return false;
+      const p = provider.toLowerCase();
+      // 第 1 层: 用户显式名单
+      const official = config && config.officialProviders;
+      if (Array.isArray(official)) {
+        for (const name of official) {
+          if (typeof name === "string" && name.trim().toLowerCase() === p) return false;
+        }
+      }
+      // 第 2 层: 服务端按 baseURL 域名判定
+      const kinds = config && config.providerKinds;
+      if (kinds && typeof kinds === "object") {
+        const kind = kinds[provider] !== undefined ? kinds[provider] : kinds[p];
+        if (kind === "official") return false;
+        if (kind === "relay") return true;
+      }
+      // 第 3 层: 官方插件后缀约定
+      if (p.endsWith("-official") || p.endsWith("_official")) return false;
+      return true;
+    }
+    /** v0.5.3: 模型名 → 平台 id 映射 (仅强特征匹配, 避免误切; 自定义/中转由调用方按名称二次匹配)
+     *  只按模型名映射, 不因中转站返回空 —— 否则状态条不会跟着模型切换。
+     *  中转站不显示余额由 BarReadout 的 viaRelay 单独处理。 */
+    function modelToPlatform(model) {
+      if (!model || typeof model !== "string") return "";
+      const m = model.toLowerCase();
+      if (/^deepseek/.test(m)) return "deepseek";
+      if (/^gpt/.test(m) || /^o[1-3]([-.]|$)/.test(m) || m.includes("openai")) return "openai";
+      if (/^claude/.test(m)) return "claude";
+      if (/^gemini/.test(m)) return "gemini";
+      if (/^qwen/.test(m)) return "qwen";
+      if (/^mimo/.test(m)) return "mimo";
+      if (/glm|chatglm/.test(m)) return "zhipu";
+      if (/kimi|moonshot/.test(m)) return "moonshot";
+      if (/^step[-_]/.test(m)) return "stepfun";
+      if (/minimax|abab/.test(m)) return "minimax";
+      if (/grok/.test(m)) return "xai";
+      return "";
+    }
+    /** 三色等级: 百分比型(套餐剩余%)用安全/预警阈值; 真实货币金额无百分比语义, 一律 ok
+     *  v0.5.6 修复: 旧逻辑把 ¥2.55 这类绝对金额跟 50/10 的百分比阈值比较, 导致显示「异常」 */
+    function getLevel(b, cfg) {
+      if (!b) return "err";
+      if (["no-key", "no-balance-api"].includes(b.status)) return "nokey";
+      if (b.status === "local") return "local";
+      if (["error", "auth-error", "parse-error"].includes(b.status)) return "err";
+      if (b.status !== "ok") return "err";
+      const safe = cfg?.safeThreshold ?? 50;
+      const warn = cfg?.warnThreshold ?? 10;
+      // v0.7.1: 修复「负数余额显示正常」。percent 与 token 数量不能用金额阈值比。
+      // - 百分比: 走阈值
+      // - 货币: 负数→err, 正数走阈值
+      // - tokens: 数量>0 安全, <=0 异常 (token 数是规模非金额)
+      const cur = String(b.currency || "").trim();
+      if (cur === "tokens") {
+        const v = typeof b.total === "number" ? b.total : (b.available ?? 0);
+        if (!Number.isFinite(v)) return "err";
+        return v > 0 ? "ok" : "err";
+      }
+      const v = typeof b.percent === "number" ? b.percent : (typeof b.total === "number" ? b.total : null);
+      if (!(typeof v === "number") || isNaN(v)) return "err";
+      return v > safe ? "ok" : v > warn ? "warn" : "err";
+    }
+    function statusLabel(level, t) { return t({ ok:"status.ok", warn:"status.warn", err:"status.err", nokey:"status.nokey", loading:"status.loading", local:"status.local", auth:"status.auth" }[level] || "status.err"); }
+    //#endregion
+
+
+    //#region 一层 bar
+    function BarReadout({ t, onOpen, onOpenSettings, selectedId, onSelect, config, cost, provider }) {
+      const data = react.useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+      const balances = data.balances || [];
+      let current = balances.find(b => b.platform === selectedId);
+      if (!current) current = balances.find(b => b.status === "ok") || balances[0];
+      // 当前走中转站时不显示官方余额 (中转站没有余额接口)
+      const viaRelay = isRelayProvider(provider, config);
+      // 选中项与当前平台不同步时, commit 后再同步 (render 阶段调用会触发 React 18 警告)
+      react.useEffect(() => {
+        if (current && selectedId !== current.platform && current.status === "ok") onSelect(current.platform);
+      });
+
+      // v0.5.0 手机端: 点击状态条开看板, 长按 500ms 弹设置菜单 (替代常驻齿轮)
+      const pressTimer = react.useRef(null);
+      const longPressed = react.useRef(false);
+      const startLongPress = () => {
+        if (pressTimer.current) clearTimeout(pressTimer.current);
+        pressTimer.current = setTimeout(() => {
+          longPressed.current = true;
+          try { if (navigator.vibrate) navigator.vibrate(20); } catch (e) { /* ignore */ }
+          onOpenSettings();
+        }, 500);
+      };
+      const cancelLongPress = () => {
+        if (pressTimer.current) { clearTimeout(pressTimer.current); pressTimer.current = null; }
+        // 短暂保活标记, 吞掉长按松手后的 click, 避免误开看板
+        setTimeout(() => { longPressed.current = false; }, 80);
+      };
+      const handleBarClick = () => { if (longPressed.current) return; onOpen(); };
+
+      // v0.5.0: 金额文字 rAF 延迟一帧写入, 合并同一帧内的重复变化
+      const [displayAmount, setDisplayAmount] = react.useState(barAmountText(current, t, viaRelay));
+      react.useEffect(() => {
+        const txt = barAmountText(current, t, viaRelay);
+        const raf = requestAnimationFrame(() => setDisplayAmount((prev) => (prev === txt ? prev : txt)));
+        return () => cancelAnimationFrame(raf);
+      });
+
+      const hasPeakInfo = typeof config?.isPeak === "boolean";
+      const isPeak = config?.isPeak === true;
+      const isWknd = config?.isWeekend === true;
+
+      // 峰谷标记 (趣味版: 梁文峰 ☀️ / 梁文谷 🌙)
+      let peakNode = null;
+      if (hasPeakInfo) {
+        const peakTitle = isPeak
+          ? t("peak.now") + " " + t("peak.hint")
+          : (isWknd ? t("valley.weekend") : t("valley.now"));
+        peakNode = react.createElement("span", {
+          className: "dshadb_bar_peak " + (isPeak ? "peak" : "valley"),
+          key: "peak",
+          title: peakTitle,
+        }, isPeak ? "☀️" : "🌙");
+      }
+
+      if (!current) return react.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: "4px" } }, [
+        react.createElement("span", {
+          className: "dshadb_bar", onClick: handleBarClick, role: "button", tabIndex: 0,
+          onKeyDown: (e) => { if (e.key === "Enter") onOpen(); },
+          onTouchStart: startLongPress, onTouchEnd: cancelLongPress, onTouchCancel: cancelLongPress,
+          onContextMenu: (e) => e.preventDefault(), key: "main"
+        }, [
+          react.createElement("span", { className: "dshadb_bar_logo", key: "logo" }, renderLogo({platform:"deepseek"})),
+          react.createElement("span", { className: "dshadb_bar_name", key: "name" }, t("title")),
+          peakNode,
+          react.createElement("span", { className: "dshadb_bar_cost", title: cost?.title, key: "cost" }, cost?.text || "~—"),
+        ]),
+      ]);
+
+      const meta = metaFor(current.platform), level = getLevel(current, config);
+      const isNoBalance = viaRelay || (current && current.status === "no-balance-api");
+      const dotClass = "dshadb_bar_dot" + (isNoBalance ? "" : " " + (level === "ok" ? "dshadb_bar_dot_ok" : level === "warn" ? "dshadb_bar_dot_warn" : "dshadb_bar_dot_err"));
+      const dotStyle = isNoBalance ? { background: "#c7c7cc" } : undefined;
+      const amtClass = "dshadb_bar_amount " + (level === "ok" ? "dshadb_bar_ok" : level === "warn" ? "dshadb_bar_warn" : "dshadb_bar_err");
+      return react.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: "4px" } }, [
+        react.createElement("span", {
+          className: "dshadb_bar", onClick: handleBarClick, role: "button", tabIndex: 0,
+          onKeyDown: (e) => { if (e.key === "Enter") onOpen(); },
+          onTouchStart: startLongPress, onTouchEnd: cancelLongPress, onTouchCancel: cancelLongPress,
+          onContextMenu: (e) => e.preventDefault(), title: t("bar.hint") + " · " + meta.name, key: "main"
+        }, [
+          react.createElement("span", { className: "dshadb_bar_logo", key: "logo" }, renderLogo(current)),
+          react.createElement("span", { className: "dshadb_bar_name", key: "name" }, meta.name),
+          react.createElement("span", { className: amtClass, key: "amount" }, displayAmount),
+          react.createElement("span", { className: dotClass, style: dotStyle, key: "dot" }),
+          peakNode,
+          react.createElement("span", { className: "dshadb_bar_cost", title: cost?.title, key: "cost" }, cost?.text || "~—"),
+        ]),
+      ]);
+    }
+    //#endregion
+
+    //#region 折叠分组 (带展开过渡动画 + 分类色点)
+    function GroupSection({ label, count, open, onToggle, children }) {
+      return react.createElement("div", { key: label }, [
+        react.createElement("div", { className: "dshadb_group_head", onClick: onToggle, role: "button", tabIndex: 0, onKeyDown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(); } } }, [
+          react.createElement("span", { className: "dshadb_group_label", key: "label" }, label),
+          react.createElement("span", { style: { display: "flex", alignItems: "center", gap: "6px" }, key: "right" }, [
+            react.createElement("span", { className: "dshadb_group_meta", key: "meta" }, count),
+            react.createElement(IconChevron, { open }),
+          ]),
+        ]),
+        react.createElement("div", { className: "dshadb_group_body" + (open ? " dshadb_group_body_open" : ""), key: "body" }, [
+          react.createElement("div", { className: "dshadb_group_body_inner", key: "inner" }, [
+            react.createElement("div", { key: "cards" }, children),
+          ]),
+        ]),
+      ]);
+    }
+    //#endregion
+
+    //#region 二层 看板面板
+    function DashboardDrawer({ isOpen, onClose, t, selectedId, onSelect, onOpenDetail, onAddRelay, onAddCustom, onOpenSettings, config, currentModel }) {
+      const data = react.useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+      const [isRefreshing, setRefreshing] = react.useState(false);
+      const [openGroups, setOpenGroups] = react.useState({ domestic: false, abroad: false, relay: false, custom: false, nobalance: false });
+      react.useEffect(() => {
+        if (!isOpen) return;
+        const handleKey = (e) => { if (e.key === "Escape") onClose(); };
+        window.addEventListener("keydown", handleKey);
+        return () => window.removeEventListener("keydown", handleKey);
+      }, [isOpen, onClose]);
+      if (!isOpen) return null;
+      const handleRefresh = () => { setRefreshing(true); store.forceRefresh().then(() => setTimeout(() => setRefreshing(false), 500)); };
+      const balances = data.balances || [];
+      const isLoading = data.status === "loading" && balances.length === 0;
+      const okCount = balances.filter(b => b.status === "ok").length;
+
+      const groups = { domestic: [], abroad: [], relay: [], custom: [] };
+      const noBalanceBrands = [];
+      let selectedBalance = null;
+      const showBrands = !!(config && config.showNoBalanceBrands);
+      for (const b of balances) {
+        if (b.platform === selectedId) { selectedBalance = b; continue; }
+        // 无余额模型品牌: 设置开关开启才显示, 放入单独分组
+        if (b.status === "no-balance-api" || b.status === "noBalance") {
+          if (showBrands) noBalanceBrands.push(b);
+          continue;
+        }
+        const cat = b.category || metaFor(b.platform).cat;
+        if (cat === "海外" || cat === "官方") groups.abroad.push(b);
+        else if (cat === "中转站") groups.relay.push(b);
+        else if (cat === "自定义") groups.custom.push(b);
+        else groups.domestic.push(b);
+      }
+      const toggle = (k) => setOpenGroups(prev => ({ ...prev, [k]: !prev[k] }));
+
+      const card = (b) => {
+        const meta = metaFor(b.platform), level = getLevel(b, config), isSelected = b.platform === selectedId;
+        const cardClass = "dshadb_card " + (isSelected ? "dshadb_card_active " : "");
+        // descText 逻辑
+        let descText;
+        if (b.status === "ok" && b.sessionCost != null) {
+          descText = (b.modelId || "—") + " · 会话消耗 " + (typeof b.sessionCost === "number" ? b.sessionCost.toFixed(2) : b.sessionCost);
+        } else if (b.status === "ok" && b.note) {
+          descText = b.note + " · 配额正常";
+        } else if (b.status === "ok") {
+          descText = "已启用";
+        } else if (b.status === "local") {
+          descText = "本地模型";
+        } else if (b.status === "noBalance" || b.status === "no-balance-api") {
+          descText = "按价格表估算消耗";
+        } else {
+          descText = statusLabel(level, t);
+        }
+        let amount;
+        let amtClass = "";
+        if (b.status === "ok") {
+          const cur = b.currency || "USD";
+          const num = typeof b.total === "number" ? b.total : 0;
+          const val = String(cur).trim() === "%" ? formatMoney(num, "%") : String(cur).trim() === "tokens" ? formatMoney(num, "tokens") : formatMoney(num, cur);
+          amtClass = level === "ok" ? "dshadb_card_status_ok" : level === "warn" ? "dshadb_card_status_warn" : "dshadb_card_status_err";
+          amount = val;
+        } else if (b.status === "no-key") { amount = t("status.nokey"); amtClass = "dshadb_card_amount_sub"; }
+        else if (b.status === "no-balance-api") { amount = "—"; amtClass = "dshadb_card_amount_sub"; }
+        else if (b.status === "local") { amount = t("status.local"); amtClass = "dshadb_card_amount_sub"; }
+        else { amount = b.error || t("error.unknown"); amtClass = "dshadb_card_status_err"; }
+        const isNoBalance = b.status === "no-balance-api";
+        const stClass = isNoBalance ? "dshadb_card_amount_sub" : (level === "ok" ? "dshadb_card_status_ok" : level === "warn" ? "dshadb_card_status_warn" : "dshadb_card_status_err");
+        const statusText = isNoBalance ? "—" : statusLabel(level, t);
+        const rightNode = react.createElement("div", { className: "dshadb_card_right", key: "right" }, [
+          react.createElement("span", { className: "dshadb_card_amount" + (amtClass ? " " + amtClass : ""), key: "amt" }, amount),
+          react.createElement("span", { className: "dshadb_card_status " + stClass, key: "st" }, [
+            react.createElement("span", { className: "dshadb_status_dot" + (isNoBalance ? "" : " dshadb_status_dot_" + (level === "ok" ? "ok" : level === "warn" ? "warn" : "err")), key: "dot", style: isNoBalance ? { background: "#c7c7cc" } : undefined }),
+            statusText,
+          ]),
+        ]);
+        return react.createElement("div", { className: cardClass, key: b.platform, onClick: () => { onSelect(b.platform); } }, [
+          react.createElement("span", { className: "dshadb_card_logo", key: "logo", style: { color: meta.color || undefined } }, renderLogo(b)),
+          react.createElement("div", { className: "dshadb_card_info", key: "info" }, [
+            react.createElement("div", { className: "dshadb_card_name", key: "name" }, meta.name),
+            react.createElement("div", { className: "dshadb_card_desc", key: "desc" }, descText),
+          ]),
+          rightNode,
+          isSelected ? react.createElement("span", { className: "dshadb_card_chevron", key: "chev", onClick: (e) => { e.stopPropagation(); onOpenDetail(b.platform); }, style: { cursor: "pointer", padding: "4px" } }, "›") : null,
+        ]);
+      };
+
+      let bodyContent;
+      if (isLoading) {
+        bodyContent = react.createElement("div", null, [0,1,2,3].map(i => react.createElement("div", { className: "dshadb_skeleton", key: i }, [
+          react.createElement("div", { className: "dshadb_skeleton_logo", key: "logo" }),
+          react.createElement("div", { className: "dshadb_skeleton_lines", key: "lines" }, [
+            react.createElement("div", { className: "dshadb_skeleton_line dshadb_skeleton_line_long", key: "l1" }),
+            react.createElement("div", { className: "dshadb_skeleton_line dshadb_skeleton_line_short", key: "l2" }),
+          ]),
+        ])));
+      } else if (balances.length === 0) {
+        bodyContent = react.createElement("div", { className: "dshadb_empty" }, [
+          react.createElement("span", { key: "icon", style: { fontSize: 30, opacity: 0.5 } }, "📊"),
+          react.createElement("span", { key: "title" }, t("title")),
+        ]);
+      } else {
+        bodyContent = [
+          // ⑤ 选中模型置顶 (原deepseek位置)
+          selectedBalance ? card(selectedBalance) : null,
+          selectedBalance ? react.createElement("div", { className: "dshadb_group_divider", key: "div" }) : null,
+          // 国内平台 (含deepseek)
+          groups.domestic.length ? react.createElement(GroupSection, { label: t("domestic"), count: groups.domestic.length, open: openGroups.domestic, onToggle: () => toggle("domestic"), key: "g_domestic" }, groups.domestic.map(card)) : null,
+          groups.abroad.length ? react.createElement(GroupSection, { label: t("abroad"), count: groups.abroad.length, open: openGroups.abroad, onToggle: () => toggle("abroad"), key: "g_abroad" }, groups.abroad.map(card)) : null,
+          noBalanceBrands.length ? react.createElement(GroupSection, { label: t("brands"), count: noBalanceBrands.length, open: openGroups.nobalance, onToggle: () => toggle("nobalance"), key: "g_brands" }, noBalanceBrands.map(card)) : null,
+          groups.relay.length ? react.createElement(GroupSection, { label: t("relay"), count: groups.relay.length, open: openGroups.relay, onToggle: () => toggle("relay"), key: "g_relay" }, groups.relay.map(card)) : null,
+          groups.custom.length ? react.createElement(GroupSection, { label: t("custom"), count: groups.custom.length, open: openGroups.custom, onToggle: () => toggle("custom"), key: "g_custom" }, groups.custom.map(card)) : null,
+          // ③ 添加按钮居中两边对齐
+          react.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginTop: "6px" }, key: "add_btns" }, [
+            react.createElement("button", { type: "button", className: "dshadb_add_btn", key: "add_relay", onClick: onAddRelay }, react.createElement(IconPlus, null), t("add.relay")),
+            react.createElement("button", { type: "button", className: "dshadb_add_btn", key: "add_custom", onClick: onAddCustom }, react.createElement(IconPlus, null), t("add.custom")),
+          ]),
+          react.createElement("div", { style: { fontSize: "10px", color: "#9ca0aa", padding: "8px 2px 2px", lineHeight: "1.5", textAlign: "center" }, key: "hint" }, [
+            "💡 OpenAI、Claude、Gemini、Groq、Mistral 等平台未开放余额查询，请通过「添加自定义模型」配置。",
+          ]),
+        ];
+      }
+
+      return react.createElement("div", { className: "dshadb_scrim", onClick: (e) => { if (e.target === e.currentTarget) onClose(); } }, [
+        react.createElement("div", { className: "dshadb_drawer", onClick: (e) => e.stopPropagation(), key: "drawer" }, [
+          react.createElement("div", { className: "dshadb_handle", key: "handle" }, react.createElement("div", { className: "dshadb_handle_bar" })),
+          react.createElement("div", { className: "dshadb_header", key: "header" }, [
+            react.createElement("div", { className: "dshadb_header_left", key: "left" }, [
+              // 模型尾椎: 从 currentModel 提取变体名, 如 deepseek-v4-flash → DSH·V4
+              react.createElement("div", { className: "dshadb_header_meta", key: "meta" },
+                (currentModel && typeof currentModel === "string")
+                  ? (() => {
+                      const parts = currentModel.split(/[-_\/]/);
+                      // 找 v4/v3/v2 等版本号, 或取最长片段
+                      let ver = parts.find(p => /^v\d/i.test(p) || /^[23456]\.?\d*$/.test(p));
+                      if (!ver) {
+                        // 取最后一个有意义的片段
+                        const meaningful = parts.filter(p => p.length > 1 && !/^(deepseek|chat|reasoner)$/i.test(p));
+                        ver = meaningful.length > 0 ? meaningful[meaningful.length - 1] : parts[parts.length - 1];
+                      }
+                      return "DSH·" + (ver ? ver.toUpperCase() : "");
+                    })()
+                  : ""
+              ),
+              react.createElement("div", { className: "dshadb_header_title", key: "title" }, [
+                react.createElement("span", { className: "dshadb_title_ic", key: "ic", style: { display: "inline-flex", alignItems: "center", justifyContent: "center", width: "26px", height: "26px", borderRadius: "7px", overflow: "hidden", marginRight: "8px", verticalAlign: "middle" } }, react.createElement(IconTitle, null)),
+                t("title"),
+              ]),
+              react.createElement("div", { className: "dshadb_header_sub", key: "sub" },
+                t("all.ok", { n: okCount }) + (isRefreshing ? " · " + t("refreshing") : "")
+              ),
+            ]),
+            react.createElement("button", {
+              className: "dshadb_header_settings",
+              key: "settings",
+              onClick: onOpenSettings,
+              title: t("settings.title"),
+              "aria-label": t("settings.title"),
+            }, react.createElement(IconGear, null)),
+          ]),
+          react.createElement("div", { className: "dshadb_body", key: "body" }, bodyContent),
+          data.fetchedAt ? react.createElement("div", { className: "dshadb_footer", key: "footer" }, [
+            "更新于 " + formatTime(data.fetchedAt),
+            react.createElement("span", { className: "dshadb_footer_dot", key: "d1" }),
+            react.createElement("button", { type: "button", className: "dshadb_refresh_badge", key: "ri", onClick: handleRefresh, title: t("refresh") }, "每 " + ((config && config.clientPollIntervalMs) ? Math.round(config.clientPollIntervalMs / 1000) : 5) + "s 刷新"),
+          ]) : null,
+        ]),
+      ]);
+    }
+    //#endregion
+
+    //#region 三层 平台详情
+    function PlatformDetail({ isOpen, onClose, platformId, t, useProjection, config }) {
+      const data = react.useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+      const cost = useProjection ? useProjection("queryBalanceCost") : undefined;
+      // v0.5.5: 价格表 (仅 DeepSeek 有峰谷两段价), 打开详情时拉取一次
+      const [priceData, setPriceData] = react.useState(null);
+      react.useEffect(() => {
+        if (!isOpen || platformId !== "deepseek") return;
+        let live = true;
+        fetch("/api-dashboard/prices", { headers: { accept: "application/json" } })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((d) => { if (live && d && d.ok) setPriceData(d); })
+          .catch(() => {});
+        return () => { live = false; };
+      }, [isOpen, platformId]);
+      react.useEffect(() => {
+        if (!isOpen) return;
+        const handleKey = (e) => { if (e.key === "Escape") onClose(); };
+        window.addEventListener("keydown", handleKey);
+        return () => window.removeEventListener("keydown", handleKey);
+      }, [isOpen, onClose]);
+      if (!isOpen) return null;
+      const b = (data.balances || []).find(x => x.platform === platformId);
+      if (!b) return null;
+      const meta = metaFor(b.platform), level = getLevel(b, config);
+      const costVal = cost && cost.cost > 0 ? formatMoney(cost.cost, cost.currency || "CNY") : "—";
+      const cur = b.currency || "USD";
+
+      // DeepSeek 峰谷趣味卡片
+      let peakCard = null;
+      if (b.platform === 'deepseek' && config) {
+        const isPeak = config.isPeak === true;
+        const isWknd = config.isWeekend === true;
+        const icon = isPeak ? "☀️" : "🌙";
+        const mainTxt = isPeak ? t("peak.now") : (isWknd ? t("valley.weekend") : t("valley.now"));
+        const slogan = isPeak ? t("peak.slogan") : (isWknd ? t("weekend.slogan") : t("valley.slogan"));
+        peakCard = react.createElement("div", { className: "dshadb_peakcard " + (isPeak ? "peak" : "valley"), key: "peakcard" }, [
+          react.createElement("div", { className: "dshadb_peakcard_title", key: "title" }, [react.createElement("span", { key: "ic" }, icon), react.createElement("span", { key: "txt" }, mainTxt)]),
+          react.createElement("div", { className: "dshadb_peakcard_sub", key: "sub" }, isPeak ? t("peak.hint") : (isWknd ? t("valley.hint") : t("valley.hint"))),
+          react.createElement("div", { className: "dshadb_peakcard_slogan", key: "slogan" }, slogan),
+        ]);
+      }
+
+      // v0.5.5: DeepSeek 峰谷价格卡 (峰时 ☀️ / 谷时 🌙, 单位: 货币/百万 tokens)
+      let priceCard = null;
+      if (platformId === "deepseek" && priceData && Array.isArray(priceData.models)) {
+        const cur = priceData.currency || "CNY";
+        const sym = cur === "CNY" ? "¥" : cur === "USD" ? "$" : cur + " ";
+        const fmt = (v) => (typeof v !== "number" ? "—" : String(v));
+        const seg = (label, p, now) => !p ? null : react.createElement("div", { className: "dshadb_price_seg" + (now ? " dshadb_price_seg_now" : ""), key: label }, [
+          react.createElement("span", { className: "dshadb_price_seg_label", key: "l" }, label),
+          react.createElement("span", { className: "dshadb_price_seg_val", key: "v", title: "未命中输入 / 缓存命中 / 输出" },
+            fmt(p.cacheMiss) + " / " + fmt(p.cacheHit) + " / " + fmt(p.output)),
+        ]);
+        priceCard = react.createElement("div", { className: "dshadb_pricelist", key: "prices" }, [
+          react.createElement("div", { className: "dshadb_pricelist_title", key: "pt" }, [
+            "单价 (" + sym + "/M tokens)",
+            react.createElement("span", { className: "dshadb_price_nowtag" + (priceData.peakNow ? " peak" : " valley"), key: "tag" }, priceData.peakNow ? "当前 ☀️ 峰时" : "当前 🌙 谷时"),
+          ]),
+          ...priceData.models.map((m) => react.createElement("div", { className: "dshadb_price_row", key: m.model }, [
+            react.createElement("span", { className: "dshadb_price_model", key: "m" }, m.model),
+            react.createElement("div", { style: { display: "flex", gap: "6px" }, key: "segs" }, [
+              seg("☀️", m.peak, m.peakValley && priceData.peakNow),
+              seg("🌙", m.offPeak, m.peakValley && !priceData.peakNow),
+              !m.peakValley && m.flat ? react.createElement("span", { className: "dshadb_price_seg_val", key: "flat", title: "未命中输入 / 缓存命中 / 输出" }, fmt(m.flat.cacheMiss) + " / " + fmt(m.flat.cacheHit) + " / " + fmt(m.flat.output)) : null,
+            ]),
+          ])),
+        ]);
+      }
+
+      // v0.5.3: 回退为底部抽屉样式 (全屏卡片观感不佳, 复用看板同款 scrim+drawer)
+      return react.createElement("div", { className: "dshadb_scrim", onClick: (e) => { if (e.target === e.currentTarget) onClose(); } }, [
+        react.createElement("div", { className: "dshadb_drawer", style: { maxHeight: "70vh" }, onClick: (e) => e.stopPropagation(), key: "drawer" }, [
+          react.createElement("div", { className: "dshadb_handle", key: "handle" }, react.createElement("div", { className: "dshadb_handle_bar" })),
+          react.createElement("div", { className: "dshadb_header", key: "header" }, [
+            react.createElement("div", { className: "dshadb_header_left", key: "left" }, [
+              react.createElement("div", { className: "dshadb_header_title", key: "title", style: { fontSize: "18px" } }, meta.name),
+            ]),
+            react.createElement("button", { type: "button", className: "dshadb_header_settings", onClick: onClose, key: "close" }, react.createElement(IconClose, null)),
+          ]),
+          react.createElement("div", { className: "dshadb_body", key: "body" }, [
+            react.createElement("div", { className: "dshadb_detail", key: "detail" }, [
+              // 头部：logo + 平台名 + 状态
+              react.createElement("div", { className: "dshadb_detail_head", key: "head" }, [
+                react.createElement("span", { className: "dshadb_detail_logo", key: "logo" }, renderLogo(b)),
+                react.createElement("div", { key: "who" }, [
+                  react.createElement("div", { className: "dshadb_detail_name", key: "name" }, meta.name),
+                  react.createElement("div", { className: "dshadb_detail_name_sub", key: "sub" }, statusLabel(level, t)),
+                ]),
+              ]),
+              // v0.5.9: 大号余额数字 + 当前余额标签（支持百分比、token数、真实货币）
+              react.createElement("div", { className: "dshadb_detail_bigwrap", key: "bigwrap" }, [
+                react.createElement("span", { className: "dshadb_detail_big", key: "bigv" },
+                  b.status === "ok" ? (
+                    String(b.currency || "").trim() === "%" ? formatMoney(typeof b.total === "number" ? b.total : 0, "%") :
+                    String(b.currency || "").trim() === "tokens" ? formatMoney(typeof b.total === "number" ? b.total : 0, "tokens") :
+                    formatMoney(b.total, cur)
+                  ) : "—"),
+                react.createElement("span", { className: "dshadb_detail_label", key: "lbl" }, t("detail.total")),
+              ]),
+              // v0.5.9: 三列指标卡网格 — 只显示有真实数据的指标（DeepSeek 没有充值/使用数据则跳过）
+              (() => {
+                if (b.status !== "ok") return null;
+                const metrics = [];
+                // 总充值：仅在 API 返回且与余额有差异时显示（DeepSeek 返回 topup==total → 不显示）
+                if (b.topup != null && Math.abs(b.topup - (b.total || 0)) > 1e-9) {
+                  metrics.push(react.createElement("div", { className: "dshadb_detail_metric", key: "topup" }, [
+                    react.createElement("div", { className: "dshadb_detail_metric_val", key: "v" }, formatMoney(b.topup, cur)),
+                    react.createElement("div", { className: "dshadb_detail_metric_label", key: "l" }, t("detail.topup")),
+                  ]));
+                }
+                // 总使用：仅在有实际消耗时显示
+                if (b.used != null && b.used > 0) {
+                  metrics.push(react.createElement("div", { className: "dshadb_detail_metric", key: "used" }, [
+                    react.createElement("div", { className: "dshadb_detail_metric_val", key: "v" }, formatMoney(b.used, cur)),
+                    react.createElement("div", { className: "dshadb_detail_metric_label", key: "l" }, t("detail.used")),
+                  ]));
+                }
+                // 类型：余额（真实货币）或 套餐（百分比），字体与三列指标卡对齐
+                if (b.status === "ok") {
+                  const typeLabel = (b.percent != null || String(b.currency || "").trim() === "%") ? "套餐" : "余额";
+                  metrics.push(react.createElement("div", { className: "dshadb_detail_metric", key: "type" }, [
+                    react.createElement("div", { className: "dshadb_detail_metric_val", key: "v" }, typeLabel),
+                    react.createElement("div", { className: "dshadb_detail_metric_label", key: "l" }, t("detail.note")),
+                  ]));
+                }
+                // 本会话消耗：始终显示
+                metrics.push(react.createElement("div", { className: "dshadb_detail_metric", key: "session" }, [
+                  react.createElement("div", { className: "dshadb_detail_metric_val", key: "v" }, costVal),
+                  react.createElement("div", { className: "dshadb_detail_metric_label", key: "l" }, t("detail.sessionCost")),
+                ]));
+                return metrics.length > 0 ? react.createElement("div", { className: "dshadb_detail_metrics", key: "metrics" }, metrics) : null;
+              })(),
+              // staleNote（暂存数据提示）
+              b.staleNote ? react.createElement("div", { className: "dshadb_detail_info", key: "stale" }, b.staleNote) : null,
+              b.status !== "ok" ? react.createElement("div", { className: "dshadb_detail_info", key: "err" }, b.error || "—") : null,
+              peakCard,
+              priceCard,
+            ]),
+          ]),
+        ]),
+      ]);
+    }
+    //#endregion
+
+    //#region 设置面板 (安全阈值 + 中转站)
+    function SettingsModal({ isOpen, onClose, onBack, t, config, initialSection }) {
+      const [section, setSection] = react.useState(initialSection || "basic");
+      const [relays, setRelays] = react.useState([]);
+      const [models, setModels] = react.useState([]);
+      const [safe, setSafe] = react.useState(50);
+      const [warn, setWarn] = react.useState(10);
+      const [currency, setCurrency] = react.useState("CNY");
+      const [refreshSec, setRefreshSec] = react.useState(5);
+      const [whaleOn, setWhaleOn] = react.useState(!!(config && config.whaleEnabled));
+      const [showBrands, setShowBrands] = react.useState(!!(config && config.showNoBalanceBrands));
+      // 官方直连 provider 名单 (第 1 层判定): 多行文本, 逗号/换行分隔
+      const [officialText, setOfficialText] = react.useState(
+        Array.isArray(config && config.officialProviders) ? config.officialProviders.join(", ") : "");
+      // 服务端按 baseURL 域名自动判定的结果 (只读, 供用户判断还需不需要手填)
+      const [providerKinds, setProviderKinds] = react.useState(
+        (config && config.providerKinds) || {});
+      // v1.1.0: 大肥鱼细项 (独立页签, 走 /api-dashboard/whale/settings, 与看板主配置分开)
+      const [wf, setWf] = react.useState({
+        scale: 1, peekRatio: 0.5, soundOn: true, soundSet: "duck",
+        volume: 0.5, bubbleOn: true, peakMode: "default", snapOn: true,
+      });
+      const [form, setForm] = react.useState({ name: "", baseUrl: "", apiKey: "", queryType: "auto" });
+      const [mform, setMform] = react.useState({ name: "", apiUrl: "", apiKey: "", queryType: "auto", totalPath: "", usedPath: "", currency: "" });
+      const [loading, setLoading] = react.useState(false);
+      const [saving, setSaving] = react.useState(false);
+      // v0.6.2: 初值也用预热的检查结果,并直接推导出提示文案(已是最新也可见"✓"),
+      // 避免打开瞬间空渲染再闪烁成提示; SSR/无 window 环境安全兜底.
+      const initInfo = typeof window !== "undefined" ? (window.__dshadbUpdateInfo || null) : null;
+      const [upd, setUpd] = react.useState({
+        phase: "idle", info: initInfo,
+        msg: initInfo && initInfo.ok && !initInfo.hasUpdate ? t("update.latest") : "",
+      });
+      const checkUpdate = react.useCallback((force) => {
+        setUpd(s => ({ ...s, phase: "checking" }));
+        fetch("/api-dashboard/update" + (force ? "?force=1" : ""), { headers: { accept: "application/json" } })
+          .then(r => r.json())
+          .then(d => {
+            // v0.6.2: 检查完必有反馈 —— 已是最新也提示, 有新版提示版本号, 失败给固定文案
+            const msg = d.ok ? (d.hasUpdate ? "" : t("update.latest")) : t("update.checkfail");
+            setUpd({ phase: "idle", info: d, msg });
+            if (typeof window !== "undefined") { window.__dshadbUpdateInfo = d; window.__dshadbUpdateCheckedAt = Date.now(); }
+          })
+          .catch(() => setUpd(s => ({ ...s, phase: "idle", msg: t("update.checkfail") })));
+      }, []);
+      react.useEffect(() => { if (isOpen) checkUpdate(false); }, [isOpen]);  // 打开面板自动检查
+      const installUpdate = () => {
+        if (!window.confirm(t("update.available") + " v" + (upd.info?.remote || "") + " ?")) return;
+        setUpd(s => ({ ...s, phase: "installing" }));
+        fetch("/api-dashboard/update/install", { method: "POST" })
+          .then(r => r.json().then(d => ({ code: r.status, body: d })))
+          .then(({ code, body }) => {
+            if (code === 200 && body.ok) {
+              setUpd({ phase: "done", info: { ok: true, current: body.installed, remote: body.installed, hasUpdate: false }, msg: t("update.done") });
+            } else {
+              setUpd(s => ({ ...s, phase: "fail", msg: body.error === "already up to date" ? t("update.latest") : t("update.fail") }));
+              checkUpdate(true);
+            }
+          })
+          .catch(() => setUpd(s => ({ ...s, phase: "fail", msg: t("update.fail") })));
+      };
+      // v0.6.1: 初始化仅在弹窗"从关到开"的瞬间执行一次。
+      // 旧写法把 config 放进依赖数组 —— 看板轮询每 ~5s 换一次快照引用,
+      // 导致打开期间 effect 反复重跑: 页签被拽回 basic、编辑中的表单被打回。
+      const onceRef = react.useRef(false);
+      react.useEffect(() => {
+        if (!isOpen) { onceRef.current = false; return; }
+        if (onceRef.current) return;   // 打开期间的重渲/轮询不再重置任何状态
+        onceRef.current = true;
+        if (initialSection) setSection(initialSection);
+        setLoading(true);
+        setSafe(config?.safeThreshold ?? 50);
+        setWarn(config?.warnThreshold ?? 10);
+        setCurrency(config?.currency ?? "CNY");
+        setRefreshSec(Math.round((config?.clientPollIntervalMs || 5000) / 1000) || 5);
+        setWhaleOn(!!(config && config.whaleEnabled));
+        let cancelled = false;
+        fetch("/api-dashboard/config", { cache: "no-store" }).then(r => r.json()).then(d => {
+          if (cancelled) return;
+          if (d.ok) {
+            setRelays(d.customRelays || []);
+            setModels(d.customModels || []);
+            if (d.refreshIntervalSec) setRefreshSec(d.refreshIntervalSec);
+            if (typeof d.whaleEnabled === "boolean") setWhaleOn(d.whaleEnabled);
+            if (Array.isArray(d.officialProviders)) setOfficialText(d.officialProviders.join(", "));
+            if (d.providerKinds && typeof d.providerKinds === "object") setProviderKinds(d.providerKinds);
+          }
+        }).finally(() => { if (!cancelled) setLoading(false); });
+        // 大肥鱼细项与主配置并行拉取, 失败保持默认值
+        fetch("/api-dashboard/whale/settings", { cache: "no-store" }).then(r => r.json()).then(d => {
+          if (cancelled || !d || !d.ok || !d.settings) return;
+          const s = d.settings;
+          setWf(prev => ({
+            scale: typeof s.scale === "number" ? s.scale : prev.scale,
+            peekRatio: typeof s.peekRatio === "number" ? s.peekRatio : prev.peekRatio,
+            soundOn: typeof s.soundOn === "boolean" ? s.soundOn : prev.soundOn,
+            soundSet: s.soundSet || prev.soundSet,
+            volume: typeof s.volume === "number" ? s.volume : prev.volume,
+            bubbleOn: typeof s.bubbleOn === "boolean" ? s.bubbleOn : prev.bubbleOn,
+            peakMode: s.peakMode || prev.peakMode,
+            snapOn: typeof s.snapOn === "boolean" ? s.snapOn : prev.snapOn,
+          }));
+        }).catch(() => {});
+        return () => { cancelled = true; };
+      }, [isOpen]);
+      if (!isOpen) return null;
+      const save = async () => {
+        setSaving(true);
+        try {
+          await fetch("/api-dashboard/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+            customRelays: relays, customModels: models,
+            safeThreshold: Number(safe), warnThreshold: Number(warn), currency,
+            refreshIntervalSec: Math.min(Math.max(Number(refreshSec) || 5, 5), 60),
+            whaleEnabled: !!whaleOn,
+            officialProviders: officialText,
+          }) });
+          // v1.1.0: 保存后立刻强拉一次, 让开关类设置(大肥鱼)即时生效, 不必等下一轮轮询
+          try { await store.forceRefresh(); } catch (e) { /* 忽略 */ }
+          // 双保险: 快照万一没及时更新, 也按用户刚保存的值直接挂载/卸载 (两处均幂等)
+          if (whaleOn) ensureWhaleWidget(); else removeWhaleWidget();
+          onClose();
+        } finally { setSaving(false); }
+      };
+      const addRelay = () => {
+        if (!form.name || !form.baseUrl) return;
+        setRelays([...relays, { id: Math.random().toString(36).slice(2), name: form.name, baseUrl: form.baseUrl.replace(/\/+$/, ''), apiKey: form.apiKey, queryType: form.queryType }]);
+        setForm({ name: "", baseUrl: "", apiKey: "", queryType: "auto" });
+      };
+      const removeRelay = (id) => setRelays(relays.filter(r => r.id !== id));
+      const addModel = () => {
+        if (!mform.name || !mform.apiUrl) return;
+        setModels([...models, { id: Math.random().toString(36).slice(2), name: mform.name, apiUrl: mform.apiUrl.trim(), apiKey: mform.apiKey, queryType: mform.queryType, totalPath: mform.totalPath.trim(), usedPath: mform.usedPath.trim(), currency: mform.currency.trim() || "CNY" }]);
+        setMform({ name: "", apiUrl: "", apiKey: "", queryType: "auto", totalPath: "", usedPath: "", currency: "" });
+      };
+      const removeModel = (id) => setModels(models.filter(m => m.id !== id));
+      // v1.1.0 修复: 开关类设置即时保存 —— 不能要求用户必须点「保存并生效」,
+      // 否则拨完开关直接返回/关闭就丢了, 表现为"开了又变回关"
+      const toggleWhale = async (next) => {
+        setWhaleOn(next);
+        if (next) ensureWhaleWidget(); else removeWhaleWidget();
+        try {
+          await fetch("/api-dashboard/config", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ whaleEnabled: !!next }),
+          });
+          await store.forceRefresh();
+        } catch (e) { /* 网络失败: 本地仍生效, 下次保存/刷新会对齐 */ }
+      };
+      // v1.1.3: 显示模型品牌开关即时生效 (同 toggleWhale 模式, 不依赖「保存并生效」按钮)
+      const toggleBrands = async (next) => {
+        setShowBrands(next);
+        try {
+          await fetch("/api-dashboard/config", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ showNoBalanceBrands: !!next }),
+          });
+          await store.forceRefresh();
+        } catch (e) { /* 网络失败: 本地仍生效, 下次保存/刷新会对齐 */ }
+      };
+      const qtLabel = (q) => t("qt." + (q || "auto"));
+
+      // v1.1.0: 大肥鱼细项即时生效 + 即时落盘 (滑块/开关都不依赖「保存并生效」按钮)
+      const patchWf = (patch) => {
+        setWf(prev => ({ ...prev, ...patch }));
+        patchWhaleWidget(patch);
+        try {
+          fetch("/api-dashboard/whale/settings", {
+            method: "PUT", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(patch),
+          }).catch(() => {});
+        } catch (e) { /* 忽略 */ }
+      };
+
+      const tab = (id, label) => react.createElement("button", { type: "button", className: "dshadb_tab" + (section === id ? " dshadb_tab_active" : ""), onClick: () => setSection(id), key: id }, label);
+      const tabsNode = react.createElement("div", { className: "dshadb_tabs", key: "tabs" }, [
+        tab("basic", t("settings.section.basic")),
+        tab("relays", t("settings.section.relays")),
+        tab("models", t("settings.section.models")),
+        tab("whale", t("settings.section.whale")),
+      ]);
+
+      // 基础设置: 阈值 / 币种 / 刷新间隔
+      const basicSection = react.createElement("div", { className: "dshadb_settings_section", key: "s_basic" }, [
+        react.createElement("div", { className: "dshadb_grid2", key: "thresh" }, [
+          react.createElement("div", { key: "safe" }, [
+            react.createElement("label", { className: "dshadb_label", key: "l1" }, t("settings.safe")),
+            react.createElement("input", { className: "dshadb_field", type: "number", value: safe, onChange: (e) => setSafe(e.target.value), key: "i1" }),
+            react.createElement("span", { style: { fontSize: "10px", color: "var(--dsw-alias-label-tertiary)" }, key: "h1" }, t("settings.safeHint")),
+          ]),
+          react.createElement("div", { key: "warn" }, [
+            react.createElement("label", { className: "dshadb_label", key: "l2" }, t("settings.warn")),
+            react.createElement("input", { className: "dshadb_field", type: "number", value: warn, onChange: (e) => setWarn(e.target.value), key: "i2" }),
+            react.createElement("span", { style: { fontSize: "10px", color: "var(--dsw-alias-label-tertiary)" }, key: "h2" }, t("settings.warnHint")),
+          ]),
+        ]),
+        react.createElement("div", { className: "dshadb_grid2", key: "misc" }, [
+          react.createElement("div", { key: "cur" }, [
+            react.createElement("label", { className: "dshadb_label", key: "cur_l" }, t("settings.currency")),
+            react.createElement("select", { className: "dshadb_field", value: currency, onChange: (e) => setCurrency(e.target.value), key: "cur_s" }, [
+              react.createElement("option", { value: "CNY", key: "c1" }, t("cmn")),
+              react.createElement("option", { value: "USD", key: "c2" }, t("usd")),
+            ]),
+          ]),
+          react.createElement("div", { key: "refresh" }, [
+            react.createElement("label", { className: "dshadb_label", key: "rf_l" }, t("settings.refresh")),
+            react.createElement("input", { className: "dshadb_field", type: "number", min: 5, max: 60, step: 5, value: refreshSec, onChange: (e) => setRefreshSec(e.target.value), key: "rf_i" }),
+            react.createElement("span", { style: { fontSize: "10px", color: "var(--dsw-alias-label-tertiary)" }, key: "rf_h" }, t("settings.refreshHint")),
+          ]),
+        ]),
+        // 无余额模型品牌开关
+        react.createElement("div", { className: "dshadb_settings_row", key: "brands", style: { margin: "2px 0 10px" } }, [
+          react.createElement("div", { className: "dshadb_settings_row_main", key: "bm" }, [
+            react.createElement("span", { className: "dshadb_settings_row_title", key: "bt" }, t("settings.showBrands")),
+            react.createElement("span", { className: "dshadb_settings_row_sub", key: "bs" }, t("settings.showBrandsHint")),
+          ]),
+          react.createElement(Switch, { checked: showBrands, onChange: toggleBrands, key: "bsw" }),
+        ]),
+        // 官方直连 provider 名单 (第 1 层判定, 覆盖自动判定)
+        react.createElement("div", { key: "official" }, [
+          react.createElement("label", { className: "dshadb_label", key: "of_l" }, t("settings.official")),
+          react.createElement("textarea", {
+            className: "dshadb_field dshadb_textarea", rows: 2, value: officialText,
+            placeholder: "deepseek, zhipu-official",
+            onChange: (e) => setOfficialText(e.target.value), key: "of_i",
+          }),
+          react.createElement("span", { style: { fontSize: "10px", color: "var(--dsw-alias-label-tertiary)", display: "block", lineHeight: 1.5 }, key: "of_h" }, t("settings.officialHint")),
+          react.createElement("div", { className: "dshadb_kinds", key: "of_k" }, [
+            react.createElement("span", { className: "dshadb_kinds_title", key: "kt" }, t("settings.officialAuto")),
+            Object.keys(providerKinds || {}).length === 0
+              ? react.createElement("span", { className: "dshadb_kinds_empty", key: "ke" }, t("settings.officialAutoEmpty"))
+              : react.createElement("div", { className: "dshadb_kinds_list", key: "kl" },
+                Object.keys(providerKinds).sort().map((name) => react.createElement("span", {
+                  className: "dshadb_kind" + (providerKinds[name] === "official" ? " dshadb_kind_official" : " dshadb_kind_relay"),
+                  key: name,
+                }, name + " · " + t(providerKinds[name] === "official" ? "settings.officialKindOfficial" : "settings.officialKindRelay")))),
+          ]),
+        ]),
+      ]);
+
+      // 中转站区块
+      const relaySection = react.createElement("div", { className: "dshadb_settings_section", key: "s_relays" }, [
+        react.createElement("div", { style: { marginTop: "2px", marginBottom: "8px" }, key: "relay_form" }, [
+          react.createElement("label", { className: "dshadb_label", key: "r1" }, "中转站名称"),
+          react.createElement("input", { className: "dshadb_field", value: form.name, placeholder: "我的中转站", onChange: (e) => setForm({ ...form, name: e.target.value }), key: "ri1" }),
+          react.createElement("label", { className: "dshadb_label", key: "r2" }, "Base URL"),
+          react.createElement("input", { className: "dshadb_field", value: form.baseUrl, placeholder: "https://api.xxx.com", onChange: (e) => setForm({ ...form, baseUrl: e.target.value }), key: "ri2" }),
+          react.createElement("label", { className: "dshadb_label", key: "r3" }, "API Key"),
+          react.createElement("input", { className: "dshadb_field", value: form.apiKey, placeholder: "sk-xxx", onChange: (e) => setForm({ ...form, apiKey: e.target.value }), key: "ri3" }),
+          react.createElement("button", { type: "button", className: "dshadb_add_btn", onClick: addRelay, key: "addbtn" }, react.createElement(IconPlus, null), t("add.relay")),
+        ]),
+        relays.length > 0 ? react.createElement("div", { key: "list" }, [
+          react.createElement("div", { style: { fontSize: "11px", fontWeight: "700", color: "#777b84", padding: "4px 2px", margin: "4px 0 6px", display: "flex", alignItems: "center", gap: "6px" }, key: "gsec" }, t("relay")),
+          relays.map(r => react.createElement("div", { className: "dshadb_card", key: r.id }, [
+            react.createElement("span", { className: "dshadb_card_logo", key: "logo" }, renderLogo({platform:"relay"})),
+            react.createElement("div", { className: "dshadb_card_info", key: "info" }, [
+              react.createElement("div", { className: "dshadb_card_name", key: "name" }, r.name),
+              react.createElement("div", { className: "dshadb_card_status", key: "status" }, r.baseUrl),
+            ]),
+            react.createElement("button", { type: "button", className: "dshadb_icon_btn", onClick: () => removeRelay(r.id), key: "del", title: "删除" }, react.createElement(IconTrash, null)),
+          ])),
+        ]) : react.createElement("div", { className: "dshadb_empty", style: { padding: "14px" }, key: "empty" }, t("relay") + " —"),
+      ]);
+
+      // 自定义模型区块
+      const modelSection = react.createElement("div", { className: "dshadb_settings_section", key: "s_models" }, [
+        react.createElement("div", { style: { fontSize: "11px", fontWeight: "700", color: "#777b84", margin: "4px 0 6px", display: "flex", alignItems: "center", gap: "6px" }, key: "hint" }, t("settings.modelHint")),
+        react.createElement("div", { style: { marginBottom: "8px" }, key: "model_form" }, [
+          react.createElement("label", { className: "dshadb_label", key: "m1" }, t("settings.modelName")),
+          react.createElement("input", { className: "dshadb_field", value: mform.name, placeholder: "我的模型余额", onChange: (e) => setMform({ ...mform, name: e.target.value }), key: "mi1" }),
+          react.createElement("label", { className: "dshadb_label", key: "m2" }, t("settings.apiUrl")),
+          react.createElement("input", { className: "dshadb_field", value: mform.apiUrl, placeholder: "https://api.example.com/balance", onChange: (e) => setMform({ ...mform, apiUrl: e.target.value }), key: "mi2" }),
+          react.createElement("div", { className: "dshadb_grid2", key: "mrow1" }, [
+            react.createElement("div", { key: "m3" }, [
+              react.createElement("label", { className: "dshadb_label", key: "ml3" }, "API Key"),
+              react.createElement("input", { className: "dshadb_field", value: mform.apiKey, placeholder: "可选", onChange: (e) => setMform({ ...mform, apiKey: e.target.value }), key: "mi3" }),
+            ]),
+            react.createElement("div", { key: "m4" }, [
+              react.createElement("label", { className: "dshadb_label", key: "ml4" }, t("settings.queryType")),
+              react.createElement("select", { className: "dshadb_field", value: mform.queryType, onChange: (e) => setMform({ ...mform, queryType: e.target.value }), key: "mi4" }, [
+                react.createElement("option", { value: "auto", key: "q0" }, t("qt.auto")),
+                react.createElement("option", { value: "openai", key: "q1" }, t("qt.openai")),
+                react.createElement("option", { value: "quota", key: "q2" }, t("qt.quota")),
+                react.createElement("option", { value: "deepseek", key: "q3" }, t("qt.deepseek")),
+                react.createElement("option", { value: "openai-billing", key: "q4" }, t("qt.openai-billing")),
+                react.createElement("option", { value: "custom", key: "q5" }, t("qt.custom")),
+              ]),
+            ]),
+          ]),
+          mform.queryType === "custom" ? react.createElement("div", { className: "dshadb_grid2", key: "mrow2" }, [
+            react.createElement("div", { key: "m5" }, [
+              react.createElement("label", { className: "dshadb_label", key: "ml5" }, t("settings.totalPath")),
+              react.createElement("input", { className: "dshadb_field", value: mform.totalPath, placeholder: "data.balance", onChange: (e) => setMform({ ...mform, totalPath: e.target.value }), key: "mi5" }),
+            ]),
+            react.createElement("div", { key: "m6" }, [
+              react.createElement("label", { className: "dshadb_label", key: "ml6" }, t("settings.usedPath")),
+              react.createElement("input", { className: "dshadb_field", value: mform.usedPath, placeholder: "可选", onChange: (e) => setMform({ ...mform, usedPath: e.target.value }), key: "mi6" }),
+            ]),
+          ]) : react.createElement("div", { className: "dshadb_grid2", key: "mrow2b" }, [
+            react.createElement("div", { key: "m5" }, [
+              react.createElement("label", { className: "dshadb_label", key: "ml5" }, t("settings.totalPath")),
+              react.createElement("input", { className: "dshadb_field", value: mform.totalPath, placeholder: "可选, 如 data.balance", onChange: (e) => setMform({ ...mform, totalPath: e.target.value }), key: "mi5" }),
+            ]),
+            react.createElement("div", { key: "m7" }, [
+              react.createElement("label", { className: "dshadb_label", key: "ml7" }, t("settings.currency")),
+              react.createElement("select", { className: "dshadb_field", value: mform.currency || "CNY", onChange: (e) => setMform({ ...mform, currency: e.target.value }), key: "mi7" }, [
+                react.createElement("option", { value: "CNY", key: "cc1" }, t("cmn")),
+                react.createElement("option", { value: "USD", key: "cc2" }, t("usd")),
+              ]),
+            ]),
+          ]),
+          react.createElement("button", { type: "button", className: "dshadb_add_btn", onClick: addModel, key: "addbtn2" }, react.createElement(IconPlus, null), t("add.custom")),
+        ]),
+        models.length > 0 ? react.createElement("div", { key: "mlist" }, [
+          react.createElement("div", { style: { fontSize: "11px", fontWeight: "700", color: "#777b84", padding: "4px 2px", margin: "4px 0 6px", display: "flex", alignItems: "center", gap: "6px" }, key: "gsec2" }, t("custom")),
+          models.map(m => react.createElement("div", { className: "dshadb_card", key: m.id }, [
+            react.createElement("span", { className: "dshadb_card_logo", key: "logo" }, renderLogo({platform:"relay"})),
+            react.createElement("div", { className: "dshadb_card_info", key: "info" }, [
+              react.createElement("div", { className: "dshadb_card_name", key: "name" }, m.name),
+              react.createElement("div", { className: "dshadb_card_status", key: "status" }, (m.apiUrl || "") + (m.queryType ? " · " + qtLabel(m.queryType) : "")),
+            ]),
+            react.createElement("button", { type: "button", className: "dshadb_icon_btn", onClick: () => removeModel(m.id), key: "del", title: "删除" }, react.createElement(IconTrash, null)),
+          ])),
+        ]) : null,
+      ]);
+
+      // v1.1.0: 大肥鱼页 —— 总开关 + 全部细项, 全部即改即存, 不依赖底部保存按钮
+      const wfRow = (key, label, control, sub) => react.createElement("div", { className: "dshadb_wf_row", key }, [
+        react.createElement("div", { key: "n", style: { minWidth: 0 } }, [
+          react.createElement("span", { className: "dshadb_wf_name", key: "t" }, label),
+          sub ? react.createElement("span", { className: "dshadb_wf_sub", key: "s" }, sub) : null,
+        ]),
+        control,
+      ]);
+      const wfSlider = (key, label, valText, min, max, step, value, onCommit) =>
+        react.createElement("div", { className: "dshadb_wf_row_col", key }, [
+          react.createElement("div", { className: "dshadb_wf_head", key: "h" }, [
+            react.createElement("span", { className: "dshadb_wf_name", key: "n" }, label),
+            react.createElement("span", { className: "dshadb_wf_val", key: "v" }, valText),
+          ]),
+          react.createElement("input", {
+            className: "dshadb_wf_range", type: "range", min, max, step, value, key: "r",
+            onChange: (e) => onCommit(Number(e.target.value)),
+          }),
+        ]);
+      const wfSeg = (key, label, options, value, onPick) =>
+        wfRow(key, label, react.createElement("div", { className: "dshadb_wf_seg", key: "seg" },
+          options.map(([v, lb]) => react.createElement("button", {
+            type: "button", key: String(v),
+            className: "dshadb_wf_segbtn" + (value === v ? " dshadb_wf_segbtn_on" : ""),
+            onClick: () => onPick(v),
+          }, lb))));
+
+      const whaleSection = react.createElement("div", { className: "dshadb_settings_section", key: "s_whale" }, [
+        // 总开关 (从基础设置迁移过来); 图标用鲸鱼本体缩略图, 不用 emoji
+        react.createElement("div", { className: "dshadb_settings_row", key: "en", style: { margin: "2px 0 10px" } }, [
+          react.createElement("img", {
+            className: "dshadb_wf_avatar", src: "/api-dashboard/whale/image.png",
+            alt: "", draggable: false, key: "av",
+          }),
+          react.createElement("div", { className: "dshadb_settings_row_main", key: "m" }, [
+            react.createElement("span", { className: "dshadb_settings_row_title", key: "t" }, t("whale.enable")),
+            react.createElement("span", { className: "dshadb_settings_row_sub", key: "s" }, t("whale.enableHint")),
+          ]),
+          react.createElement(Switch, { checked: whaleOn, onChange: toggleWhale, key: "sw" }),
+        ]),
+        // 细项: 未开启时置灰不可点
+        react.createElement("div", { className: whaleOn ? "" : "dshadb_wf_disabled", key: "detail" }, [
+          !whaleOn ? react.createElement("div", { className: "dshadb_wf_tip", key: "offtip", style: { marginBottom: "8px" } }, t("whale.offTip")) : null,
+          wfSlider("scale", t("whale.scale"), Math.round(wf.scale * 100) + "%", 0.6, 2.5, 0.05, wf.scale,
+            (v) => patchWf({ scale: v })),
+          wfSlider("peek", t("whale.peek"), Math.round(wf.peekRatio * 100) + "%", 0.15, 0.9, 0.05, wf.peekRatio,
+            (v) => patchWf({ peekRatio: v })),
+          wfSeg("snap", t("whale.snap"), [[true, t("whale.on")], [false, t("whale.off")]], wf.snapOn,
+            (v) => patchWf({ snapOn: v })),
+          react.createElement("div", { className: "dshadb_wf_tip", key: "snaphint", style: { margin: "-2px 0 8px" } }, t("whale.snapHint")),
+          wfSeg("bubble", t("whale.bubble"), [[true, t("whale.on")], [false, t("whale.off")]], wf.bubbleOn,
+            (v) => patchWf({ bubbleOn: v })),
+          wfSeg("peak", t("whale.peakMode"), [
+            ["default", t("whale.peak.default")], ["liangwen", t("whale.peak.liangwen")], ["qiangqiang", t("whale.peak.qiangqiang")],
+          ], wf.peakMode, (v) => patchWf({ peakMode: v })),
+          wfSeg("sound", t("whale.sound"), [[true, t("whale.on")], [false, t("whale.off")]], wf.soundOn,
+            (v) => patchWf({ soundOn: v })),
+          wfSeg("soundset", t("whale.soundSet"), [["duck", t("whale.duck")], ["fx1", t("whale.fx1")]], wf.soundSet,
+            (v) => patchWf({ soundSet: v })),
+          wfSlider("vol", t("whale.volume"), Math.round(wf.volume * 100) + "%", 0, 1, 0.05, wf.volume,
+            (v) => patchWf({ volume: v })),
+          react.createElement("div", { className: "dshadb_wf_tip", key: "tip" }, t("whale.tip")),
+        ]),
+      ]);
+
+      const output = react.createElement("div", { className: "dshadb_drawer", style: { maxHeight: "86vh" }, onClick: (e) => e.stopPropagation(), key: "drawer" }, [
+        react.createElement("div", { className: "dshadb_handle", key: "handle" }, react.createElement("div", { className: "dshadb_handle_bar" })),
+        react.createElement("div", { className: "dshadb_header", key: "header" }, [
+          react.createElement("div", { style: { display: "flex", alignItems: "center", gap: "10px", flex: "1", minWidth: 0 }, key: "leftwrap" }, [
+            onBack ? react.createElement("button", { type: "button", className: "dshadb_header_back", onClick: onBack, key: "back", title: t("back") }, react.createElement(IconBack, null)) : null,
+            react.createElement("div", { className: "dshadb_header_left", key: "left", style: { flex: "1" } }, [
+              react.createElement("div", { className: "dshadb_header_title", key: "title", style: { fontSize: "18px" } }, t("settings.title")),
+            ]),
+          ]),
+          react.createElement("button", { type: "button", className: "dshadb_header_settings", onClick: onClose, key: "close" }, react.createElement(IconClose, null)),
+        ]),
+        react.createElement("div", { className: "dshadb_body", key: "body" }, [
+          tabsNode,
+          section === "basic" ? basicSection : section === "relays" ? relaySection : section === "whale" ? whaleSection : modelSection,
+          // 大肥鱼页全部即改即存, 不需要保存按钮
+          section === "whale" ? null : react.createElement("button", { type: "button", className: "dshadb_add_btn", onClick: save, disabled: saving, key: "save", style: { width: "100%", borderStyle: "solid", background: "#17181c", color: "#fff", borderColor: "#17181c" } }, saving ? t("refreshing") : t("settings.save")),
+          // v0.6.0: 版本与更新区块
+          react.createElement("div", { key: "upd", style: { marginTop: "12px", paddingTop: "10px", borderTop: "1px solid #e7e8ec" } }, [
+            react.createElement("div", { style: { fontSize: "11px", fontWeight: "700", color: "#777b84", marginBottom: "8px" }, key: "upd_t" }, t("update.title")),
+            react.createElement("div", { key: "upd_row", style: { display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", color: "#17181c", fontWeight: "600" } }, [
+              react.createElement("span", { key: "upd_v" },
+                t("update.current") + ": v" + (upd.info?.current || "?")),
+              upd.info?.hasUpdate ? react.createElement("span", { key: "upd_badge", style: { color: "#35b56b", fontSize: "12px", fontWeight: "700" } }, "→ v" + upd.info.remote) : null,
+            ]),
+            react.createElement("div", { key: "upd_btns", style: { display: "flex", gap: "8px", marginTop: "8px" } }, [
+              react.createElement("button", { type: "button", className: "dshadb_add_btn", onClick: () => checkUpdate(true), disabled: upd.phase === "checking" || upd.phase === "installing", key: "upd_chk", style: { flex: 1, padding: "8px", fontSize: "12px" } },
+                upd.phase === "checking" ? t("update.checking") : t("update.check")),
+              upd.info?.hasUpdate ? react.createElement("button", { type: "button", className: "dshadb_save_btn", onClick: installUpdate, disabled: upd.phase === "installing", key: "upd_go", style: { flex: 1, padding: "8px", fontSize: "12px" } },
+                upd.phase === "installing" ? t("update.installing") : t("update.install") + " v" + upd.info.remote) : null,
+            ]),
+            upd.msg || upd.info?.hasUpdate ? react.createElement("div", { key: "upd_msg", style: { color: upd.phase === "fail" ? "#e05252" : "#777b84", fontSize: "11px", marginTop: "6px" } },
+              upd.msg || (upd.info?.hasUpdate ? t("update.available") + " v" + upd.info.remote : null)) : null,
+          ]),
+        ]),
+      ]);
+      return react.createElement("div", { className: "dshadb_scrim", onClick: (e) => { if (e.target === e.currentTarget) onClose(); } }, output);
+    }
+    //#endregion
+
+    //#region 大肥鱼互动挂件 (v1.1.0)
+    // 移植自 MeteorNOX/DeepSeek-Balance-Whale-Widget (MIT License, Copyright (c) 2026 MeteorNOX)
+    // 保留原版全部互动能力: 拖拽 / 四边吸附 / 左吸附镜像 / 按压Q弹 / 音效 / 随机台词 / 汉堡菜单;
+    // 去掉的只有余额与消耗显示 (那部分由输入框下方的看板负责)。
+    function Switch({ checked, onChange }) {
+      return react.createElement("button", {
+        type: "button", role: "switch", "aria-checked": !!checked,
+        className: "dshadb_switch" + (checked ? " dshadb_switch_on" : ""),
+        onClick: () => onChange(!checked), style: { marginLeft: "auto" },
+      }, react.createElement("span", { className: "dshadb_switch_knob" }));
+    }
+
+    var WHALE_DEFAULTS = {
+      scale: 1, soundOn: true, soundSet: "duck", volume: 0.5, bubbleOn: true,
+      peakMode: "default", snapOn: true, peekRatio: 0.5, left: null, top: null, side: "right",
+    };
+    var whaleCtxInfo = { isPeak: false };
+    function updateWhaleContext(info) {
+      whaleCtxInfo = { isPeak: !!(info && info.isPeak) };
+    }
+    function whalePeakWords(peakMode, isPeak) {
+      if (peakMode === "liangwen") return isPeak ? "梁文峰" : "梁文谷";
+      if (peakMode === "qiangqiang") return isPeak ? "!?峰峰?!" : "!?谷谷?!";
+      return isPeak ? "高峰时段" : "空闲时段";
+    }
+    function whalePickOne(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+    // 台词组: [权重, 生成函数] —— 生成 {gif:true} 或 [{t,s,c}] 三行 (s: A小字 / B大字 / P峰谷 / C灰注)
+    var WHALE_GROUPS = [
+      [40, function (st) {
+        var isPeak = !!whaleCtxInfo.isPeak;
+        return [
+          { t: "当前时间段为:", s: "A" },
+          { t: whalePeakWords(st.peakMode, isPeak), s: "P", c: isPeak ? "#e0433f" : "#2fa24c" },
+          { t: isPeak ? "09:00~12:00 / 14:00~18:00" : "其余时段 / 周末全天", s: "C" },
+        ];
+      }],
+      [10, function () { return { gif: true }; }],
+      [8, function () { return [null, { t: whalePickOne(["好模型... ↓", "好女孩...↓"]), s: "B" }, null]; }],
+      [8, function () {
+        return [null, { t: whalePickOne([
+          "不知道用户有什么用，先赶走吧~", "我...我...我也要挣钱吗？", "我去吃饭啦，测完叫我",
+          "压力一只蓝色大肥鱼？！", "DeepSleep...", "坏了...用户彻底怒了！",
+          "摸头摸头~ 再摸摸嘛", "尾巴被你拖到墙角啦", "偷看你打代码半天啦",
+        ]), s: "A", w: true }, null]; }],
+      [4, function () {
+        return [null, { t: whalePickOne([
+          "你目录里的dsh是什么...大烧货吗...?", "恭喜你实现token自由！token全跑了！", "真当我是便宜货啊...",
+        ]), s: "A", w: true }, null]; }],
+      [2, function () { return [{ t: "这个", s: "A" }, { t: "凶", s: "B" }, { t: "是什么意思呀...", s: "A" }]; }],
+      [1, function () { return [null, { t: "哦鲸鲸... ", s: "B" }, null]; }],
+    ];
+    function whalePickLines(st) {
+      var total = 0, i;
+      for (i = 0; i < WHALE_GROUPS.length; i++) total += WHALE_GROUPS[i][0];
+      var r = Math.random() * total;
+      for (i = 0; i < WHALE_GROUPS.length; i++) { r -= WHALE_GROUPS[i][0]; if (r < 0) return WHALE_GROUPS[i][1](st); }
+      return WHALE_GROUPS[0][1](st);
+    }
+
+    var whaleWidget = null;
+    var whaleRefs = 0;
+    // 最近一次已知的大肥鱼设置缓存 — 会话切换重建时直接用它初始化, 避免先从默认(右侧)闪一下再跳回用户位置
+    var lastWhaleSettings = null;
+    // 停止互动后多久缩回 / 气泡存活时长 (用户要求: 3 秒)
+    var WHALE_IDLE_MS = 3000;
+    // 左右「边缘带」占屏宽比例: 松手时中心落在带内才吸附缩回, 中间区域原地不动
+    var WHALE_EDGE_ZONE = 0.22;
+    // 贴边时横向要拉开多少 (占鲸鱼宽比例) 才脱离边轨、转为自由拖拽并展开
+    var WHALE_RAIL_BREAK = 0.42;
+    // 连点节流: 间隔小于此值只续命不换台词 (换词会重建气泡, 连点时会闪没)
+    var WHALE_LINE_MIN_MS = 420;
+    function ensureWhaleWidget() {
+      if (whaleWidget) return;
+      if (typeof document === "undefined") return;
+      var st = {};
+      var disposed = false;
+      for (var k in WHALE_DEFAULTS) st[k] = WHALE_DEFAULTS[k];
+      // 用最近一次已知设置初始化, 避免重建时先从默认(右侧)闪一下再跳回用户位置
+      if (lastWhaleSettings) {
+        for (var k2 in WHALE_DEFAULTS) {
+          if (lastWhaleSettings[k2] !== undefined && lastWhaleSettings[k2] !== null) st[k2] = lastWhaleSettings[k2];
+        }
+        if (lastWhaleSettings.left !== undefined) st.left = lastWhaleSettings.left;
+        if (lastWhaleSettings.top !== undefined) st.top = lastWhaleSettings.top;
+      }
+
+      // ---------- DOM ----------
+      var root = document.createElement("div");
+      root.className = "dshadb-whale";
+      var sprite = document.createElement("div");
+      sprite.className = "dshadb-whale-sprite";
+      var body = document.createElement("div");
+      body.className = "dshadb-whale-body";
+      var img = document.createElement("img");
+      img.className = "dshadb-whale-img";
+      img.src = "/api-dashboard/whale/image.png";
+      img.alt = "大肥鱼"; img.draggable = false;
+      body.appendChild(img);
+      sprite.appendChild(body);
+      var bubble = document.createElement("div");
+      bubble.className = "dshadb-whale-bubble";
+      var bText = document.createElement("div");
+      bText.className = "dshadb-whale-btext";
+      var gif = document.createElement("img");
+      gif.className = "dshadb-whale-gif";
+      gif.src = "/api-dashboard/whale/rua.gif";
+      gif.alt = ""; gif.draggable = false;
+      var gifBroken = false;
+      gif.addEventListener("error", function () { gifBroken = true; });
+      bubble.appendChild(gif);
+      bubble.appendChild(bText);
+      root.appendChild(bubble);
+      root.appendChild(sprite);
+      // 初始化时禁用 CSS transition, 避免 left:0 → 实际位置 的 300ms 滑动动画
+      // (CSS 里写死了 left:0, JS 第一次设 left 时会触发 transition)
+      root.style.transition = "none";
+      document.body.appendChild(root);
+
+      // ---------- 音效 ----------
+      var audio = { press: null, release: null };
+      function reloadAudio() {
+        audio.press = new Audio("/api-dashboard/whale/sound/press.mp3?set=" + st.soundSet);
+        audio.release = new Audio("/api-dashboard/whale/sound/release.mp3?set=" + st.soundSet);
+        audio.press.volume = st.volume; audio.release.volume = st.volume;
+      }
+      reloadAudio();
+      function playSound(which) {
+        if (!st.soundOn || st.volume <= 0) return;
+        var a = audio[which]; if (!a) return;
+        try { a.volume = st.volume; a.currentTime = 0; var p = a.play(); if (p && p.catch) p.catch(function () {}); } catch (e) {}
+      }
+
+      // ---------- 状态 ----------
+      var full = false;          // 是否整只露出
+      var bubbleOpen = false;
+      var hideTimer = null, bubbleTimer = null, saveTimer = null;
+      var drag = null;
+      var lastLineAt = 0;        // 上次换台词的时刻 (连点节流用)
+
+      function sizePx() { return root.getBoundingClientRect().width || 120; }
+      function vw() { return window.innerWidth || document.documentElement.clientWidth; }
+      function vh() { return window.innerHeight || document.documentElement.clientHeight; }
+
+      function applyScale() { root.style.setProperty("--dshw-scale", String(st.scale)); }
+
+      /** 把 state 的位置写进 left/top; 探头位移交给 transform, 所以这里一律夹在屏幕内 */
+      function applyPos() {
+        var s = sizePx();
+        if (st.left === null || st.top === null) {
+          st.left = Math.max(0, vw() - s);
+          st.top = Math.round(vh() * 0.62);
+        }
+        st.left = Math.min(Math.max(st.left, 0), Math.max(0, vw() - s));
+        st.top = Math.min(Math.max(st.top, 0), Math.max(0, vh() - s));
+        root.style.left = st.left + "px";
+        root.style.top = st.top + "px";
+      }
+
+      /** 探头位移: 只有吸在左右两侧时才把身子推出屏幕; 中间自由摆放时整只显示 */
+      function applyPeek() {
+        if (full || !st.side) { root.style.transform = "translate(0px, 0px)"; return; }
+        var s = sizePx();
+        var out = Math.round(s * (1 - st.peekRatio));
+        var dx = st.side === "left" ? -out : st.side === "right" ? out : 0;
+        root.style.transform = "translate(" + dx + "px, 0px)";
+      }
+      function applyFlip() {
+        if (st.side === "left") root.classList.add("dshadb-whale-flip");
+        else root.classList.remove("dshadb-whale-flip");
+      }
+      function applyAll() { applyScale(); applyPos(); applyFlip(); applyPeek(); }
+
+      // ---------- 持久化 ----------
+      function saveSoon() {
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = setTimeout(function () {
+          saveTimer = null;
+          lastWhaleSettings = {
+            scale: st.scale, soundOn: st.soundOn, soundSet: st.soundSet, volume: st.volume,
+            bubbleOn: st.bubbleOn, peakMode: st.peakMode, snapOn: st.snapOn,
+            peekRatio: st.peekRatio, left: st.left, top: st.top, side: st.side,
+          };
+          try {
+            fetch("/api-dashboard/whale/settings", {
+              method: "PUT", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(lastWhaleSettings),
+            }).catch(function () {});
+          } catch (e) {}
+        }, 400);
+      }
+
+      // ---------- 气泡 ----------
+      var STYLE_CLASS = { A: "dshadb-whale-l-a", B: "dshadb-whale-l-b", P: "dshadb-whale-l-p", C: "dshadb-whale-l-c" };
+      function renderLines(lines) {
+        bText.textContent = "";
+        if (lines && lines.gif && !gifBroken) { gif.style.display = "block"; bText.style.display = "none"; return; }
+        gif.style.display = "none"; bText.style.display = "block";
+        var arr = (lines && lines.gif) ? [null, { t: "动图跑掉了...", s: "A", w: true }, null] : lines;
+        for (var i = 0; i < arr.length; i++) {
+          var ln = arr[i]; if (!ln) continue;
+          var el = document.createElement("div");
+          el.className = STYLE_CLASS[ln.s] || STYLE_CLASS.A;
+          if (ln.w) el.className += " dshadb-whale-wrap";
+          if (ln.c) el.style.color = ln.c;
+          el.textContent = ln.t;
+          bText.appendChild(el);
+        }
+      }
+      /**
+       * 鲸鱼的「目标」位置 —— 不用 getBoundingClientRect。
+       * 探头/展开是 0.45s transform 过渡, 点击瞬间读实时 rect 拿到的是过渡中的中间态,
+       * 气泡会按旧位置算避让, 连点时越算越偏, 最后整个飘到屏幕外 = 看着"不显示"。
+       */
+      function targetRect() {
+        var s = sizePx();
+        var dx = 0;
+        if (!full && st.side) {
+          var out = Math.round(s * (1 - st.peekRatio));
+          dx = st.side === "left" ? -out : st.side === "right" ? out : 0;
+        }
+        return { left: st.left + dx, top: st.top, size: s };
+      }
+      /**
+       * 把气泡摆到不出屏的位置:
+       * 1) 水平方向整体平移, 保证左右都留 8px 边距 (贴边时不会有一半在屏幕外)
+       * 2) 尾巴单独定位, 仍然指向鲸鱼中心
+       * 3) 上方空间不够时翻到鲸鱼下方
+       */
+      function placeBubble() {
+        var margin = 8;
+        bubble.classList.remove("dshadb-whale-bubble-below");
+        bubble.style.setProperty("--dshw-bdx", "0px");
+        bubble.style.setProperty("--dshw-btx", "50%");
+        var r = targetRect();
+        var bw = bubble.offsetWidth, bh = bubble.offsetHeight;
+        if (!bw) return;
+        var cx = r.left + r.size / 2;
+        var want = cx - bw / 2;
+        var shift = 0;
+        if (want < margin) shift = margin - want;
+        else if (want + bw > vw() - margin) shift = (vw() - margin) - (want + bw);
+        bubble.style.setProperty("--dshw-bdx", Math.round(shift) + "px");
+        var tail = bw / 2 - shift;
+        tail = Math.min(Math.max(tail, 18), bw - 18);
+        bubble.style.setProperty("--dshw-btx", Math.round(tail) + "px");
+        if (r.top - bh - 6 < margin && (vh() - r.top - r.size - bh - 6 >= margin)) bubble.classList.add("dshadb-whale-bubble-below");
+      }
+      function openBubble() {
+        if (!st.bubbleOn) return;
+        renderLines(whalePickLines(st));
+        bubble.classList.remove("dshadb-whale-bubble-keep");
+        bubble.classList.add("dshadb-whale-bubble-on");
+        bubbleOpen = true;
+        placeBubble();
+        if (bubbleTimer) clearTimeout(bubbleTimer);
+        bubbleTimer = setTimeout(closeBubble, WHALE_IDLE_MS);
+      }
+      /**
+       * 连点续命: 保持当前台词不变, 只把气泡留住并重新计时。
+       * 连点时不重建内容 —— 重建会让气泡宽度反复跳变、重新测量, 视觉上就是闪一下没了。
+       */
+      function keepBubble() {
+        if (!st.bubbleOn) return;
+        if (!bubbleOpen) { openBubble(); return; }
+        bubble.classList.add("dshadb-whale-bubble-on");
+        bubble.classList.add("dshadb-whale-bubble-keep");
+        placeBubble();
+        if (bubbleTimer) clearTimeout(bubbleTimer);
+        bubbleTimer = setTimeout(closeBubble, WHALE_IDLE_MS);
+      }
+      function closeBubble() {
+        bubble.classList.remove("dshadb-whale-bubble-on");
+        bubble.classList.remove("dshadb-whale-bubble-keep");
+        bubbleOpen = false;
+        if (bubbleTimer) { clearTimeout(bubbleTimer); bubbleTimer = null; }
+      }
+
+      // ---------- 探头 / 全身 ----------
+      function toFull() {
+        full = true; applyPeek();
+        lastLineAt = Date.now();
+        openBubble();
+        armHide();
+      }
+      function toPeek() {
+        full = false; applyPeek();
+        closeBubble();
+        if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+      }
+      /** 停手 WHALE_IDLE_MS 后自动缩回; 每次互动都重新计时 */
+      function armHide() {
+        if (hideTimer) clearTimeout(hideTimer);
+        hideTimer = setTimeout(function () { hideTimer = null; if (full) toPeek(); }, WHALE_IDLE_MS);
+      }
+
+      // ---------- 吸附 ----------
+      /**
+       * 松手后的落位: 只有拖到左右两侧的「边缘带」里才吸附 + 探头,
+       * 停在屏幕中间就整只留在原地 (side="" → applyPeek 不做位移)。
+       */
+      function settle() {
+        var s = sizePx();
+        var W = vw(), H = vh();
+        if (!st.snapOn) {
+          st.side = "";
+          applyPos(); applyFlip(); applyPeek(); saveSoon();
+          return;
+        }
+        var cx = st.left + s / 2;
+        var zone = Math.min(Math.max(s * 0.75, W * WHALE_EDGE_ZONE), Math.max(1, W / 2 - 1));   // 边缘带宽度, 不超过半屏
+        if (cx <= zone) { st.side = "left"; st.left = 0; }
+        else if (cx >= W - zone) { st.side = "right"; st.left = W - s; }
+        else { st.side = ""; }                                 // 屏幕中间: 不缩
+        // 纵向永远不缩, 只是别跑出屏幕
+        st.top = Math.min(Math.max(st.top, 0), Math.max(0, H - s));
+        applyPos(); applyFlip(); applyPeek(); saveSoon();
+      }
+
+      // ---------- 拖拽 ----------
+      function onDown(e) {
+        if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+        drag = {
+          id: e.pointerId, sx: e.clientX, sy: e.clientY,
+          ox: st.left, oy: st.top, moved: false,
+          // 起手时贴着哪一侧: 贴边状态下的纵向滑动算「沿边轨道滑」, 不展开
+          rail: full ? "" : st.side, freed: false,
+        };
+        root.classList.add("dshadb-whale-dragging");
+        root.classList.add("dshadb-whale-press");
+        try { body.setPointerCapture(e.pointerId); } catch (err) {}
+        playSound("press");
+      }
+      function onMove(e) {
+        if (!drag || e.pointerId !== drag.id) return;
+        var dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+        if (!drag.moved && dx * dx + dy * dy < 9) return;
+        drag.moved = true;
+        // 沿边纵向滑动: 横向没拉开就保持探头姿态, 只上下移动
+        if (drag.rail && !drag.freed) {
+          var breakOut = Math.abs(dx) > Math.max(28, sizePx() * WHALE_RAIL_BREAK);
+          if (!breakOut) {
+            st.top = drag.oy + dy;
+            applyPos();          // 夹在屏幕内并写回 top
+            applyPeek();         // 维持探头位移, 不展开
+            e.preventDefault();
+            return;
+          }
+          drag.freed = true;     // 横向拉开了 → 转为自由拖拽
+        }
+        if (!full) {
+          full = true;                    // 拖动时整只跟手, 不再半隐
+          root.style.transform = "translate(0px, 0px)";
+          closeBubble();
+        }
+        st.left = drag.ox + dx; st.top = drag.oy + dy;
+        root.style.left = st.left + "px";
+        root.style.top = st.top + "px";
+        e.preventDefault();
+      }
+      function onUp(e) {
+        if (!drag || e.pointerId !== drag.id) return;
+        var moved = drag.moved;
+        var railed = !!drag.rail && !drag.freed;
+        drag = null;
+        root.classList.remove("dshadb-whale-dragging");
+        root.classList.remove("dshadb-whale-press");
+        try { body.releasePointerCapture(e.pointerId); } catch (err) {}
+        if (moved) {
+          // 沿边滑完仍是探头状态: 只记住新高度, 不吸附动画也不展开
+          if (railed) { saveSoon(); return; }
+          settle(); armHide(); return;
+        }
+        // 没移动 = 点击: 弹全身 / 换台词, 但绝不立刻收回 —— 一律等停手 3 秒
+        playSound("release");
+        if (!full) { toFull(); return; }
+        // 连点节流: 间隔太短只续命不换词, 避免气泡反复重建导致"看不到"
+        var now = Date.now();
+        if (now - lastLineAt < WHALE_LINE_MIN_MS) { keepBubble(); armHide(); return; }
+        lastLineAt = now;
+        openBubble();
+        armHide();
+      }
+      body.addEventListener("pointerdown", onDown);
+      body.addEventListener("pointermove", onMove);
+      body.addEventListener("pointerup", onUp);
+      body.addEventListener("pointercancel", onUp);
+
+      // ---------- 外部设置接口 ----------
+      // 设置面板「大肥鱼」页改动后调用: 立刻应用到当前挂件并落盘
+      function applyPatch(patch) {
+        var soundTouched = false;
+        for (var key in patch) {
+          if (!Object.prototype.hasOwnProperty.call(patch, key)) continue;
+          if (patch[key] === undefined) continue;
+          st[key] = patch[key];
+          if (key === "soundSet") soundTouched = true;
+          if (key === "volume" || key === "soundOn") soundTouched = true;
+        }
+        if (soundTouched) {
+          if (patch.soundSet !== undefined) reloadAudio();
+          if (audio.press) audio.press.volume = st.volume;
+          if (audio.release) audio.release.volume = st.volume;
+        }
+        if (patch.bubbleOn === false) closeBubble();
+        if (patch.snapOn !== undefined) {
+          if (st.snapOn) { settle(); return; }
+          st.side = "";
+        }
+        applyAll();
+        if (bubbleOpen) placeBubble();
+        saveSoon();
+      }
+
+      // ---------- 全局监听 ----------
+      var onDocDown = function (e) {
+        if (root.contains(e.target)) return;
+        if (full && !drag) toPeek();
+      };
+      document.addEventListener("pointerdown", onDocDown);
+      var lastVw = vw();
+      var onResize = function () {
+        var nowVw = vw();
+        applyPos();
+        // 键盘弹出/收起只改视口高度, 不应触发水平吸附(否则鲸鱼会被吸到边上去);
+        // 只有视口宽度真正变化(横竖屏/分屏)才重新 settle
+        if (st.snapOn && st.side && Math.abs(nowVw - lastVw) > 4) settle(); else applyPeek();
+        lastVw = nowVw;
+        if (bubbleOpen) placeBubble();
+      };
+      window.addEventListener("resize", onResize);
+      var onVis = function () {
+        if (document.hidden) { if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; } }
+        else if (full) armHide();
+      };
+      document.addEventListener("visibilitychange", onVis);
+
+      whaleWidget = {
+        applyPatch: applyPatch,
+        dispose: function () {
+          disposed = true;
+          body.removeEventListener("pointerdown", onDown);
+          body.removeEventListener("pointermove", onMove);
+          body.removeEventListener("pointerup", onUp);
+          body.removeEventListener("pointercancel", onUp);
+          document.removeEventListener("pointerdown", onDocDown);
+          document.removeEventListener("visibilitychange", onVis);
+          window.removeEventListener("resize", onResize);
+          if (hideTimer) clearTimeout(hideTimer);
+          if (bubbleTimer) clearTimeout(bubbleTimer);
+          if (saveTimer) clearTimeout(saveTimer);
+          if (root.parentNode) root.parentNode.removeChild(root);
+          whaleWidget = null;
+        },
+      };
+
+      // ---------- 拉取已存设置 ----------
+      applyAll();
+      fetch("/api-dashboard/whale/settings", { cache: "no-store" })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (disposed) return;
+          if (!d || !d.ok || !d.settings) return;
+          // 本会话内已拖过/存过位置(缓存非空)时, 不再用服务端旧值覆盖当前落点,
+          // 否则重建(新对话)会把用户刚放好的中间/左边又弹回服务端的旧右侧
+          if (!lastWhaleSettings) {
+            for (var key in WHALE_DEFAULTS) {
+              if (d.settings[key] !== undefined && d.settings[key] !== null) st[key] = d.settings[key];
+            }
+            if (d.settings.left !== undefined) st.left = d.settings.left;
+            if (d.settings.top !== undefined) st.top = d.settings.top;
+          }
+          lastWhaleSettings = {
+            scale: st.scale, soundOn: st.soundOn, soundSet: st.soundSet, volume: st.volume,
+            bubbleOn: st.bubbleOn, peakMode: st.peakMode, snapOn: st.snapOn,
+            peekRatio: st.peekRatio, left: st.left, top: st.top, side: st.side,
+          };
+          applyAll();
+          root.style.transition = "";  // 初始化完成, 恢复过渡动画(拖拽/吸附时平滑)
+        })
+        .catch(function () {
+          root.style.transition = "";
+        });
+    }
+    function removeWhaleWidget() { if (whaleWidget) whaleWidget.dispose(); }
+    /** 引用计数: 多个 dock 实例并存时, 只有最后一个释放才真正卸载挂件 */
+    function acquireWhaleWidget() { ensureWhaleWidget(); whaleRefs++; }
+    function releaseWhaleWidget() { whaleRefs = Math.max(0, whaleRefs - 1); if (whaleRefs === 0) removeWhaleWidget(); }
+    /** 设置面板改动后推给活着的挂件 (未挂载时静默忽略, 值已由端点落盘) */
+    function patchWhaleWidget(patch) {
+      if (whaleWidget && whaleWidget.applyPatch) whaleWidget.applyPatch(patch);
+    }
+    //#endregion
+
+    //#region plugin
+    const inject = ["slots", "locale", "modelDirectories"];
+    function apply(ctx) {
+      ctx.effect(() => ctx.locale.register(NS, { zh, en }), "dsh-api-dashboard: dictionaries");
+      const getSelected = () => { try { return localStorage.getItem("dsh-api-dashboard:selected") || ""; } catch { return ""; } };
+      const setSelected = (id) => { try { localStorage.setItem("dsh-api-dashboard:selected", id); } catch {} };
+
+      ctx.slots.inject("conversation.composer.dock", () => {
+        const dispose = ctx.slots.register({
+          name: "conversation.composer.dock",
+          id: "dsh-api-dashboard",
+          order: 5,
+          locale: NS,
+          // v0.5.15: 注入模型目录 store — 选中模型瞬间即同步平台, 消除等投影的窗口延迟
+          inject: (sessionId) => {
+            const models = ctx.modelDirectories;
+            if (models && sessionId !== void 0) {
+              try {
+                const dir = models.directoryFor(sessionId);
+                if (dir && dir.store) return { modelStore: dir.store };
+              } catch (e) { /* 忽略 */ }
+            }
+            return { modelStore: void 0 };
+          }
+        }, function DashboardSlot(props) {
+          const t = props.t;
+          const useProjection = props.useProjection;
+          const modelStore = props.modelStore;
+          // 本会话消耗 (参考 dsh-balance: 无条件读取投影, 放在组件顶部保证 hooks 顺序)
+          const cost = useProjection ? useProjection("queryBalanceCost") : undefined;
+          const [view, setView] = react.useState("bar");
+          const [isSettingsOpen, setSettingsOpen] = react.useState(false);
+          const [settingsSection, setSettingsSection] = react.useState("basic");
+          const [detailId, setDetailId] = react.useState("");
+          const [selectedId, setSelectedId] = react.useState(getSelected());
+          const dashData = react.useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+          const config = dashData.config;
+
+          // v1.1.0: 大肥鱼互动挂件 — 设置里开启「收养大肥鱼」后挂载/卸载 (纯互动, 不含余额)
+          const whaleOn = !!(config && config.whaleEnabled);
+          react.useEffect(() => {
+            if (!whaleOn) { releaseWhaleWidget(); return; }
+            acquireWhaleWidget();
+            return releaseWhaleWidget;
+          }, [whaleOn]);
+          // 峰谷时段变化同步给挂件 (台词里的「当前时间段」用它, 不涉及任何金额)
+          react.useEffect(() => {
+            updateWhaleContext({ isPeak: !!(config && config.isPeak) });
+          }, [config && config.isPeak]);
+
+          const handleSelect = (id) => { setSelected(id); setSelectedId(id); };
+
+          // v0.5.15: 按模型名切到对应平台的核心逻辑 (两条信号共用)
+          const applyModelToPlatform = react.useCallback((m) => {
+            if (!m || typeof m !== "string") return;
+            let pid = modelToPlatform(m);
+            if (!pid) {
+              try {
+                const low = m.toLowerCase();
+                const hit = (dashData.balances || []).find((b) =>
+                  (b.category === "中转站" || b.category === "自定义") && b.platform && low.includes(String(b.platform).toLowerCase()));
+                pid = hit ? hit.platform : "";
+              } catch (e) { pid = ""; }
+            }
+            if (pid && pid !== selectedId) handleSelect(pid);
+          }, [selectedId, dashData.balances]);
+
+          // v0.5.15: 即时信号 — 订阅模型目录 store, 选中模型瞬间就切平台 (不再等投影/请求)
+          const modelDirSub = modelStore && typeof modelStore.subscribe === "function" ? modelStore.subscribe : () => () => {};
+          const modelDirSnap = modelStore && typeof modelStore.getSnapshot === "function" ? modelStore.getSnapshot : () => void 0;
+          const modelDirState = react.useSyncExternalStore(modelDirSub, modelDirSnap, modelDirSnap);
+          const modelDirModel = modelDirState?.current?.model;
+          const modelDirProvider = modelDirState?.current?.provider;
+          // 当前 provider: 模型目录优先(切换瞬间就更新), 投影兜底
+          const curProvider = modelDirProvider || (cost && cost.currentProvider) || "";
+          const [didModelDir, setDidModelDir] = react.useState(false);
+          react.useEffect(() => {
+            const m = modelDirModel;
+            if (!m) return;
+            if (!didModelDir) { setDidModelDir(true); return; }
+            applyModelToPlatform(m);
+          }, [modelDirModel, didModelDir]);
+
+          // v0.5.3: 自动联动 — 会话当前模型变化时, 输入框下方平台跟着切换
+          // 仅在模型实际变化时触发一次, 用户手动选择的平台不会被后续渲染覆盖
+          const [lastLinkedModel, setLastLinkedModel] = react.useState(null);
+          react.useEffect(() => {
+            const m = cost && cost.currentModel;
+            if (!m || typeof m !== "string" || m === lastLinkedModel) return;
+            setLastLinkedModel(m);
+            applyModelToPlatform(m);
+          }, [cost && cost.currentModel]);
+          const currentModel = cost && cost.currentModel;
+          const openList = () => setView("list");
+          const openDetail = (id) => { setDetailId(id); setView("detail"); };
+          const closeDetail = () => setView("list");
+          const closeList = () => setView("bar");
+          const openSettings = (section) => { setSettingsSection(section || "basic"); setView("bar"); setSettingsOpen(true); };
+
+          // v0.6.0: 启动自动检查更新 (一次静默请求, 服务端 5 分钟缓存; 结果供设置弹窗直接显示)
+          react.useEffect(() => {
+            const cachedAt = window.__dshadbUpdateCheckedAt || 0;
+            if (Date.now() - cachedAt < 5 * 60 * 1000) return; // 会话内查过就不重复
+            fetch("/api-dashboard/update", { headers: { accept: "application/json" } })
+              .then((r) => r.json())
+              .then((d) => { if (d && d.ok) { window.__dshadbUpdateInfo = d; window.__dshadbUpdateCheckedAt = Date.now(); } })
+              .catch(() => { /* 网络异常静默, 打开设置时可见固定错误文案 */ });
+          }, []);
+
+          // 本会话消耗节点 (无条件渲染, waiting=true 显示 ~— 等待数据, 否则精确到6位)
+          let costText = "~—"
+          let costTitle = t("detail.sessionCost") + " — 等待数据"
+          if (cost !== undefined && typeof cost.cost === 'number' && cost.waiting !== true) {
+            const amount = cost.cost
+            const cur = cost.currency || "CNY"
+            const sym = cur === "CNY" ? "¥" : cur === "USD" ? "$" : cur + " "
+            const fixed = amount >= 1 ? 2 : amount >= 0.01 ? 3 : amount >= 0.001 ? 4 : amount >= 0.0001 ? 5 : 6
+            costText = "~" + sym + amount.toFixed(fixed)
+            costTitle = "本会话消耗: " + sym + amount.toFixed(6) + (cost.models && cost.models.length ? " | 模型: " + cost.models.join(", ") : "")
+          } else if (cost !== undefined && cost.waiting === true) {
+            costText = "~—"
+            costTitle = "本会话消耗 — 等待数据, 发消息后自动更新"
+          }
+          const costDisp = { text: costText, title: costTitle };
+
+          return react.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: "2px", maxWidth: "100%" } }, [
+            // v0.5.7: 本会话消耗并入同一个胶囊, 不再裸露在外
+            react.createElement(BarReadout, { t, onOpen: openList, onOpenSettings: () => openSettings("basic"), selectedId, onSelect: handleSelect, config, cost: costDisp, provider: curProvider, key: "bar" }),
+            view === "list" ? react.createElement(DashboardDrawer, { isOpen: true, onClose: closeList, t, selectedId, onSelect: handleSelect, onOpenDetail: (id) => { setDetailId(id); setView("detail"); }, onAddRelay: () => openSettings("relays"), onAddCustom: () => openSettings("models"), onOpenSettings: () => openSettings("basic"), config, currentModel, key: "drawer" }) : null,
+            view === "detail" ? react.createElement(PlatformDetail, { isOpen: true, onClose: closeDetail, platformId: detailId, t, useProjection, config, key: "detail" }) : null,
+            isSettingsOpen ? react.createElement(SettingsModal, { isOpen: true, onClose: () => setSettingsOpen(false), onBack: () => { setSettingsOpen(false); setView("list"); }, t, config, initialSection: settingsSection, key: "settings" }) : null,
+          ]);
+        });
+        return () => { dispose(); };
+      });
+
+      ctx.effect(() => {
+        const onVisibility = () => { if (!document.hidden) refresh(true).then(schedule, schedule); };
+        document.addEventListener("visibilitychange", onVisibility);
+        return () => document.removeEventListener("visibilitychange", onVisibility);
+      }, "dsh-api-dashboard: visibility resume");
+    }
+    //#endregion
+
+    exports.apply = apply;
+    exports.inject = inject;
+    return module.exports;
+  }
+});
