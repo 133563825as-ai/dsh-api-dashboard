@@ -18,6 +18,9 @@ a('qwen3.7-flash 0.03/0.13', pUsd('qwen3.7-flash').cacheMiss===0.03 && pUsd('qwe
 // GLM-5
 a('glm-5.2 1.4/4.4', pUsd('glm-5.2').cacheMiss===1.4 && pUsd('glm-5.2').output===4.4)
 a('glm-5.3-flash 0.15/0.5', pUsd('glm-5.3-flash').cacheMiss===0.15 && pUsd('glm-5.3-flash').output===0.5)
+// v1.2.3 回归: GLM 系缓存读必须 < 输入价 (20% 口径), 修复"无缓存折扣"误标导致长会话消耗虚高 5 倍
+a('glm-5.3-flash cacheHit=0.03 (20%)', pUsd('glm-5.3-flash').cacheHit===0.03)
+a('GLM 系缓存读均低于输入价', ['glm-5.2','glm-5-turbo','glm-5.3-flash'].every(m => pUsd(m).cacheHit < pUsd(m).cacheMiss))
 // Kimi K3 cache 修正
 a('kimi-k3 cacheHit=0.3', pUsd('kimi-k3').cacheHit===0.3)
 // 币种统一 (CNY 官方价 ÷7 → USD 基准)

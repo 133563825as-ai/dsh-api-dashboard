@@ -523,7 +523,7 @@ export const MODEL_PRICES = {
   // 智谱 GLM-5
   'glm-5.2':              { cacheHit: 0.26,  cacheMiss: 1.4,   output: 4.4 },
   'glm-5-turbo':          { cacheHit: 0.24,  cacheMiss: 1.2,   output: 4.0 },
-  'glm-5.3-flash':        { cacheHit: 0.15,  cacheMiss: 0.15,  output: 0.5 },   // 无缓存折扣
+  'glm-5.3-flash':        { cacheHit: 0.03,  cacheMiss: 0.15,  output: 0.5 },   // v1.2.3 修正缓存读价: GLM 系缓存读=输入×20% (与 glm-5.2 0.26/1.4、glm-5-turbo 0.24/1.2 口径一致; 原误标"无缓存折扣"致长会话消耗虚高 5 倍)
   // Kimi
   'kimi-k3':              { cacheHit: 0.3,   cacheMiss: 3.0,   output: 15.0 },  // 缓存价已修正
   'kimi-k2.6':            { cacheHit: 0.152, cacheMiss: 0.897, output: 3.724 }, // radar 2026-09-03, 262K ctx (官方页 CNY ÷7)
