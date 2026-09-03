@@ -980,9 +980,15 @@ async function queryPreset(platform, apiKey, config) {
     const parsed = parseResponse(queryType, json)
 
     if (!parsed) {
+      // v1.2.4: 业务层错误优先透传 —— 接口 HTTP 200 但 success:false / code!=200 时(实测智谱套餐过期返回
+      // {"code":500,"msg":"当前用户不存在coding plan","success":false}), 笼统报"无法解析"会误导用户往解析坏
+      // 的方向排查; 原始 msg 才是真实原因(套餐没了/无权限), 透传给用户。JSON 解析失败(json=null)仍走原文案。
+      const bizMsg = (json && typeof json === 'object' && typeof json.msg === 'string' && json.msg
+        && (json.success === false || (json.code !== undefined && json.code !== 200))) ? json.msg : null
       return {
         platform: platform.id, name: platform.label, icon: platform.icon, color: platform.color,
-        category: platform.category, status: 'parse-error', error: '无法解析余额数据', noBalance: true,
+        category: platform.category, status: 'parse-error',
+        error: bizMsg ? `无法解析余额数据 (接口返回: ${bizMsg})` : '无法解析余额数据', noBalance: true,
       }
     }
 
