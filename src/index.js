@@ -985,6 +985,16 @@ async function queryPreset(platform, apiKey, config) {
       // 的方向排查; 原始 msg 才是真实原因(套餐没了/无权限), 透传给用户。JSON 解析失败(json=null)仍走原文案。
       const bizMsg = (json && typeof json === 'object' && typeof json.msg === 'string' && json.msg
         && (json.success === false || (json.code !== undefined && json.code !== 200))) ? json.msg : null
+      // v1.2.5: 智谱按量付费账户无公开余额接口(实测 2026-09-03: /api/monitor/account/balance、
+      // /api/paas/v4/dashboard/billing/* 等候选端点全 404) —— 仅 Coding Plan 套餐可查配额。
+      // 识别"不存在coding plan"后按「未开放」中性展示, 不再标红报错吓用户。
+      if (queryType === 'glm' && bizMsg && /coding\s*plan/i.test(bizMsg)) {
+        return {
+          platform: platform.id, name: platform.label, icon: platform.icon, color: platform.color,
+          category: platform.category, status: 'no-balance-api',
+          error: '按量付费账户未开放余额查询 (仅 Coding Plan 套餐可查配额)', noBalance: true,
+        }
+      }
       return {
         platform: platform.id, name: platform.label, icon: platform.icon, color: platform.color,
         category: platform.category, status: 'parse-error',
