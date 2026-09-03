@@ -486,36 +486,65 @@ export const isWeekend = (timestamp = Date.now()) => {
 //       ② 旧模型(2025-08) 为历史参考价. 仅做参考, 实际以平台为准.
 // ============================================================
 export const MODEL_PRICES = {
-  // —— 现役主力 (2026-09-01 更新; 统一 USD/百万tokens) ——
-  // 来源: model_pricing_2026_09.json (USD) + StepFun/MiMo/Qwen3.8 官方页 (CNY, 已 ÷7 换算并标注)
-  // OpenAI GPT-5.6 系列
+  // —— 现役主力 (2026-09-03 更新; 统一 USD/百万tokens) ——
+  // 来源: ① model_pricing_2026_09.json (USD) + StepFun/MiMo/Qwen3.8 官方页 (CNY, 已 ÷7 换算并标注)
+  //       ② v1.2.0 补充: modelradar.cn/data/models.json 2026-09-03 快照 (各模型 sourceUrl 均指官方定价页)。
+  //          仅采纳与官方口径无分歧的条目; 与原表冲突时保留原值并注明 ——
+  //          radar 的 GPT-5.6 系输出价全呈「输入×1.25」异常模式, 疑似抓错列, 未采纳;
+  //          促销价 (qwen3.7-max 5折等) radar 不跟踪, 保留原促销值。
+  // OpenAI GPT-5.6 系列 (radar 报 sol 输出 $5 / terra $2.5 / luna $0.25, 均为输入×1.25 异常模式, 未采纳)
   'gpt-5.6-sol':          { cacheHit: 0.5,   cacheMiss: 4.0,   output: 20.0 },  // 临时促销价(至少到 2026-11-21)
   'gpt-5.6-terra':        { cacheHit: 0.2,   cacheMiss: 2.0,   output: 12.0 },  // 2026-07-30 降价
   'gpt-5.6-luna':         { cacheHit: 0.02,  cacheMiss: 0.2,   output: 1.2 },   // 2026-07-30 降价
+  'gpt-5.3-codex':        { cacheHit: 0.175, cacheMiss: 1.75,  output: 14.0 },  // radar 2026-09-03, OpenAI 官方页
   // Anthropic Claude 5
-  'claude-opus-5':        { cacheHit: 5.0,   cacheMiss: 5.0,   output: 25.0 },  // 无缓存折扣, 与 Opus 4.8 同价
+  'claude-opus-5':        { cacheHit: 0.5,   cacheMiss: 5.0,   output: 25.0 },  // v1.2.0 修正缓存读价: Anthropic 缓存读=0.1×输入, radar 对照 claude.com/pricing (opus-4-8 亦 $0.5); 原误标"无缓存折扣"
   'claude-sonnet-5':      { cacheHit: 0.2,   cacheMiss: 2.0,   output: 10.0 },
   'claude-sonnet-4-6':    { cacheHit: 0.30,  cacheMiss: 3.00,  output: 15.00 },
   'claude-haiku-4-5':     { cacheHit: 0.10,  cacheMiss: 1.00,  output: 5.00 },
   // Google Gemini 3.x
   'gemini-3.7-flash':     { cacheHit: 0.075, cacheMiss: 0.75,  output: 3.75 },  // 促销至 2026-12-31, 之后翻倍
+  'gemini-3.8-flash':     { cacheHit: 0.075, cacheMiss: 0.75,  output: 3.75 },  // radar 2026-09-02 新增, 与 3.7/3.6 同价
   'gemini-3.6-flash':     { cacheHit: 0.075, cacheMiss: 0.75,  output: 3.75 },  // 促销至 2026-12-31, 之后翻倍
   'gemini-3-flash-preview': { cacheHit: 0.025, cacheMiss: 0.5, output: 3.0 },
   'gemini-3.5-flash-lite':  { cacheHit: 0.3,  cacheMiss: 0.3,  output: 2.5 },   // 无缓存折扣
   'gemini-3.1-pro':       { cacheHit: 2.0,   cacheMiss: 2.0,   output: 12.0 },  // 无缓存折扣; 长上下文 $4/$24
   'gemini-2.5-pro':       { cacheHit: 0.125, cacheMiss: 1.25,  output: 10.00 },
+  'gemini-2.5-flash':     { cacheHit: 0.03,  cacheMiss: 0.3,   output: 2.5 },   // radar 2026-09-03, 1M ctx
   // —— 国产主力 (2026-09) ——
   // 阿里云百炼 Qwen3
   'qwen3.8-max':          { cacheHit: 1.71,  cacheMiss: 1.71,  output: 5.14 },  // 100万token/90天免费额度, 超出按 ¥12/¥36 (÷7); 夜间22:00-08:00五折未实现
   'qwen3.7-max':          { cacheHit: 0.83,  cacheMiss: 0.83,  output: 2.48 },  // 5折促销, 无缓存折扣
   'qwen3.7-plus':         { cacheHit: 0.55,  cacheMiss: 0.55,  output: 1.65 },  // 无缓存折扣
   'qwen3.7-flash':        { cacheHit: 0.03,  cacheMiss: 0.03,  output: 0.13 },  // 0-32k 最优价
+  'qwen3.8-flash':        { cacheHit: 0.011, cacheMiss: 0.11,  output: 0.372 }, // radar 2026-09-03 (官方页 CNY ÷7), 1M ctx
+  'qwen3.8-27b':          { cacheHit: 0.05,  cacheMiss: 0.503, output: 3.017 }, // radar (CNY ÷7)
+  'qwen3.6-plus':         { cacheHit: 0.028, cacheMiss: 0.276, output: 1.655 }, // radar (CNY ÷7), 256K ctx
   // 智谱 GLM-5
   'glm-5.2':              { cacheHit: 0.26,  cacheMiss: 1.4,   output: 4.4 },
   'glm-5-turbo':          { cacheHit: 0.24,  cacheMiss: 1.2,   output: 4.0 },
   'glm-5.3-flash':        { cacheHit: 0.15,  cacheMiss: 0.15,  output: 0.5 },   // 无缓存折扣
-  // Kimi K3
+  // Kimi
   'kimi-k3':              { cacheHit: 0.3,   cacheMiss: 3.0,   output: 15.0 },  // 缓存价已修正
+  'kimi-k2.6':            { cacheHit: 0.152, cacheMiss: 0.897, output: 3.724 }, // radar 2026-09-03, 262K ctx (官方页 CNY ÷7)
+  'kimi-k2.5':            { cacheHit: 0.097, cacheMiss: 0.552, output: 2.897 }, // radar, 262K ctx
+  // 字节豆包 Seed 2.0 (radar 2026-09-03, 火山方舟官方页; 计费随上下文档位不同, 前缀匹配按最长命中)
+  'doubao-seed-2.0-pro-32k':   { cacheHit: 0.088, cacheMiss: 0.441, output: 2.207 },
+  'doubao-seed-2.0-pro-128k':  { cacheHit: 0.132, cacheMiss: 0.662, output: 3.31 },
+  'doubao-seed-2.0-pro-256k':  { cacheHit: 0.265, cacheMiss: 1.324, output: 6.621 },
+  'doubao-seed-2.0-lite-32k':  { cacheHit: 0.017, cacheMiss: 0.083, output: 0.497 },
+  'doubao-seed-2.0-lite-128k': { cacheHit: 0.025, cacheMiss: 0.124, output: 0.745 },
+  'doubao-seed-2.0-lite-256k': { cacheHit: 0.05,  cacheMiss: 0.248, output: 1.49 },
+  'doubao-seed-2.0-mini-32k':  { cacheHit: 0.006, cacheMiss: 0.028, output: 0.276 },
+  'doubao-seed-2.0-mini-128k': { cacheHit: 0.011, cacheMiss: 0.055, output: 0.552 },
+  'doubao-seed-2.0-mini-256k': { cacheHit: 0.022, cacheMiss: 0.11,  output: 1.103 },
+  'doubao-seed-2.0-code-32k':  { cacheHit: 0.088, cacheMiss: 0.441, output: 2.207 },
+  'doubao-seed-2.0-code-128k': { cacheHit: 0.132, cacheMiss: 0.662, output: 3.31 },
+  'doubao-seed-2.0-code-256k': { cacheHit: 0.265, cacheMiss: 1.324, output: 6.621 },
+  // 腾讯混元 (radar 2026-09-03, cloud.tencent.com 官方页; 无缓存价 → cacheHit=cacheMiss)
+  'hunyuan-2.0-instruct-128k': { cacheHit: 0.621, cacheMiss: 0.621, output: 1.535 },
+  'hunyuan-2.0-think-128k':    { cacheHit: 0.731, cacheMiss: 0.731, output: 2.924 },
+  'hunyuan-turbo-s':           { cacheHit: 0.11,  cacheMiss: 0.11,  output: 0.276 },
   // 阶跃星辰 (官方页为 CNY, 已 ÷7 换 USD)
   'step-3.7-flash':       { cacheHit: 0.039, cacheMiss: 0.193, output: 1.157 },
   'step-3.5-flash':       { cacheHit: 0.02,  cacheMiss: 0.10,  output: 0.30 },
@@ -647,7 +676,7 @@ const PLATFORM_PRESETS = [
     baseUrl: 'https://api.stepfun.com', queryType: 'stepfun', envKeys: ['STEPFUN_API_KEY'] },
   { id: 'siliconflow', label: '硅基流动', icon: 'siliconflow', color: '#6E29F6', category: '国内',
     baseUrl: 'https://api.siliconflow.cn', queryType: 'siliconflow', envKeys: ['SILICONFLOW_API_KEY', 'SILICON_API_KEY'] },
-  { id: 'minimax', label: 'MiniMax', icon: 'together', color: '#1E40AF', category: '国内',
+  { id: 'minimax', label: 'MiniMax', icon: 'minimax', color: '#E73562', category: '国内',
     baseUrl: 'https://api.minimaxi.com', queryType: 'minimax', envKeys: ['MINIMAX_API_KEY'] },
 
   // ===== 海外平台（有公开余额/配额查询接口）=====
@@ -655,7 +684,7 @@ const PLATFORM_PRESETS = [
     baseUrl: 'https://openrouter.ai', queryType: 'openrouter', envKeys: ['OPENROUTER_API_KEY'] },
   { id: 'novita', label: 'Novita AI', icon: 'together', color: '#FA520F', category: '海外',
     baseUrl: 'https://api.novita.ai', queryType: 'novita', envKeys: ['NOVITA_API_KEY'] },
-  { id: 'xai', label: 'xAI Grok', icon: 'mistral', color: '#000000', category: '海外',
+  { id: 'xai', label: 'xAI Grok', icon: 'xai', color: '#000000', category: '海外',
     baseUrl: 'https://api.x.ai', queryType: 'openai', envKeys: ['XAI_API_KEY'] },
 
   // ===== 著名模型品牌 (无公开余额接口, 仅显示模型 + 按价格表估算消耗) =====
