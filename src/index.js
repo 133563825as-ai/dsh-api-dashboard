@@ -693,6 +693,9 @@ const PLATFORM_PRESETS = [
   { id: 'gemini', label: 'Google Gemini', icon: 'gemini', color: '#4285F4', category: '海外', noBalance: true },
   { id: 'qwen', label: '通义千问 Qwen', icon: 'qwen', color: '#623AE7', category: '国内', noBalance: true },
   { id: 'mimo', label: '小米 MiMo', icon: 'mimo', color: '#FF6900', category: '国内', noBalance: true },
+  // v1.2.1: 豆包/混元入列模型品牌分组 (价格表 v1.2.0 已覆盖, 此前只算价不显示)
+  { id: 'doubao', label: '豆包 Seed', icon: 'doubao', color: '#3C8CFF', category: '国内', noBalance: true },
+  { id: 'hunyuan', label: '腾讯混元', icon: 'hunyuan', color: '#0052D9', category: '国内', noBalance: true },
 ]
 
 // ============================================================

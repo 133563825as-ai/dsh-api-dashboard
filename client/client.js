@@ -25,6 +25,7 @@ window.__ModuleLoader__.load({
     const ICONS = {
       'alibaba': '<svg fill="#FF6A00" xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24"><path d="M3.996 4.517h5.291L8.01 6.324L4.153 7.506a1.67 1.67 0 0 0-1.165 1.601v5.786a1.67 1.67 0 0 0 1.165 1.6l3.857 1.183l1.277 1.807H3.996A3.996 3.996 0 0 1 0 15.487V8.513a3.996 3.996 0 0 1 3.996-3.996m16.008 0h-5.291l1.277 1.807l3.857 1.182c.715.227 1.17.889 1.165 1.601v5.786a1.67 1.67 0 0 1-1.165 1.6l-3.857 1.183l-1.277 1.807h5.291A3.996 3.996 0 0 0 24 15.487V8.513a3.996 3.996 0 0 0-3.996-3.996m-4.007 8.345H8.002v-1.804h7.995Z"/></svg>',
       'claude': '<svg fill="#D97757" xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24"><path d="m4.714 15.956l4.718-2.648l.079-.23l-.08-.128h-.23l-.79-.048l-2.695-.073l-2.337-.097l-2.265-.122l-.57-.121l-.535-.704l.055-.353l.48-.321l.685.06l1.518.104l2.277.157l1.651.098l2.447.255h.389l.054-.158l-.133-.097l-.103-.098l-2.356-1.596l-2.55-1.688l-1.336-.972l-.722-.491L2 6.223l-.158-1.008l.656-.722l.88.06l.224.061l.893.686l1.906 1.476l2.49 1.833l.364.304l.146-.104l.018-.072l-.164-.274l-1.354-2.446l-1.445-2.49l-.644-1.032l-.17-.619a3 3 0 0 1-.103-.729L6.287.133L6.7 0l.995.134l.42.364l.619 1.415L9.735 4.14l1.555 3.03l.455.898l.243.832l.09.255h.159V9.01l.127-1.706l.237-2.095l.23-2.695l.08-.76l.376-.91l.747-.492l.583.28l.48.685l-.067.444l-.286 1.851l-.558 2.903l-.365 1.942h.213l.243-.242l.983-1.306l1.652-2.064l.728-.82l.85-.904l.547-.431h1.032l.759 1.129l-.34 1.166l-1.063 1.347l-.88 1.142l-1.263 1.7l-.79 1.36l.074.11l.188-.02l2.853-.606l1.542-.28l1.84-.315l.832.388l.09.395l-.327.807l-1.967.486l-2.307.462l-3.436.813l-.043.03l.049.061l1.548.146l.662.036h1.62l3.018.225l.79.522l.473.638l-.08.485l-1.213.62l-1.64-.389l-3.825-.91l-1.31-.329h-.183v.11l1.093 1.068l2.003 1.81l2.508 2.33l.127.578l-.321.455l-.34-.049l-2.204-1.657l-.85-.747l-1.925-1.62h-.127v.17l.443.649l2.343 3.521l.122 1.08l-.17.353l-.607.213l-.668-.122l-1.372-1.924l-1.415-2.168l-1.141-1.943l-.14.08l-.674 7.254l-.316.37l-.728.28l-.607-.461l-.322-.747l.322-1.476l.388-1.924l.316-1.53l.285-1.9l.17-.632l-.012-.042l-.14.018l-1.432 1.967l-2.18 2.945l-1.724 1.845l-.413.164l-.716-.37l.066-.662l.401-.589l2.386-3.036l1.439-1.882l.929-1.086l-.006-.158h-.055L4.138 18.56l-1.13.146l-.485-.456l.06-.746l.231-.243l1.907-1.312Z"/></svg>',
+      'doubao': '<svg fill="#3C8CFF" xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24"><path d="M19.8772 1.4685L24 2.5326v18.9426l-4.1228 1.0563V1.4685zm-13.3481 9.428l4.115 1.0641v8.9786l-4.115 1.0642v-11.107zM0 2.572l4.115 1.0642v16.7354L0 21.428V2.572zm17.4553 5.6205v11.107l-4.1228-1.0642V9.2568l4.1228-1.0642z"/></svg>',
       'deepseek': '<svg fill="#4D6BFE" xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24"><path d="M23.748 4.651c-.254-.124-.364.113-.512.233c-.051.04-.094.09-.137.137c-.372.397-.806.657-1.373.626c-.829-.046-1.537.214-2.163.848c-.133-.782-.575-1.248-1.247-1.548c-.352-.155-.708-.311-.955-.65c-.172-.24-.219-.509-.305-.774c-.055-.16-.11-.323-.293-.35c-.2-.031-.278.136-.356.276c-.313.572-.434 1.202-.422 1.84c.027 1.436.633 2.58 1.838 3.393c.137.094.172.187.129.323c-.082.28-.18.553-.266.833c-.055.179-.137.218-.328.14a5.5 5.5 0 0 1-1.737-1.179c-.857-.828-1.631-1.743-2.597-2.46a12 12 0 0 0-.689-.47c-.985-.957.13-1.743.387-1.836c.27-.098.094-.433-.778-.428c-.872.003-1.67.295-2.687.685a3 3 0 0 1-.465.136a9.6 9.6 0 0 0-2.883-.101c-1.885.21-3.39 1.1-4.497 2.622C.082 8.776-.231 10.854.152 13.02c.403 2.284 1.568 4.175 3.36 5.653c1.857 1.533 3.997 2.284 6.438 2.14c1.482-.085 3.132-.284 4.994-1.86c.47.234.962.328 1.78.398c.629.058 1.235-.031 1.705-.129c.735-.155.684-.836.418-.961c-2.155-1.004-1.682-.595-2.112-.926c1.095-1.295 2.768-3.598 3.284-6.733c.05-.346.115-.834.108-1.114c-.004-.171.035-.238.23-.257a4.2 4.2 0 0 0 1.545-.475c1.397-.763 1.96-2.016 2.093-3.517c.02-.23-.004-.467-.247-.588M11.58 18.168c-2.088-1.642-3.101-2.183-3.52-2.16c-.39.024-.32.472-.234.763c.09.288.207.487.371.74c.114.167.192.416-.113.603c-.673.416-1.842-.14-1.897-.168c-1.361-.801-2.5-1.86-3.301-3.306c-.775-1.393-1.225-2.888-1.299-4.482c-.02-.385.094-.522.477-.592a4.7 4.7 0 0 1 1.53-.038c2.131.311 3.946 1.264 5.467 2.774c.868.86 1.525 1.887 2.202 2.89c.72 1.066 1.494 2.082 2.48 2.915c.348.291.626.513.892.677c-.802.09-2.14.109-3.055-.615zm1.001-6.44a.306.306 0 0 1 .415-.287a.3.3 0 0 1 .113.074a.3.3 0 0 1 .086.214c0 .17-.136.307-.308.307a.303.303 0 0 1-.306-.307m3.11 1.596c-.2.081-.4.151-.591.16a1.25 1.25 0 0 1-.798-.254c-.274-.23-.47-.358-.551-.758a1.7 1.7 0 0 1 .015-.588c.07-.327-.007-.537-.238-.727c-.188-.156-.426-.199-.689-.199a.6.6 0 0 1-.254-.078a.253.253 0 0 1-.114-.358a1 1 0 0 1 .192-.21c.356-.202.767-.136 1.146.016c.352.144.618.408 1.001.782c.392.451.462.576.685.915c.176.264.336.536.446.848c.066.194-.02.353-.25.45"/></svg>',
       'gemini': '<svg fill="#4285F4" xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24"><path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68q.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58a12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68q-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96q2.19.93 3.81 2.55t2.55 3.81"/></svg>',
       'groq': '<svg fill="#F55036" xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24"><path d="M3 3v18h18V3zm11.72 13.37c-.41.38-.82.66-1.33.87l-.21.09c-.83.3-1.82.21-2.63-.1c-.45-.21-.82-.46-1.19-.8c.33-.41.66-.75 1.07-1.07l.27.21c.5.35 1 .47 1.61.41c.62-.12 1.12-.4 1.52-.9c.37-.61.41-1.09.41-1.8V10.4c0-.72-.15-1.18-.6-1.74c-.61-.49-1.17-.74-1.96-.7c-.66.11-1.19.42-1.59.95c-.33.53-.48 1.07-.37 1.69c.2.68.45 1.25 1.07 1.61c.52.27.98.32 1.56.33h.25c.2.02.4.02.61.03V14c-1.49.06-2.65.06-3.84-.97a4.22 4.22 0 0 1-1.23-2.8c.04-.88.35-1.6.86-2.32l.15-.23c1.43-1.51 3.7-1.61 5.31-.31l.17.14c.58.52.96 1.25 1.08 2.01c0 .16.01.33.01.49v3.6c0 1.05-.3 1.95-1.02 2.74Z"/></svg>',
@@ -52,6 +53,8 @@ window.__ModuleLoader__.load({
       stepfun: { name: "阶跃星辰", color: "#FA520F", cat: "国内" },
       siliconflow: { name: "硅基流动", color: "#6E29F6", cat: "国内" },
       minimax: { name: "MiniMax", color: "#E73562", cat: "国内" },
+      doubao: { name: "豆包 Seed", color: "#3C8CFF", cat: "国内" },
+      hunyuan: { name: "腾讯混元", color: "#0052D9", cat: "国内" },
       openrouter: { name: "OpenRouter", color: "#6469FF", cat: "海外" },
       novita: { name: "Novita", color: "#FA520F", cat: "海外" },
       xai: { name: "xAI Grok", color: "#000000", cat: "海外" },
@@ -66,8 +69,8 @@ window.__ModuleLoader__.load({
     const ICON_ALIAS = {
       stepfun: "mistral", novita: "together", relay: "relay",
     };
-    /** 无官方图标、用文字名代替的平台 (v1.2.0: minimax/xai/mimo 已换官方 SVG, 移出此列) */
-    const TEXT_ONLY = new Set(["stepfun", "novita", "relay"]);
+    /** 无官方图标、用文字名代替的平台 (v1.2.1: minimax/xai/mimo 已换官方 SVG; hunyuan 暂无官方 SVG 用文字) */
+    const TEXT_ONLY = new Set(["stepfun", "novita", "relay", "hunyuan"]);
     /** 文字图标: 取平台名的首字符做一个彩色圆圈字 */
     function textIcon(id, meta) {
       const color = meta.color || "#64748B";
@@ -86,6 +89,53 @@ window.__ModuleLoader__.load({
       const meta = metaFor(b ? b.platform : "");
       if (TEXT_ONLY.has(b ? b.platform : "")) return textIcon(b ? b.platform : "?", meta);
       return react.createElement("span", { className: "dshadb_imglogo", dangerouslySetInnerHTML: { __html: iconOf(b) } });
+    }
+    //#endregion
+
+    //#region 把手下滑关闭 (v1.2.1)
+    /** 把手 = 下滑关闭手势区: pointer 跟手拖拽整个抽屉, 超过阈值或快速下滑 → 播滑出动画后关闭, 否则回弹。
+     *  三处复用: 看板抽屉(onClose) / 平台详情(onClose) / 设置面板(onBack || onClose)。 */
+    function SwipeHandle({ onClose }) {
+      const st = react.useRef({ y0: 0, dy: 0, t0: 0, drawer: null, dragging: false, done: false })
+      const setT = (el, dy, anim) => {
+        if (!el) return
+        el.style.transition = anim ? "transform .24s ease" : "none"
+        el.style.transform = dy > 0 ? "translateY(" + dy + "px)" : ""
+      }
+      const down = (e) => {
+        const s = st.current
+        if (s.done) return
+        s.y0 = e.clientY; s.dy = 0; s.t0 = Date.now(); s.dragging = true
+        s.drawer = e.currentTarget.closest(".dshadb_drawer")
+        if (s.drawer) s.drawer.style.transition = "none"
+        try { e.currentTarget.setPointerCapture(e.pointerId) } catch (err) { /* 无 PointerCapture 时靠事件冒泡兜底 */ }
+      }
+      const move = (e) => {
+        const s = st.current
+        if (!s.dragging) return
+        s.dy = Math.max(0, e.clientY - s.y0) // 只跟手下滑, 不允许上拉越顶
+        setT(s.drawer, s.dy, false)
+      }
+      const end = () => {
+        const s = st.current
+        if (!s.dragging || s.done) return
+        s.dragging = false
+        const dt = Math.max(1, Date.now() - s.t0)
+        const fast = s.dy > 24 && s.dy / dt > 0.55 // 快速轻扫也算关闭意图
+        if (s.dy > 72 || fast) {
+          s.done = true
+          if (s.drawer) { // 先播滑出动画再卸载, 避免拖到一半突然消失
+            s.drawer.style.transition = "transform .2s ease-in"
+            s.drawer.style.transform = "translateY(100%)"
+          }
+          setTimeout(onClose, 180)
+        } else setT(s.drawer, 0, true)
+      }
+      return react.createElement("div", {
+        className: "dshadb_handle", key: "handle", title: "下滑关闭",
+        style: { touchAction: "none", cursor: "grab" },
+        onPointerDown: down, onPointerMove: move, onPointerUp: end, onPointerCancel: end,
+      }, react.createElement("div", { className: "dshadb_handle_bar" }))
     }
     //#endregion
 
@@ -390,7 +440,7 @@ window.__ModuleLoader__.load({
       "whale.tip": "拖着大肥鱼可以在屏幕上随意移动；点一下弹全身和台词，再点一下收回。",
       "whale.offTip": "先打开上面的「收养大肥鱼」，才能调下面这些。",
       "brands": "模型品牌",
-      "settings.showBrands": "显示模型品牌", "settings.showBrandsHint": "在看板中显示 OpenAI / Claude / Gemini / Qwen / MiMo 等无余额接口的品牌",
+      "settings.showBrands": "显示模型品牌", "settings.showBrandsHint": "在看板中显示 OpenAI / Claude / Gemini / Qwen / 豆包 / 混元 / MiMo 等无余额接口的品牌",
       "settings.official": "官方直连 provider",
       "settings.officialHint": "逗号或换行分隔。写在这里的 provider 名一律按官方直连处理，状态条显示官方余额；留空则自动判定（按 settings.yaml 里 baseURL 的域名，识别不出按中转站显示「—」）",
       "settings.officialAuto": "自动判定结果",
@@ -444,7 +494,7 @@ window.__ModuleLoader__.load({
       "whale.tip": "Drag the whale anywhere on screen; tap once for full body and a line, tap again to tuck it back.",
       "whale.offTip": "Turn on \"Adopt Big Whale\" above to edit these.",
       "brands": "Model Brands",
-      "settings.showBrands": "Show model brands", "settings.showBrandsHint": "Show OpenAI / Claude / Gemini / Qwen / MiMo etc. (no balance API) in dashboard",
+      "settings.showBrands": "Show model brands", "settings.showBrandsHint": "Show OpenAI / Claude / Gemini / Qwen / Doubao / Hunyuan / MiMo etc. (no balance API) in dashboard",
       "settings.official": "Official-direct providers",
       "settings.officialHint": "Comma or newline separated. Providers listed here always count as official direct connections and show their official balance; leave empty to auto-detect from the baseURL host in settings.yaml (undetected ones are treated as relays and show \"—\")",
       "settings.officialAuto": "Auto-detected",
@@ -584,6 +634,8 @@ window.__ModuleLoader__.load({
       if (/^claude/.test(m)) return "claude";
       if (/^gemini/.test(m)) return "gemini";
       if (/^qwen/.test(m)) return "qwen";
+      if (/^doubao/.test(m)) return "doubao";
+      if (/hunyuan/.test(m)) return "hunyuan";
       if (/^mimo/.test(m)) return "mimo";
       if (/glm|chatglm/.test(m)) return "zhipu";
       if (/kimi|moonshot/.test(m)) return "moonshot";
@@ -857,7 +909,7 @@ window.__ModuleLoader__.load({
 
       return react.createElement("div", { className: "dshadb_scrim", onClick: (e) => { if (e.target === e.currentTarget) onClose(); } }, [
         react.createElement("div", { className: "dshadb_drawer", onClick: (e) => e.stopPropagation(), key: "drawer" }, [
-          react.createElement("div", { className: "dshadb_handle", key: "handle" }, react.createElement("div", { className: "dshadb_handle_bar" })),
+          react.createElement(SwipeHandle, { onClose, key: "handle" }),
           react.createElement("div", { className: "dshadb_header", key: "header" }, [
             react.createElement("div", { className: "dshadb_header_left", key: "left" }, [
               // 模型尾椎: 从 currentModel 提取变体名, 如 deepseek-v4-flash → DSH·V4
@@ -976,7 +1028,7 @@ window.__ModuleLoader__.load({
       // v0.5.3: 回退为底部抽屉样式 (全屏卡片观感不佳, 复用看板同款 scrim+drawer)
       return react.createElement("div", { className: "dshadb_scrim", onClick: (e) => { if (e.target === e.currentTarget) onClose(); } }, [
         react.createElement("div", { className: "dshadb_drawer", style: { maxHeight: "70vh" }, onClick: (e) => e.stopPropagation(), key: "drawer" }, [
-          react.createElement("div", { className: "dshadb_handle", key: "handle" }, react.createElement("div", { className: "dshadb_handle_bar" })),
+          react.createElement(SwipeHandle, { onClose, key: "handle" }),
           react.createElement("div", { className: "dshadb_header", key: "header" }, [
             react.createElement("div", { className: "dshadb_header_left", key: "left" }, [
               react.createElement("div", { className: "dshadb_header_title", key: "title", style: { fontSize: "18px" } }, meta.name),
@@ -1439,7 +1491,7 @@ window.__ModuleLoader__.load({
       ]);
 
       const output = react.createElement("div", { className: "dshadb_drawer", style: { maxHeight: "86vh" }, onClick: (e) => e.stopPropagation(), key: "drawer" }, [
-        react.createElement("div", { className: "dshadb_handle", key: "handle" }, react.createElement("div", { className: "dshadb_handle_bar" })),
+        react.createElement(SwipeHandle, { onClose: onBack || onClose, key: "handle" }),
         react.createElement("div", { className: "dshadb_header", key: "header" }, [
           react.createElement("div", { style: { display: "flex", alignItems: "center", gap: "10px", flex: "1", minWidth: 0 }, key: "leftwrap" }, [
             onBack ? react.createElement("button", { type: "button", className: "dshadb_header_back", onClick: onBack, key: "back", title: t("back") }, react.createElement(IconBack, null)) : null,
