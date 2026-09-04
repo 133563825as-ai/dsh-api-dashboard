@@ -78,11 +78,28 @@ jobs:
           node --check src/index.js
           node --check client/client.js
 
-      # 测试要 import src/index.js，而它依赖两个 peerDependency。
-      # 宿主环境由 DSHA 提供，CI 里得自己装。--no-save 保证不改动 package.json/lock。
-      # 版本对齐容器实测值，只需满足 peerDependencies 声明的范围即可。
+      # 测试要 import src/index.js，而它依赖两个 peerDependency（宿主 DSHA 提供，CI 里没有）。
+      #
+      # ⚠️ 别改成 `npm i --no-save --no-package-lock <包>`：那样是**空转**。
+      #    --no-save + --no-package-lock 让 npm 无处记录请求，于是它只按 package.json
+      #    推导理想依赖树；本包 dependencies 为空 → 判定「up to date」，命令行指定的包被静默丢弃，
+      #    连 node_modules 都不建（v1.3.2 首次 CI 就栽在这里）。
+      #
+      # 改为：装到独立目录再软链进工作区 —— 与容器里的既有做法一致，
+      # 且**全程不碰 package.json / package-lock.json**，零依赖硬约束不会被污染。
       - name: 安装测试所需 peer 依赖
-        run: npm i --no-save --no-package-lock zod@4.5.2 @deepseek-ai/schemastery@3.18.1
+        run: |
+          mkdir -p /tmp/peerdeps && cd /tmp/peerdeps
+          npm init -y > /dev/null
+          npm i --no-fund --no-audit zod@4.5.2 '@deepseek-ai/schemastery@3.18.1'
+          cd "$GITHUB_WORKSPACE"
+          mkdir -p node_modules/@deepseek-ai
+          ln -sfn /tmp/peerdeps/node_modules/zod node_modules/zod
+          ln -sfn /tmp/peerdeps/node_modules/@deepseek-ai/schemastery node_modules/@deepseek-ai/schemastery
+          node --input-type=module -e "
+            console.log('zod        →', await import.meta.resolve('zod'));
+            console.log('schemastery→', await import.meta.resolve('@deepseek-ai/schemastery'));
+          "
 
       - name: 跑全套测试
         run: |
@@ -103,6 +120,11 @@ jobs:
 
       - name: 打包预演（记录将发布的文件清单）
         run: npm pack --dry-run
+
+      # 最后一道保险：确认前面的步骤没有偷偷改动清单文件
+      # （软链方案本不该动它们，但零依赖是硬约束，值得在发布前再确认一次）
+      - name: 确认 package.json / lock 未被改动
+        run: git diff --exit-code -- package.json package-lock.json
 
       # 无 token：npm CLI 自动用 OIDC 换取发布权限，并附带 provenance 溯源
       - name: 发布到 npm
