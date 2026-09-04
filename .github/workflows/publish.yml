@@ -56,7 +56,10 @@ jobs:
           npm i -g npm@latest
           echo "npm $(npm --version) / node $(node --version)"
 
+      # 只有 tag 触发时才校验版本号；手动触发(workflow_dispatch)时 GITHUB_REF_NAME 是分支名，
+      # 拿它跟版本号比会永远失败 —— 手动触发用于重跑，版本已由当初那个 tag 定死。
       - name: 校验 tag 与 package.json 版本一致
+        if: github.event_name == 'push'
         run: |
           TAG="${GITHUB_REF_NAME#v}"
           PKG="$(node -p "require('./package.json').version")"
