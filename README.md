@@ -221,7 +221,8 @@ v1.2.1 — **把手下滑关闭**：看板抽屉 / 平台详情 / 设置面板�
 v1.2.2 — **豆包/混元换官方品牌图标**：豆包改用豆包官方 64×64 图标（官网 favicon PNG 转 data URI 内嵌，替换此前借用的字节跳动 logo）；混元改用腾讯混元官方 logo.svg（hunyuan.tencent.com 官方矢量，净化后内嵌，多色圆弧标），移出 TEXT_ONLY 文字图标列；两者均自官网/官方 CDN 获取
 v1.2.3 — **修复 GLM-5.3-flash 缓存读价误标**（用户实测反馈：长会话估算 ¥9.93 vs 真实账单 ¥5.19）：原表把 `glm-5.3-flash` 标为「无缓存折扣」（cacheHit=cacheMiss=0.15），但 GLM 系缓存读=输入×20%（同表 glm-5.2 0.26/1.4、glm-5-turbo 0.24/1.2 交叉佐证），多轮长会话数百万缓存读 token 全按全价计导致估算虚高 ~5 倍；修正 cacheHit→0.03 并新增回归断言（GLM 系 cacheHit 必须低于 cacheMiss）；其余「无缓存折扣」条目（qwen3.7/3.8-max 促销价、混元等）因缺官方缓存价佐证维持原值
 v1.2.4 — **parse-error 透传接口业务错误消息**：智谱套餐过期实测返回 HTTP 200 + `{"code":500,"msg":"当前用户不存在coding plan","success":false}`，原逻辑只显示笼统的「无法解析余额数据」，误导用户以为是解析代码坏了；现在识别业务层错误（`success:false` 或 `code≠200` 且带 `msg`）并透传原始消息（显示为「无法解析余额数据 (接口返回: 当前用户不存在coding plan)」），适用于全部预设平台
-v1.2.5 — **智谱按量付费账户改为中性「未开放」展示**：实测按量付费用户（非 Coding Plan 套餐）调用配额接口返回「当前用户不存在coding plan」，且候选余额端点（`/api/monitor/account/balance`、`/api/paas/v4/dashboard/billing/*` 等）全部 404 —— 智谱按量付费无公开余额接口；识别该业务消息后状态从红色 parse-error 改为 no-balance-api（「按量付费账户未开放余额查询 (仅 Coding Plan 套餐可查配额)」），其余业务错误仍透传原始消息
+v1.2.5 — **智谱按量付费账户改为中性「未开放」展示**：实测按量付费用户（非 Coding Plan 套餐）调用配额接口返回「当前用户不存在coding plan」，且候选余额端点（`/api/monitor/account/balance`、`/api/paas/v4/dashboard/billing/*` 等）全部 404 —— 智谱按量付费无公开余额接口；识别该业务消息后状态从红色 parse-error 改为 no-balance-api，其余业务错误仍透传原始消息
+v1.2.6 — **智谱四类账户分流固化 + 套餐用户回归测试**（开源前防回归）：业务错误分类抽为可单测的 `classifyBizError(queryType, json)`；新增 13 条断言覆盖 Coding Plan 套餐用户（有额度 / 周配额用完 / 全用尽三种形状必须照常出配额，**绝不能被按量付费改动吞掉**）、按量付费/套餐过期（中性未开放）、其他业务错误（透传 msg）、非智谱平台不误套规则、JSON 解析失败保持原文案；文案不替平台断言账户类型——按量付费与套餐已过期返回**同一条** `msg`，接口层无法区分，故统一表述为「无 Coding Plan 套餐（按量付费 / 套餐已过期均返回此结果）」
 
 ## License
 

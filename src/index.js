@@ -925,6 +925,34 @@ export function parseResponse(queryType, json) {
 
 /** 某些类型无法用普通 API key 查询余额 (需 OAuth 等) */
 // ============================================================
+// 业务层错误分类 (v1.2.6 抽出为可测函数)
+// ============================================================
+/**
+ * 解析失败时对「接口 HTTP 200 但业务层报错」做分类。
+ * ⚠️ 仅在 parseResponse 返回 null 时调用 —— 能解析出配额/余额的账户(如智谱 Coding Plan 套餐用户)
+ *    根本不会走到这里, 本函数不影响他们。
+ * @returns {{status: string, error: string}} 供 queryPreset 直接摊进返回体
+ */
+export function classifyBizError(queryType, json) {
+  // 业务层错误消息: success:false 或 code!=200 且带 msg (JSON 解析失败 json=null 时不适用)
+  const bizMsg = (json && typeof json === 'object' && typeof json.msg === 'string' && json.msg
+    && (json.success === false || (json.code !== undefined && json.code !== 200))) ? json.msg : null
+
+  // 智谱: 按量付费账户无公开余额接口 (实测 2026-09-03: /api/monitor/account/balance、
+  // /api/paas/v4/dashboard/billing/{subscription,credit_grants,usage}、/api/paas/v4/users/me
+  // 等候选端点全部 404; 唯一公开的 /api/monitor/usage/quota/limit 是 Coding Plan 套餐专用)。
+  // 该情形属「平台未开放」而非「插件解析坏了」, 按中性状态展示, 不标红。
+  if (queryType === 'glm' && bizMsg && /coding\s*plan/i.test(bizMsg)) {
+    // ⚠️ 措辞不替平台断言账户类型: 按量付费用户与套餐已过期用户拿到的是【同一条】返回,
+    //    接口层无法区分, 所以只说"无 Coding Plan 套餐", 不硬说成"按量付费"。
+    return { status: 'no-balance-api', error: '无 Coding Plan 套餐，无余额接口 (按量付费 / 套餐已过期均返回此结果；套餐用户可正常显示配额)' }
+  }
+
+  // 其余业务错误: 透传原始 msg, 便于用户/维护者定位真实原因 (套餐过期、无权限、接口改名…)
+  return { status: 'parse-error', error: bizMsg ? `无法解析余额数据 (接口返回: ${bizMsg})` : '无法解析余额数据' }
+}
+
+// ============================================================
 // 查询单个预设平台
 // ============================================================
 async function queryPreset(platform, apiKey, config) {
@@ -980,25 +1008,12 @@ async function queryPreset(platform, apiKey, config) {
     const parsed = parseResponse(queryType, json)
 
     if (!parsed) {
-      // v1.2.4: 业务层错误优先透传 —— 接口 HTTP 200 但 success:false / code!=200 时(实测智谱套餐过期返回
-      // {"code":500,"msg":"当前用户不存在coding plan","success":false}), 笼统报"无法解析"会误导用户往解析坏
-      // 的方向排查; 原始 msg 才是真实原因(套餐没了/无权限), 透传给用户。JSON 解析失败(json=null)仍走原文案。
-      const bizMsg = (json && typeof json === 'object' && typeof json.msg === 'string' && json.msg
-        && (json.success === false || (json.code !== undefined && json.code !== 200))) ? json.msg : null
-      // v1.2.5: 智谱按量付费账户无公开余额接口(实测 2026-09-03: /api/monitor/account/balance、
-      // /api/paas/v4/dashboard/billing/* 等候选端点全 404) —— 仅 Coding Plan 套餐可查配额。
-      // 识别"不存在coding plan"后按「未开放」中性展示, 不再标红报错吓用户。
-      if (queryType === 'glm' && bizMsg && /coding\s*plan/i.test(bizMsg)) {
-        return {
-          platform: platform.id, name: platform.label, icon: platform.icon, color: platform.color,
-          category: platform.category, status: 'no-balance-api',
-          error: '按量付费账户未开放余额查询 (仅 Coding Plan 套餐可查配额)', noBalance: true,
-        }
-      }
+      // v1.2.6: 业务错误分类抽到 classifyBizError (可单测)。
+      // 注意: 智谱 Coding Plan 套餐用户能解析出配额 → parsed 非空 → 不会走到这里。
+      const { status, error } = classifyBizError(queryType, json)
       return {
         platform: platform.id, name: platform.label, icon: platform.icon, color: platform.color,
-        category: platform.category, status: 'parse-error',
-        error: bizMsg ? `无法解析余额数据 (接口返回: ${bizMsg})` : '无法解析余额数据', noBalance: true,
+        category: platform.category, status, error, noBalance: true,
       }
     }
 
