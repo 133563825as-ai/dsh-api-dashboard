@@ -28,7 +28,7 @@ const t=(k)=>k
 // 服务端下发的判定素材: providerKinds 来自 settings.yaml 的 baseURL 域名比对
 const cfg = {
   officialProviders: ['myofficial', 'DS-CN'],
-  providerKinds: { zhipu:'official', jiyuan:'relay', new:'relay', sw:'relay', dshzuoxhe:'relay' },
+  providerKinds: { zhipu:'official', 'relay-one':'relay', 'relay-two':'relay', 'relay-three':'relay' },
 }
 
 // 第 1 层: 用户显式名单 (最高优先级, 覆盖后缀规则与自动判定)
@@ -38,10 +38,10 @@ a('L1 覆盖第2层 relay 判定', T.isRelayProvider('new', { officialProviders:
 
 // 第 2 层: baseURL 域名判定
 a('L2 zhipu(open.bigmodel.cn) 是官方', T.isRelayProvider('zhipu', cfg)===false)
-a('L2 jiyuan 是中转站', T.isRelayProvider('jiyuan', cfg)===true)
+a('L2 relay-one 是中转站', T.isRelayProvider('relay-one', cfg)===true)
 a('L2 new 是中转站', T.isRelayProvider('new', cfg)===true)
 a('L2 sw 是中转站', T.isRelayProvider('sw', cfg)===true)
-a('L2 dshzuoxhe 是中转站', T.isRelayProvider('dshzuoxhe', cfg)===true)
+a('L2 relay-three 是中转站', T.isRelayProvider('relay-three', cfg)===true)
 a('L2 覆盖第3层后缀规则(relay 胜出)', T.isRelayProvider('fake', { providerKinds:{ fake:'relay' } })===true)
 
 // 第 3 层: -official / _official 后缀 (DSH 官方插件命名约定)

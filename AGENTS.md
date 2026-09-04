@@ -101,6 +101,10 @@ dsh plugin --profile web add file:/root/dsha-api-dashboard
    的账号上均实测失败（web 登录成功后 publish 仍报 EOTP）。
 8. **测试必须以退出码表达结果**：`test/*.mjs` 结尾都有 `if (fail > 0) process.exitCode = 1`。
    新增测试脚本别忘了加，否则 CI 里断言失败也会被当成通过。
+   ⚠️ **测试不许读运行机器上的私有文件**：`test-provider-kinds.mjs` 原来直读 `~/.dsh/settings.yaml`，
+   clone 到别处 / 在 CI 里一律 ENOENT 崩掉，断言里还会带上使用者真实的中转站名与域名。
+   已改为内联夹具（结构与真实文件逐项对齐，名称与域名用 `relay-one.example.com` 之类占位值）。
+   **别把真实 provider 名 / 中转域名写进测试**。
 9. **provider 判定别改回硬编码名单**：官方/中转三层判定（用户显式名单 → settings.yaml 的 baseURL 域名白名单 → `-official` 后缀）是开源化改造的关键，**千万别把「官方 provider 名单」写回客户端硬编码**——别人的中转站叫什么猜不到。判定的服务端逻辑在 `src/index.js` 的 `parseProviderBaseURLs` / `computeProviderKinds` / `isOfficialHost`，客户端落地在 `client/client.js` 的 `isRelayProvider(provider, config)`。没写 baseURL 的 provider 是「不表态、交后缀兜底」，**别**去读 pi-ai 内置目录补官方域名（`xiaomi` 就是内置目录指向官方域名、但 key 实际来自中转站的反例）。
 
 
@@ -128,4 +132,4 @@ dsh plugin --profile web add file:/root/dsha-api-dashboard
 - [x] provider 官方/中转三层判定（原唯一开源阻断项）
 - [x] 价格表币种统一 USD 基准 + `resolveModelPrice` 按 currency 换算
 - [x] 安全审计（无高危）+ 4 项加固：状态文件强制 0600、请求体 256KB 上限、输入清洗、officialProviders 上限
-- [x] 测试脚本入仓 `test/` 并改相对路径（clone 即可跑，**10 文件 190 断言**）
+- [x] 测试脚本入仓 `test/` 并改相对路径（clone 即可跑，**10 文件 191 断言**）

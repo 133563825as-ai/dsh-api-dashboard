@@ -16,23 +16,68 @@ a('官方 api.deepseek.com', m.isOfficialHost('api.deepseek.com') === true)
 a('官方 open.bigmodel.cn', m.isOfficialHost('open.bigmodel.cn') === true)
 a('官方后缀 api.xiaomimimo.com', m.isOfficialHost('api.xiaomimimo.com') === true)
 a('官方后缀 token-plan-cn.xiaomimimo.com', m.isOfficialHost('token-plan-cn.xiaomimimo.com') === true)
-a('中转 tokenrhythm.studio', m.isOfficialHost('tokenrhythm.studio') === false)
-a('中转 api.mhsapi.top', m.isOfficialHost('api.mhsapi.top') === false)
+a('中转 relay-one.example.com', m.isOfficialHost('relay-one.example.com') === false)
+a('中转 api.relay-two.example.net', m.isOfficialHost('api.relay-two.example.net') === false)
 a('后缀不被伪造域名骗', m.isOfficialHost('api.xiaomimimo.com.attacker.net') === false)
 a('子域不冒充精确条目', m.isOfficialHost('evil.api.deepseek.com.cn') === false)
 a('空/非字符串', m.isOfficialHost('') === false && m.isOfficialHost(undefined) === false)
 
-// ==== parseProviderBaseURLs: 真实 settings.yaml ====
-const real = readFileSync(process.env.DSH_HOME ? process.env.DSH_HOME + '/settings.yaml' : (process.env.HOME || '/root') + '/.dsh/settings.yaml', 'utf8')
+// ==== parseProviderBaseURLs: 真实 settings.yaml 形状（内联夹具）====
+// 原来这里直读 ~/.dsh/settings.yaml —— 那是运行机器上的私有文件，clone 到别处 / 在 CI 里
+// 一律 ENOENT 崩掉（v1.3.2 首次 CI 实测），而且断言里会带上使用者的真实中转站名与域名。
+// 现改为内联夹具：**结构与真实文件逐项对齐**（provider 名下 apiKeyEnv/api/baseURL/compat 混排、
+// compat 更深一层缩进、models 是带 `- id:` 与空值子键的列表、部分 provider 故意不写 baseURL），
+// 但 provider 名与中转域名全部用占位值。这样既保住回归价值，又不依赖任何机器上的文件。
+const real = `llm-pi-ai:
+  providers:
+    zhipu:
+      apiKeyEnv: ZHIPU_API_KEY
+      api: openai-completions
+      baseURL: https://open.bigmodel.cn/api/paas/v4
+      compat:
+        thinkingFormat: zai
+      models:
+        - id: glm-5.3-flash
+          name: GLM-5.3-Flash
+          contextWindow: 200000
+          maxTokens: 131072
+          reasoningEfforts:
+            off:
+            high: high
+    vendor-a:
+      apiKeyEnv: VENDOR_A_API_KEY
+      models:
+        - id: some-model
+          contextWindow: 131072
+    relay-one:
+      apiKeyEnv: RELAY_ONE_API_KEY
+      api: openai-completions
+      baseURL: https://relay-one.example.com/v1
+      models:
+        - id: claude-opus-5
+          contextWindow: 200000
+    vendor-b:
+      models:
+        - id: another-model
+    relay-two:
+      baseURL: https://relay-one.example.com/v1
+    relay-three:
+      baseURL: https://relay-three.example.net/v1
+      compat:
+        thinkingFormat: openai
+    relay-four:
+      baseURL: https://relay-four.example.org/v1
+`
 const realUrls = m.parseProviderBaseURLs(real)
-a('真实文件抓到 zhipu', realUrls.zhipu === 'https://open.bigmodel.cn/api/paas/v4')
-a('真实文件抓到中转 new', realUrls.new === 'https://api.mhsapi.top/v1')
-a('真实文件不给 xiaomi 表态(无 baseURL)', !('xiaomi' in realUrls))
-a('真实文件不给 opencode 表态(无 baseURL)', !('opencode' in realUrls))
+a('夹具抓到 zhipu(官方域名)', realUrls.zhipu === 'https://open.bigmodel.cn/api/paas/v4')
+a('夹具抓到中转 relay-one', realUrls['relay-one'] === 'https://relay-one.example.com/v1')
+a('无 baseURL 的 vendor-a 不表态', !('vendor-a' in realUrls))
+a('无 baseURL 的 vendor-b 不表态', !('vendor-b' in realUrls))
+a('compat 更深缩进不干扰后续 provider', realUrls['relay-three'] === 'https://relay-three.example.net/v1')
 const realKinds = m.computeProviderKinds(real)
-eq('真实文件 kinds', realKinds, {
-  zhipu: 'official', jiyuan: 'relay', jiyuanlvdong: 'relay',
-  new: 'relay', sw: 'relay', dshzuoxhe: 'relay',
+eq('夹具 kinds', realKinds, {
+  zhipu: 'official',
+  'relay-one': 'relay', 'relay-two': 'relay', 'relay-three': 'relay', 'relay-four': 'relay',
 })
 
 // ==== parseProviderBaseURLs: 边界 ====
