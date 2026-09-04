@@ -76,6 +76,12 @@ dsh plugin --profile web add file:/root/dsha-api-dashboard
 > - **通用 `MODEL_PRICES`**：现役主力(OpenAI GPT-5.6 / Claude 4.x·5 / Gemini 3.x / Kimi K3·K2.x / StepFun / 豆包 Seed 2.0 / 混元 2.0) 来自 NousResearch hermes-agent `usage_pricing.py`、StepFun[官方定价](https://platform.stepfun.com/docs/zh/guides/pricing/details)、[modelradar.cn](https://modelradar.cn/data/models.json)(各条带 sourceUrl 指向厂商官方页)等，**统一存 USD/百万tokens 基准**：StepFun / MiMo / Qwen / 豆包 / 混元官方页是 CNY，入库前 **÷7 换算成 USD**（注释里标了原 CNY 价）；`resolveModelPrice` 返回时按用户「计价货币」换算（选 CNY ×7、选 USD 原样，与 DeepSeek `V4_RATES` 两套表口径一致）。一手价未取到的模型→落 defaultPrices(未定价)，**别乱填**。旧模型(2025-08)条目标为"历史/参考"。仅估算用，实际以平台为准。
 > - ⚠️ **第三方聚合源只作参考，与原表冲突时不要盲信**：modelradar 2026-09-03 快照里 GPT-5.6 系输出价全呈「输入×1.25」异常模式(疑似抓错列)、且不跟踪促销价(qwen3.7-max 报的是原价) → **这两类已故意未采纳**，注释中有标注，别当遗漏"修回去"。
 > - 🔴 **`cacheHit` 缺官方佐证时别标「无缓存折扣」**（v1.2.3 血泪）：`glm-5.3-flash` 曾被标 `cacheHit = cacheMiss`，长会话数百万缓存读 token 全按全价计 → 用户实际充值 5 元、面板显示消耗 ¥9.93。GLM 系缓存读实为**输入的 20%**（同表 `glm-5.2` 0.26/1.4、`glm-5-turbo` 0.24/1.2 交叉佐证 + 用户真实账单反推；**非官方明文**，拿到官方价以官方为准）。已加回归断言「GLM 系 `cacheHit` 必须 < `cacheMiss`」。**真的无折扣才写等值，不确定就按同厂同系比例推并注明依据。**
+> - 💱 **v1.3.2 起币种不是全局唯一的**：`resolveModelPrice` 的币种由 `currencyForModel(config, model)` 决定——
+>   海外模型（`modelRegion(model)==='海外'`）在 `overseasCurrency` 非 `'follow'` 时走它，其余跟 `currency`。
+>   **改价格解析时别再假设「一个会话只有一种货币」**：`makeCostProjection` 的视图给的是 `costByCurrency`（按币种分组），
+>   混合会话客户端两段拼接显示，**绝不要为了凑成一个数字而按汇率折算合并**——那正是 v1.2.x 想摆脱的 ×7 误差来源。
+>   `modelRegion` 未命中的模型**不表态、走主货币**（保守），新增模型时若产地重要，去补 `OVERSEAS_MODEL_PREFIXES` /
+>   `DOMESTIC_MODEL_PREFIXES` 前缀表，别在别处硬编码判定。
 > - ⏰ **促销价有时效，到期要更新**：`glm-5.3-flash` 促销 **2026-09-09 到期**（最近）；`gemini-3.8/3.7/3.6-flash` 2026-12-31 到期后翻倍；`gpt-5.6-sol` 促销至少到 2026-11-21(列表价 $5/$30)；`qwen3.7-max` 5 折、`qwen3.8-max` 90 天/100 万 token 免费额度。`qwen3.8-max` 夜间 22:00-08:00 五折**未实现**（峰谷引擎目前只服务 DeepSeek）。
 
 ---
@@ -83,9 +89,9 @@ dsh plugin --profile web add file:/root/dsha-api-dashboard
 ## 四、维护铁律（改代码前必读）
 
 1. **先备份再改**：改 `client/client.js` 或 `src/index.js` 前，先 `tar` 一份 / 存回退点。用户习惯 A/B 对比+回滚。
-2. **推送前问用户**：用户明确说过「不需要推送，先本地测试」。别擅自推 GitHub。
+2. **推送前问维护者**：默认只做本地改动与本地测试。**别擅自推 GitHub / 发 npm**。
 3. **测试方法**：`node --check <文件>` 只查语法；真正的客户端改动要**重启 dsh web GUI** 才进 bundle。运行在容器里时别贸然重启(会断会话)。
-4. **改 UI 结构要克制**：用户 UI 方向还没定(试过半屏/三Tab/核心分组都被否)。用户认可的是「**玻璃背景**」这一项。别擅自大改 UI 结构。
+4. **改 UI 结构要克制**：UI 方向尚未定稿(半屏/三Tab/核心分组几种方案均已否决)，已确认保留的是「**玻璃背景**」。别擅自大改 UI 结构。
 5. **玻璃色经验**：浅色用纯白 rtgba(255,255,255,0.72)，深色走 `@media(prefers-color-scheme:dark)`。**别用 CSS `color-mix` 跟 token 推玻璃色**——会发灰。
 6. **版本闭环**：任何对已发布功能的改动，记得 bump `package.json`/`package-lock.json` 版本 + 更新 README changelog，推 GitHub 后老用户面板会提示更新。
 7. **provider 判定别改回硬编码名单**：官方/中转三层判定（用户显式名单 → settings.yaml 的 baseURL 域名白名单 → `-official` 后缀）是开源化改造的关键，**千万别把「官方 provider 名单」写回客户端硬编码**——别人的中转站叫什么猜不到。判定的服务端逻辑在 `src/index.js` 的 `parseProviderBaseURLs` / `computeProviderKinds` / `isOfficialHost`，客户端落地在 `client/client.js` 的 `isRelayProvider(provider, config)`。没写 baseURL 的 provider 是「不表态、交后缀兜底」，**别**去读 pi-ai 内置目录补官方域名（`xiaomi` 就是内置目录指向官方域名、但 key 实际来自中转站的反例）。
@@ -103,7 +109,6 @@ dsh plugin --profile web add file:/root/dsha-api-dashboard
 ## 六、开源发布前待办（2026-09-04 校准）
 
 ### 仍未完成
-- [ ] **重启 `dsh web`** —— v1.2.1~v1.2.6 客户端改动未进 bundle（会断会话，用户在场再操作）
 - [ ] 推送前自检：文件树无 `.dsh/`、无本地状态文件、无任何 API key（**推送需仓库维护者授权，代理不得擅自推**）
 - [ ] 验证 B 栏（OpenRouter/siliconflow/Novita/one-api/xAI）的真实字段，修正解析（**需真实 key**）
 - [ ] `glm-5-turbo` model id 官方确认（`model_id_mapping.json` 标 `confirmed: false`）
@@ -115,4 +120,4 @@ dsh plugin --profile web add file:/root/dsha-api-dashboard
 - [x] provider 官方/中转三层判定（原唯一开源阻断项）
 - [x] 价格表币种统一 USD 基准 + `resolveModelPrice` 按 currency 换算
 - [x] 安全审计（无高危）+ 4 项加固：状态文件强制 0600、请求体 256KB 上限、输入清洗、officialProviders 上限
-- [x] 测试脚本入仓 `test/` 并改相对路径（clone 即可跑，9 文件 139 断言）
+- [x] 测试脚本入仓 `test/` 并改相对路径（clone 即可跑，**10 文件 190 断言**）

@@ -418,6 +418,7 @@ window.__ModuleLoader__.load({
       "detail.total": "当前余额", "detail.topup": "总充值", "detail.used": "总使用", "detail.note": "类型",
       "detail.sessionCost": "本会话消耗", "detail.noBalance": "该平台未开放余额查询",
       "settings.safe": "安全阈值(绿)", "settings.warn": "预警阈值(黄)", "settings.currency": "计价货币",
+      "settings.overseasCurrency": "海外模型计价", "settings.overseasFollow": "跟随主货币", "settings.overseasHint": "海外厂商官方价本就是美元, 选美元可免去 ×7 折算误差",
       "settings.safeHint": "余额高于此值显示绿色(安全)",
       "settings.warnHint": "余额低于此值显示黄色(偏低)，再低显示红",
       "settings.refresh": "刷新间隔(秒)", "settings.refreshHint": "5~60 秒，最高一分钟",
@@ -472,6 +473,7 @@ window.__ModuleLoader__.load({
       "detail.total": "Balance", "detail.topup": "Top-up", "detail.used": "Used", "detail.note": "Type",
       "detail.sessionCost": "Session cost", "detail.noBalance": "No balance API",
       "settings.safe": "Safe (green)", "settings.warn": "Warn (yellow)", "settings.currency": "Currency",
+      "settings.overseasCurrency": "Overseas models", "settings.overseasFollow": "Follow main", "settings.overseasHint": "Overseas vendors price in USD; picking USD avoids the x7 conversion error",
       "settings.safeHint": "Above this = green (safe)",
       "settings.warnHint": "Below this = yellow, lower = red",
       "settings.refresh": "Refresh (sec)", "settings.refreshHint": "5-60s, max one minute",
@@ -568,6 +570,38 @@ window.__ModuleLoader__.load({
     //#region helpers
     const CURRENCY_SYMBOLS = { CNY: "¥", USD: "$", EUR: "€" };
     const currencySymbol = (c) => { if (c === "%" || c === "tokens") return ""; return CURRENCY_SYMBOLS[c] || c + " "; };
+    /**
+     * v1.3.2: 会话消耗格式化 —— 海外模型可独立走 USD, 一个会话可能同时有两种货币。
+     * 不做汇率折算合并 (折算=再引入 ×7 误差, 正是用户「¥1285 被看成 $1285」的成因),
+     * 改为两段拼接: ~¥3.40+$12.50。主货币排在前。
+     * 返回 { text, title, mixed }; 无数据返回 null。
+     */
+    function formatSessionCost(cost) {
+      if (!cost || typeof cost.cost !== "number" || cost.waiting === true) return null;
+      const mainCur = cost.currency || "CNY";
+      const symOf = (c) => (c === "CNY" ? "¥" : c === "USD" ? "$" : c + " ");
+      const fixOf = (a) => (a >= 1 ? 2 : a >= 0.01 ? 3 : a >= 0.001 ? 4 : a >= 0.0001 ? 5 : 6);
+      const byCur = cost.costByCurrency && typeof cost.costByCurrency === "object" ? cost.costByCurrency : null;
+      let segs = [];
+      if (byCur) {
+        segs = Object.keys(byCur)
+          .filter((k) => typeof byCur[k] === "number" && byCur[k] > 0)
+          .sort((a, b) => (a === mainCur ? -1 : b === mainCur ? 1 : byCur[b] - byCur[a]))
+          .map((k) => ({ cur: k, amount: byCur[k] }));
+      }
+      // 旧 bundle / 未开启独立币种 / 全零 → 退回单段, 行为同 v1.2.6
+      if (segs.length === 0) segs = [{ cur: mainCur, amount: cost.cost }];
+      const mixed = segs.length > 1;
+      // hasValue: 是否真有非零金额。不能用 cost.cost > 0 判断 —— 开启海外独立币种后,
+      // 纯 claude 会话的主货币段就是 0, 金额全在 USD 段里 (详情页会误显示成「—」)。
+      const hasValue = segs.some((x) => x.amount > 0);
+      return {
+        text: segs.map((x) => symOf(x.cur) + x.amount.toFixed(fixOf(x.amount))).join("+"),
+        title: segs.map((x) => symOf(x.cur) + x.amount.toFixed(6)).join(" + ") + (mixed ? " (两种货币, 未按汇率合并)" : ""),
+        mixed: mixed,
+        hasValue: hasValue,
+      };
+    }
     function formatMoney(amount, currency) {
       if (typeof amount !== "number" || isNaN(amount)) return currencySymbol(currency) + "0";
       if (currency === "%") return Math.round(amount) + "%";
@@ -981,7 +1015,8 @@ window.__ModuleLoader__.load({
       const b = (data.balances || []).find(x => x.platform === platformId);
       if (!b) return null;
       const meta = metaFor(b.platform), level = getLevel(b, config);
-      const costVal = cost && cost.cost > 0 ? formatMoney(cost.cost, cost.currency || "CNY") : "—";
+      const costFmtDetail = formatSessionCost(cost);
+      const costVal = costFmtDetail !== null && costFmtDetail.hasValue ? costFmtDetail.text : "—";
       const cur = b.currency || "USD";
 
       // DeepSeek 峰谷趣味卡片
@@ -1109,6 +1144,8 @@ window.__ModuleLoader__.load({
       const [safe, setSafe] = react.useState(50);
       const [warn, setWarn] = react.useState(10);
       const [currency, setCurrency] = react.useState("CNY");
+      // v1.3.2: 海外模型独立计价货币 follow|USD|CNY
+      const [overseasCurrency, setOverseasCurrency] = react.useState("follow");
       const [refreshSec, setRefreshSec] = react.useState(5);
       const [whaleOn, setWhaleOn] = react.useState(!!(config && config.whaleEnabled));
       const [showBrands, setShowBrands] = react.useState(!!(config && config.showNoBalanceBrands));
@@ -1175,6 +1212,7 @@ window.__ModuleLoader__.load({
         setSafe(config?.safeThreshold ?? 50);
         setWarn(config?.warnThreshold ?? 10);
         setCurrency(config?.currency ?? "CNY");
+        setOverseasCurrency(config?.overseasCurrency ?? "follow");
         setRefreshSec(Math.round((config?.clientPollIntervalMs || 5000) / 1000) || 5);
         setWhaleOn(!!(config && config.whaleEnabled));
         let cancelled = false;
@@ -1184,6 +1222,7 @@ window.__ModuleLoader__.load({
             setRelays(d.customRelays || []);
             setModels(d.customModels || []);
             if (d.refreshIntervalSec) setRefreshSec(d.refreshIntervalSec);
+            if (typeof d.overseasCurrency === "string") setOverseasCurrency(d.overseasCurrency);
             if (typeof d.whaleEnabled === "boolean") setWhaleOn(d.whaleEnabled);
             if (Array.isArray(d.officialProviders)) setOfficialText(d.officialProviders.join(", "));
             if (d.providerKinds && typeof d.providerKinds === "object") setProviderKinds(d.providerKinds);
@@ -1212,7 +1251,7 @@ window.__ModuleLoader__.load({
         try {
           await fetch("/api-dashboard/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
             customRelays: relays, customModels: models,
-            safeThreshold: Number(safe), warnThreshold: Number(warn), currency,
+            safeThreshold: Number(safe), warnThreshold: Number(warn), currency, overseasCurrency,
             refreshIntervalSec: Math.min(Math.max(Number(refreshSec) || 5, 5), 60),
             whaleEnabled: !!whaleOn,
             officialProviders: officialText,
@@ -1303,6 +1342,16 @@ window.__ModuleLoader__.load({
               react.createElement("option", { value: "CNY", key: "c1" }, t("cmn")),
               react.createElement("option", { value: "USD", key: "c2" }, t("usd")),
             ]),
+          ]),
+          // v1.3.2: 海外模型 (gpt/claude/gemini/grok...) 可独立选币种, follow=跟随上面的主货币
+          react.createElement("div", { key: "ocur" }, [
+            react.createElement("label", { className: "dshadb_label", key: "ocur_l" }, t("settings.overseasCurrency")),
+            react.createElement("select", { className: "dshadb_field", value: overseasCurrency, onChange: (e) => setOverseasCurrency(e.target.value), key: "ocur_s" }, [
+              react.createElement("option", { value: "follow", key: "o0" }, t("settings.overseasFollow")),
+              react.createElement("option", { value: "USD", key: "o1" }, t("usd")),
+              react.createElement("option", { value: "CNY", key: "o2" }, t("cmn")),
+            ]),
+            react.createElement("span", { style: { fontSize: "10px", color: "var(--dsw-alias-label-tertiary)" }, key: "ocur_h" }, t("settings.overseasHint")),
           ]),
           react.createElement("div", { key: "refresh" }, [
             react.createElement("label", { className: "dshadb_label", key: "rf_l" }, t("settings.refresh")),
@@ -2135,13 +2184,10 @@ window.__ModuleLoader__.load({
           // 本会话消耗节点 (无条件渲染, waiting=true 显示 ~— 等待数据, 否则精确到6位)
           let costText = "~—"
           let costTitle = t("detail.sessionCost") + " — 等待数据"
-          if (cost !== undefined && typeof cost.cost === 'number' && cost.waiting !== true) {
-            const amount = cost.cost
-            const cur = cost.currency || "CNY"
-            const sym = cur === "CNY" ? "¥" : cur === "USD" ? "$" : cur + " "
-            const fixed = amount >= 1 ? 2 : amount >= 0.01 ? 3 : amount >= 0.001 ? 4 : amount >= 0.0001 ? 5 : 6
-            costText = "~" + sym + amount.toFixed(fixed)
-            costTitle = "本会话消耗: " + sym + amount.toFixed(6) + (cost.models && cost.models.length ? " | 模型: " + cost.models.join(", ") : "")
+          const costFmt = formatSessionCost(cost)
+          if (costFmt !== null) {
+            costText = "~" + costFmt.text
+            costTitle = "本会话消耗: " + costFmt.title + (cost.models && cost.models.length ? " | 模型: " + cost.models.join(", ") : "")
           } else if (cost !== undefined && cost.waiting === true) {
             costText = "~—"
             costTitle = "本会话消耗 — 等待数据, 发消息后自动更新"

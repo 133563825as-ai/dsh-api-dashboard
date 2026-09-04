@@ -31,4 +31,31 @@ a('step-3.5-flash ÷7 = 0.10/0.30', pUsd('step-3.5-flash').cacheMiss===0.10 && p
 a('gpt-5.6-sol CNY ×7 = 28/140', pCny('gpt-5.6-sol').cacheMiss===28 && pCny('gpt-5.6-sol').output===140)
 a('claude-opus-5 CNY ×7 = 35/175', pCny('claude-opus-5').cacheMiss===35 && pCny('claude-opus-5').output===175)
 a('gemini-3.7-flash CNY ×7 = 5.25/26.25', pCny('gemini-3.7-flash').cacheMiss===5.25 && pCny('gemini-3.7-flash').output===26.25)
+
+// ===== v1.3.2 海外模型独立计价货币 =====
+// 产地判定
+a('R1 claude 判海外', m.modelRegion('claude-opus-5-thinking')==='海外')
+a('R1 gpt 判海外', m.modelRegion('gpt-5.6-sol')==='海外')
+a('R1 gemini 判海外', m.modelRegion('gemini-3.8-flash')==='海外')
+a('R1 grok 判海外', m.modelRegion('grok-4')==='海外')
+a('R1 deepseek 判国内', m.modelRegion('deepseek-v4-flash')==='国内')
+a('R1 glm 判国内', m.modelRegion('glm-5.3-flash')==='国内')
+a('R1 doubao/hunyuan 判国内', m.modelRegion('doubao-seed-2.0-pro-32k')==='国内' && m.modelRegion('hunyuan-turbo-s')==='国内')
+a('R1 未知模型不表态', m.modelRegion('some-random-model')===null && m.modelRegion('')===null && m.modelRegion(null)===null)
+// currencyForModel: follow(默认) 时一律跟主货币
+a('R2 follow 时海外跟 CNY', m.currencyForModel({ currency:'CNY' }, 'claude-opus-5')==='CNY')
+a('R2 follow 时海外跟 USD', m.currencyForModel({ currency:'USD' }, 'claude-opus-5')==='USD')
+// 开启后只影响海外模型
+a('R2 海外走 USD', m.currencyForModel({ currency:'CNY', overseasCurrency:'USD' }, 'claude-opus-5')==='USD')
+a('R2 国内仍走 CNY', m.currencyForModel({ currency:'CNY', overseasCurrency:'USD' }, 'deepseek-v4-flash')==='CNY')
+a('R2 未知模型走主货币(保守)', m.currencyForModel({ currency:'CNY', overseasCurrency:'USD' }, 'some-random-model')==='CNY')
+a('R2 脏值当 follow', m.currencyForModel({ currency:'CNY', overseasCurrency:'EUR' }, 'claude-opus-5')==='CNY')
+// 价格实际口径: 开启后 claude 不再 ×7, deepseek 仍是 CNY 表
+const cfgMix = { currency:'CNY', overseasCurrency:'USD' }
+a('R3 claude 开启后 = USD 原值 5/25', m.resolveModelPrice(cfgMix,'claude-opus-5').cacheMiss===5 && m.resolveModelPrice(cfgMix,'claude-opus-5').output===25)
+a('R3 deepseek 不受影响(仍 CNY 峰谷表)', [3,1.5].includes(m.resolveModelPrice(cfgMix,'deepseek-v4-flash').cacheMiss))
+a('R3 glm 不受影响 CNY ×7 = 1.05', Math.abs(m.resolveModelPrice(cfgMix,'glm-5.3-flash').cacheMiss - 1.05) < 1e-9)
+// 回归: 默认配置(无 overseasCurrency)必须与 v1.2.6 完全一致
+a('R4 默认 claude CNY ×7 = 35/175', pCny('claude-opus-5').cacheMiss===35 && pCny('claude-opus-5').output===175)
+
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`)

@@ -43,6 +43,8 @@
 
 ### 完整设置面板
 - 安全阈值 / 预警阈值 / 计价货币 / 自定义中转站管理
+- **海外模型计价货币可独立选择 (v1.3.2)**：跟随主货币 / 美元 / 人民币。
+  海外厂商官方价本就是 USD，选美元可免去 ×7 折算误差；混合会话按币种两段显示 `~¥3.40+$12.50`，不折算合并
 - 设置齿轮直接出现在状态条右侧
 
 ### 自动刷新 (v0.4.4)
@@ -128,6 +130,8 @@ dsh plugin --profile web add file:/root/dsha-api-dashboard
     safeThreshold: 50
     warnThreshold: 10
     currency: CNY
+    # v1.3.2: 海外模型独立计价货币 follow(默认, 跟随 currency) | USD | CNY
+    overseasCurrency: follow
     refreshIntervalMs: 300000
     clientPollIntervalMs: 30000
     timeoutMs: 8000
@@ -223,6 +227,8 @@ v1.2.3 — **修复 GLM-5.3-flash 缓存读价误标**（用户实测反馈：�
 v1.2.4 — **parse-error 透传接口业务错误消息**：智谱套餐过期实测返回 HTTP 200 + `{"code":500,"msg":"当前用户不存在coding plan","success":false}`，原逻辑只显示笼统的「无法解析余额数据」，误导用户以为是解析代码坏了；现在识别业务层错误（`success:false` 或 `code≠200` 且带 `msg`）并透传原始消息（显示为「无法解析余额数据 (接口返回: 当前用户不存在coding plan)」），适用于全部预设平台
 v1.2.5 — **智谱按量付费账户改为中性「未开放」展示**：实测按量付费用户（非 Coding Plan 套餐）调用配额接口返回「当前用户不存在coding plan」，且候选余额端点（`/api/monitor/account/balance`、`/api/paas/v4/dashboard/billing/*` 等）全部 404 —— 智谱按量付费无公开余额接口；识别该业务消息后状态从红色 parse-error 改为 no-balance-api，其余业务错误仍透传原始消息
 v1.2.6 — **智谱四类账户分流固化 + 套餐用户回归测试**（开源前防回归）：业务错误分类抽为可单测的 `classifyBizError(queryType, json)`；新增 13 条断言覆盖 Coding Plan 套餐用户（有额度 / 周配额用完 / 全用尽三种形状必须照常出配额，**绝不能被按量付费改动吞掉**）、按量付费/套餐过期（中性未开放）、其他业务错误（透传 msg）、非智谱平台不误套规则、JSON 解析失败保持原文案；文案不替平台断言账户类型——按量付费与套餐已过期返回**同一条** `msg`，接口层无法区分，故统一表述为「无 Coding Plan 套餐（按量付费 / 套餐已过期均返回此结果）」
+
+v1.3.2 — **海外模型可独立选计价货币**（用户实测反馈：面板显示 ¥1285 被误读成 $1285，实为 $183.7）：设置里「计价货币」下方新增「海外模型计价」下拉（跟随主货币 / 美元 / 人民币，**默认「跟随」= v1.2.6 行为完全不变**）。海外厂商官方定价页本来就是 USD，选美元即绕开 ×7 折算带来的误差与「¥ 被看成 $」的误读。新增 `modelRegion(model)` 前缀判定产地（`gpt`/`claude`/`gemini`/`grok`/`mistral` 等 → 海外，`deepseek`/`glm`/`kimi`/`qwen`/`doubao`/`hunyuan`/`step`/`mimo`/`minimax` 等 → 国内，**未命中一律不表态、走主货币**）与 `currencyForModel(config, model)`；会话消耗投影改为按币种分组 `costByCurrency`，混合会话（如 claude + deepseek）**不按汇率折算合并**，状态条两段拼接显示 `~¥3.40+$12.50`——折算等于把刚修掉的 ×7 误差又引回来。新增 `test-cost-currency.mjs`（18 断言）+ 产地/币种断言 17 条 + 客户端格式化器断言 15 条，全套 10 文件 190 断言
 
 ## License
 

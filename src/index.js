@@ -595,11 +595,45 @@ export const MODEL_PRICES = {
   'openrouter-auto':      { cacheHit: 0.5,   cacheMiss: 1,    output: 2 },
 }
 
+// v1.3.2: 模型产地判定 —— 供「海外模型独立计价货币」使用。
+// 海外厂商官方定价页本来就是 USD, ×7 折人民币只是近似且容易被误读成美元
+// (用户实测: 面板 ¥1285 被看成 $1285, 实为 $183.7); 国内厂商官方页是 CNY, 入库时已 ÷7 存 USD 基准。
+// 判定按前缀, 与 MODEL_PRICES 的键同源; 未命中 → null (不表态, 走主货币, 保守)。
+const OVERSEAS_MODEL_PREFIXES = ['gpt-', 'gpt', 'o1', 'o3', 'o4', 'chatgpt', 'claude', 'gemini', 'grok', 'mistral', 'groq-', 'llama', 'command-', 'openrouter-']
+const DOMESTIC_MODEL_PREFIXES = ['deepseek', 'glm', 'kimi', 'moonshot', 'step-', 'qwen', 'mimo', 'doubao', 'hunyuan', 'minimax', 'abab', 'ernie', 'spark', 'yi-']
+
+/** 判定模型产地: '海外' | '国内' | null(未知, 不表态)。前缀匹配取最长, 避免短前缀误命中。 */
+export const modelRegion = (model) => {
+  if (typeof model !== 'string' || model === '') return null
+  const m = model.toLowerCase()
+  const hit = (list) => list.filter(p => m.startsWith(p)).sort((a, b) => b.length - a.length)[0] ?? null
+  const dom = hit(DOMESTIC_MODEL_PREFIXES)
+  const sea = hit(OVERSEAS_MODEL_PREFIXES)
+  if (dom !== null && sea !== null) return dom.length >= sea.length ? '国内' : '海外'
+  if (dom !== null) return '国内'
+  if (sea !== null) return '海外'
+  return null
+}
+
+/**
+ * v1.3.2: 算出某模型实际该用哪种计价货币。
+ * 海外模型且 overseasCurrency 不是 'follow' 时用它, 其余一律跟主货币 currency。
+ * 默认 overseasCurrency='follow' → 行为与 v1.2.6 完全一致。
+ */
+export const currencyForModel = (config, model) => {
+  const main = (config?.currency ?? 'CNY').toUpperCase()
+  const over = String(config?.overseasCurrency ?? 'follow').toLowerCase()
+  if (over === 'follow' || over === '') return main
+  if (modelRegion(model) !== '海外') return main
+  return over.toUpperCase() === 'USD' ? 'USD' : 'CNY'
+}
+
 /** 解析模型单价, 仅 deepseek-v4-* 支持峰谷自动切换; chat/reasoner 等走通用价格表 */
 export const resolveModelPrice = (configOrGetter, model, timestamp = Date.now()) => {
   const config = typeof configOrGetter === 'function' ? configOrGetter() : configOrGetter
   const peak = isPeakTime(timestamp)
-  const isUsd = (config?.currency ?? 'CNY').toUpperCase() === 'USD'
+  // v1.3.2: 币种按「该模型」决定, 而非全局唯一 —— 海外模型可独立走 USD (见 currencyForModel)
+  const isUsd = currencyForModel(config, model) === 'USD'
   // MODEL_PRICES 与 defaultPrices 都存 USD 基准; 用户计价货币非 USD 时 ×7 换算, 与 V4_RATES 两套表口径一致
   const toCurrency = (price) => (isUsd ? price : { cacheHit: price.cacheHit * USD_TO_CNY_RATE, cacheMiss: price.cacheMiss * USD_TO_CNY_RATE, output: price.output * USD_TO_CNY_RATE })
 
@@ -720,6 +754,11 @@ export const Config = Schema.object({
   warnThreshold: Schema.number().min(0).default(10),
   /** 计价货币 */
   currency: Schema.string().default('CNY'),
+  /**
+   * v1.3.2: 海外模型独立计价货币 —— 'follow'(跟随 currency, 默认) | 'USD' | 'CNY'。
+   * 海外厂商官方价本来就是 USD, 选 'USD' 可免掉 ×7 折算带来的误差与「¥ 被看成 $」的误读。
+   */
+  overseasCurrency: Schema.string().default('follow'),
   prices: Schema.dict(Schema.object({
     cacheHit: Schema.number().min(0).default(0.2),
     cacheMiss: Schema.number().min(0).default(2),
@@ -1255,6 +1294,11 @@ export function makeCostProjection(configOrGetter) {
         currentProvider: z.string().nullable().optional(),
         cost: z.number(),
         costByModel: z.record(z.string(), z.number().nonnegative()),
+        // v1.3.2: 海外模型可独立走 USD, 于是一个会话可能同时产生两种货币的消耗。
+        // 不做汇率折算合并 (折算=再引入 ×7 误差), 客户端两段拼接显示。
+        costByCurrency: z.record(z.string(), z.number().nonnegative()).optional(),
+        currencyByModel: z.record(z.string(), z.string()).optional(),
+        mixedCurrency: z.boolean().optional(),
         tokens: z.object({ uncachedInput: z.number().int().nonnegative(), cacheRead: z.number().int().nonnegative(), cacheWrite: z.number().int().nonnegative(), output: z.number().int().nonnegative() }).strict(),
         tokensByModel: z.record(z.string(), z.object({ uncachedInputTokens: z.number().int().nonnegative(), cacheReadTokens: z.number().int().nonnegative(), cacheWriteTokens: z.number().int().nonnegative(), outputTokens: z.number().int().nonnegative() }).strict()).optional(),
         currency: z.string(),
@@ -1265,10 +1309,13 @@ export function makeCostProjection(configOrGetter) {
       const cfg = getConfig()
       // 无事件时返回 waiting 标记, 客户端据此显示 "~—" 而非 "~¥0"
       if (state.modelOrder.length === 0) {
-        return { models: [], currentModel: state.currentModel ?? null, currentProvider: state.currentProvider ?? null, cost: -1, costByModel: {}, tokens: { uncachedInput: 0, cacheRead: 0, cacheWrite: 0, output: 0 }, tokensByModel: {}, currency: cfg.currency ?? 'CNY', isPeak: isPeakTime(), waiting: true }
+        return { models: [], currentModel: state.currentModel ?? null, currentProvider: state.currentProvider ?? null, cost: -1, costByModel: {}, costByCurrency: {}, currencyByModel: {}, mixedCurrency: false, tokens: { uncachedInput: 0, cacheRead: 0, cacheWrite: 0, output: 0 }, tokensByModel: {}, currency: cfg.currency ?? 'CNY', isPeak: isPeakTime(), waiting: true }
       }
       const tokens = { uncachedInput: 0, cacheRead: 0, cacheWrite: 0, output: 0 }
       const costByModel = {}
+      const costByCurrency = {}
+      const currencyByModel = {}
+      const mainCurrency = (cfg.currency ?? 'CNY').toUpperCase()
       let cost = 0
       const defaultPrice = cfg.defaultPrices ?? { cacheHit: 0.1, cacheMiss: 1, output: 2 }
       const peak = isPeakTime()
@@ -1281,10 +1328,19 @@ export function makeCostProjection(configOrGetter) {
         // 支持 DeepSeek 谷峰自动计费
         const price = resolveModelPrice(cfg, model)
         const c = ((b.uncachedInputTokens + b.cacheWriteTokens) * price.cacheMiss + b.cacheReadTokens * price.cacheHit + b.outputTokens * price.output) / 1e6
-        if (c > 0) costByModel[model] = round6(c)
-        cost += c
+        // v1.3.2: 该模型实际币种 (海外模型可能与主货币不同)
+        const cur = currencyForModel(cfg, model)
+        if (c > 0) {
+          costByModel[model] = round6(c)
+          currencyByModel[model] = cur
+          costByCurrency[cur] = round6((costByCurrency[cur] ?? 0) + c)
+        }
+        // cost 仍只汇总「主货币」那一份, 保持字段语义单一 (混合时另一半在 costByCurrency 里)。
+        // overseasCurrency='follow' (默认) 时所有模型都是主货币, cost === 全部合计, 与 v1.2.6 一致。
+        if (cur === mainCurrency) cost += c
       }
-      return { models: state.modelOrder, currentModel: state.currentModel ?? null, currentProvider: state.currentProvider ?? null, cost: round6(cost), costByModel, tokens, tokensByModel: state.byModel, currency: cfg.currency ?? 'CNY', isPeak: peak, waiting: false }
+      const mixedCurrency = Object.keys(costByCurrency).length > 1
+      return { models: state.modelOrder, currentModel: state.currentModel ?? null, currentProvider: state.currentProvider ?? null, cost: round6(cost), costByModel, costByCurrency, currencyByModel, mixedCurrency, tokens, tokensByModel: state.byModel, currency: mainCurrency, isPeak: peak, waiting: false }
       },
     },
     stateVersion: 1,
@@ -1307,6 +1363,8 @@ export function apply(ctx, config) {
     prices: config.prices ?? { 'deepseek-chat': { cacheHit: 0.1, cacheMiss: 1, output: 2 } },
     defaultPrices: config.defaultPrices ?? { cacheHit: 0.1, cacheMiss: 1, output: 2 },
     currency: persisted.currency ?? config.currency ?? 'CNY',
+    // v1.3.2: 海外模型独立计价货币 ('follow' = 跟随主货币, 默认, 行为同 v1.2.6)
+    overseasCurrency: persisted.overseasCurrency ?? config.overseasCurrency ?? 'follow',
     safeThreshold: persisted.safeThreshold ?? config.safeThreshold ?? 50,
     warnThreshold: persisted.warnThreshold ?? config.warnThreshold ?? 10,
     whaleEnabled: persisted.whaleEnabled ?? config.whaleEnabled ?? false,
@@ -1399,6 +1457,7 @@ export function apply(ctx, config) {
           safeThreshold: runtimeConfig.safeThreshold,
           warnThreshold: runtimeConfig.warnThreshold,
           currency: runtimeConfig.currency,
+          overseasCurrency: runtimeConfig.overseasCurrency,
           isPeak: isPeakTime(),
           isWeekend: isWeekend(),
           whaleEnabled: !!runtimeConfig.whaleEnabled,
@@ -1639,6 +1698,7 @@ export function apply(ctx, config) {
               customRelays: runtimeConfig.customRelays,
               customModels: runtimeConfig.customModels,
               currency: runtimeConfig.currency,
+              overseasCurrency: runtimeConfig.overseasCurrency,
               safeThreshold: runtimeConfig.safeThreshold,
               warnThreshold: runtimeConfig.warnThreshold,
               whaleEnabled: runtimeConfig.whaleEnabled,
@@ -1666,6 +1726,8 @@ export function apply(ctx, config) {
             customModels: runtimeConfig.customModels.map(m => ({ ...m, apiKey: m.apiKey ? '***' : '' })),
             presets: runtimeConfig.presets,
             refreshIntervalSec: Math.round(runtimeConfig.refreshIntervalMs / 1000),
+            currency: runtimeConfig.currency,
+            overseasCurrency: runtimeConfig.overseasCurrency,
             whaleEnabled: !!runtimeConfig.whaleEnabled,
             showNoBalanceBrands: !!runtimeConfig.showNoBalanceBrands,
             officialProviders: runtimeConfig.officialProviders,
@@ -1714,6 +1776,11 @@ export function apply(ctx, config) {
             if (typeof body.safeThreshold === 'number' && body.safeThreshold >= 0) runtimeConfig.safeThreshold = body.safeThreshold
             if (typeof body.warnThreshold === 'number' && body.warnThreshold >= 0) runtimeConfig.warnThreshold = body.warnThreshold
             if (typeof body.currency === 'string' && body.currency.trim()) runtimeConfig.currency = body.currency.trim().toUpperCase()
+            // v1.3.2: 海外模型独立计价货币, 只接受白名单三值 (脏值一律落回 follow, 不放行任意字符串)
+            if (typeof body.overseasCurrency === 'string') {
+              const v = body.overseasCurrency.trim().toLowerCase()
+              runtimeConfig.overseasCurrency = v === 'usd' ? 'USD' : v === 'cny' ? 'CNY' : 'follow'
+            }
             // v1.1.0: 收养大肥鱼开关
             if (typeof body.whaleEnabled === 'boolean') runtimeConfig.whaleEnabled = body.whaleEnabled
             // 显示无余额模型品牌
@@ -1730,6 +1797,7 @@ export function apply(ctx, config) {
               customRelays: runtimeConfig.customRelays,
               customModels: runtimeConfig.customModels,
               currency: runtimeConfig.currency,
+              overseasCurrency: runtimeConfig.overseasCurrency,
               safeThreshold: runtimeConfig.safeThreshold,
               warnThreshold: runtimeConfig.warnThreshold,
               whaleEnabled: runtimeConfig.whaleEnabled,
@@ -1742,6 +1810,8 @@ export function apply(ctx, config) {
               customRelays: runtimeConfig.customRelays.map(r => ({ ...r, apiKey: r.apiKey ? '***' : '' })),
               customModels: runtimeConfig.customModels.map(m => ({ ...m, apiKey: m.apiKey ? '***' : '' })),
               refreshIntervalSec: Math.round(runtimeConfig.refreshIntervalMs / 1000),
+              currency: runtimeConfig.currency,
+              overseasCurrency: runtimeConfig.overseasCurrency,
               whaleEnabled: !!runtimeConfig.whaleEnabled,
               showNoBalanceBrands: !!runtimeConfig.showNoBalanceBrands,
               officialProviders: runtimeConfig.officialProviders,
