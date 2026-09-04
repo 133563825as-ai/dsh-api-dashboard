@@ -59,3 +59,5 @@ a('R3 glm 不受影响 CNY ×7 = 1.05', Math.abs(m.resolveModelPrice(cfgMix,'glm
 a('R4 默认 claude CNY ×7 = 35/175', pCny('claude-opus-5').cacheMiss===35 && pCny('claude-opus-5').output===175)
 
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`)
+// v1.3.2: 断言失败时以非 0 退出, 否则 CI(GitHub Actions)拦不住回归 —— 原来一律 exit 0
+if (fail > 0) process.exitCode = 1

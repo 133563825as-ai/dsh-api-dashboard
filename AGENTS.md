@@ -94,7 +94,15 @@ dsh plugin --profile web add file:/root/dsha-api-dashboard
 4. **改 UI 结构要克制**：UI 方向尚未定稿(半屏/三Tab/核心分组几种方案均已否决)，已确认保留的是「**玻璃背景**」。别擅自大改 UI 结构。
 5. **玻璃色经验**：浅色用纯白 rtgba(255,255,255,0.72)，深色走 `@media(prefers-color-scheme:dark)`。**别用 CSS `color-mix` 跟 token 推玻璃色**——会发灰。
 6. **版本闭环**：任何对已发布功能的改动，记得 bump `package.json`/`package-lock.json` 版本 + 更新 README changelog，推 GitHub 后老用户面板会提示更新。
-7. **provider 判定别改回硬编码名单**：官方/中转三层判定（用户显式名单 → settings.yaml 的 baseURL 域名白名单 → `-official` 后缀）是开源化改造的关键，**千万别把「官方 provider 名单」写回客户端硬编码**——别人的中转站叫什么猜不到。判定的服务端逻辑在 `src/index.js` 的 `parseProviderBaseURLs` / `computeProviderKinds` / `isOfficialHost`，客户端落地在 `client/client.js` 的 `isRelayProvider(provider, config)`。没写 baseURL 的 provider 是「不表态、交后缀兜底」，**别**去读 pi-ai 内置目录补官方域名（`xiaomi` 就是内置目录指向官方域名、但 key 实际来自中转站的反例）。
+7. **npm 发布只走 Trusted Publishing (OIDC)**：`git tag v<版本> && git push origin v<版本>` 触发
+   `.github/workflows/publish.yml`，仓库内**不存任何 npm token**。
+   ⚠️ **别再试 `npm publish` + token/OTP**：npm 已限制「绕过 2FA 的 token」用于直接发布
+   (https://gh.io/npm-gat-bypass2fa-deprecation)，Granular / Automation token 加 `--otp` 在开启 2FA
+   的账号上均实测失败（web 登录成功后 publish 仍报 EOTP）。
+8. **测试必须以退出码表达结果**：`test/*.mjs` 结尾都有 `if (fail > 0) process.exitCode = 1`。
+   新增测试脚本别忘了加，否则 CI 里断言失败也会被当成通过。
+9. **provider 判定别改回硬编码名单**：官方/中转三层判定（用户显式名单 → settings.yaml 的 baseURL 域名白名单 → `-official` 后缀）是开源化改造的关键，**千万别把「官方 provider 名单」写回客户端硬编码**——别人的中转站叫什么猜不到。判定的服务端逻辑在 `src/index.js` 的 `parseProviderBaseURLs` / `computeProviderKinds` / `isOfficialHost`，客户端落地在 `client/client.js` 的 `isRelayProvider(provider, config)`。没写 baseURL 的 provider 是「不表态、交后缀兜底」，**别**去读 pi-ai 内置目录补官方域名（`xiaomi` 就是内置目录指向官方域名、但 key 实际来自中转站的反例）。
+
 
 ---
 

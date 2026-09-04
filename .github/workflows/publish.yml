@@ -1,0 +1,109 @@
+# npm 可信发布 (Trusted Publishing / OIDC) —— 不使用任何 npm token。
+#
+# 为什么是这个方案：npm 已开始限制「绕过 2FA 的 token」用于直接发布
+# (npm CLI 公告: https://gh.io/npm-gat-bypass2fa-deprecation)，
+# 因此 Automation token / Granular token + OTP 在开启 2FA 的账号上都不再可靠。
+# OIDC 可信发布由 GitHub 签发短时效身份令牌换取发布权限，仓库里不存任何密钥。
+#
+# 【首次使用前必须先在 npm 网页上配置，否则本流程会以认证失败告终】
+#   https://www.npmjs.com/package/dsh-api-dashboard/access
+#   → Trusted Publisher → 选 GitHub Actions，填：
+#       Organization or user : 133563825as-ai
+#       Repository           : dsh-api-dashboard
+#       Workflow filename    : publish.yml
+#       Environment          : (留空)
+#
+# 【发版方式】把 package.json 的 version 改好并提交后：
+#   git tag v1.3.2 && git push origin v1.3.2
+#   tag 必须是 v + package.json 里的版本号，不一致会被下面的校验拦住。
+
+name: publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+  # 允许在 Actions 页面手动触发（用于重跑失败的发布）
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # 可信发布必需：没有它 npm 拿不到 OIDC 身份
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 拉取源码
+        uses: actions/checkout@v4
+
+      - name: 准备 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      # setup-node 自带的 npm 可能低于支持 OIDC 可信发布的版本 (需 >= 11.5.1)
+      - name: 升级 npm
+        run: |
+          npm i -g npm@latest
+          echo "npm $(npm --version) / node $(node --version)"
+
+      - name: 校验 tag 与 package.json 版本一致
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          echo "tag=$TAG  package.json=$PKG"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::tag ($TAG) 与 package.json ($PKG) 不一致，拒绝发布"
+            exit 1
+          fi
+
+      # 零依赖是本插件的硬约束：引入 runtime 依赖会破坏宿主安装
+      - name: 校验 dependencies 为空
+        run: |
+          node -e "
+            const d = require('./package.json').dependencies;
+            if (d && Object.keys(d).length) {
+              console.error('::error::dependencies 必须为空，实测: ' + JSON.stringify(d));
+              process.exit(1);
+            }
+            console.log('dependencies 为空 ✓');
+          "
+
+      - name: 语法检查
+        run: |
+          node --check src/index.js
+          node --check client/client.js
+
+      # 测试要 import src/index.js，而它依赖两个 peerDependency。
+      # 宿主环境由 DSHA 提供，CI 里得自己装。--no-save 保证不改动 package.json/lock。
+      # 版本对齐容器实测值，只需满足 peerDependencies 声明的范围即可。
+      - name: 安装测试所需 peer 依赖
+        run: npm i --no-save --no-package-lock zod@4.5.2 @deepseek-ai/schemastery@3.18.1
+
+      - name: 跑全套测试
+        run: |
+          fail=0
+          for f in test/test-*.mjs; do
+            if out="$(node "$f" 2>&1)"; then
+              printf '%-30s %s\n' "$(basename "$f")" "$(printf '%s' "$out" | tail -1)"
+            else
+              fail=1
+              printf '%-30s FAILED\n' "$(basename "$f")"
+              printf '%s\n' "$out"
+            fi
+          done
+          if [ "$fail" != 0 ]; then
+            echo "::error::测试未全绿，拒绝发布"
+            exit 1
+          fi
+
+      - name: 打包预演（记录将发布的文件清单）
+        run: npm pack --dry-run
+
+      # 无 token：npm CLI 自动用 OIDC 换取发布权限，并附带 provenance 溯源
+      - name: 发布到 npm
+        run: npm publish --provenance --access public

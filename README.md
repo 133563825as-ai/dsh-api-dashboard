@@ -230,6 +230,19 @@ v1.2.6 — **智谱四类账户分流固化 + 套餐用户回归测试**（开�
 
 v1.3.2 — **海外模型可独立选计价货币**（用户实测反馈：面板显示 ¥1285 被误读成 $1285，实为 $183.7）：设置里「计价货币」下方新增「海外模型计价」下拉（跟随主货币 / 美元 / 人民币，**默认「跟随」= v1.2.6 行为完全不变**）。海外厂商官方定价页本来就是 USD，选美元即绕开 ×7 折算带来的误差与「¥ 被看成 $」的误读。新增 `modelRegion(model)` 前缀判定产地（`gpt`/`claude`/`gemini`/`grok`/`mistral` 等 → 海外，`deepseek`/`glm`/`kimi`/`qwen`/`doubao`/`hunyuan`/`step`/`mimo`/`minimax` 等 → 国内，**未命中一律不表态、走主货币**）与 `currencyForModel(config, model)`；会话消耗投影改为按币种分组 `costByCurrency`，混合会话（如 claude + deepseek）**不按汇率折算合并**，状态条两段拼接显示 `~¥3.40+$12.50`——折算等于把刚修掉的 ×7 误差又引回来。新增 `test-cost-currency.mjs`（18 断言）+ 产地/币种断言 17 条 + 客户端格式化器断言 15 条，全套 10 文件 190 断言
 
+## 发布方式（维护者）
+
+npm 发布走 **Trusted Publishing (OIDC)**，仓库内不存任何 token：
+
+```sh
+# package.json 版本改好并提交后
+git tag v1.3.2 && git push origin v1.3.2
+```
+
+`.github/workflows/publish.yml` 会校验「tag 与 package.json 版本一致」「dependencies 为空」
+「语法」「全套测试全绿」，全过才发布，并附带 provenance 溯源。
+首次使用需先在 npm 网页把本仓库配成 Trusted Publisher（详见该 workflow 顶部注释）。
+
 ## License
 
 [MIT](./LICENSE)

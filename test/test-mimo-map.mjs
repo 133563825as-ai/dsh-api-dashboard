@@ -26,3 +26,5 @@ a('mimo→mimo', T.modelToPlatform('mimo-v2.5')==='mimo')
 a('mimo-pro→mimo', T.modelToPlatform('mimo-v2.5-pro')==='mimo')
 a('metaFor mimo', T.metaFor('mimo').name==='MiMo')
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`)
+// v1.3.2: 断言失败时以非 0 退出, 否则 CI(GitHub Actions)拦不住回归 —— 原来一律 exit 0
+if (fail > 0) process.exitCode = 1

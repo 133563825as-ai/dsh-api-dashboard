@@ -61,3 +61,5 @@ try { m.makeCostProjection(() => ({ currency: 'CNY', overseasCurrency: 'USD' }))
 a('P6 混合视图通过 viewSchema (strict)', schemaOk)
 
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`)
+// v1.3.2: 断言失败时以非 0 退出, 否则 CI(GitHub Actions)拦不住回归 —— 原来一律 exit 0
+if (fail > 0) process.exitCode = 1

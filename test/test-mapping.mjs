@@ -40,3 +40,5 @@ a('metaFor qwen', T.metaFor('qwen').name==='通义千问')
 a('metaFor doubao', T.metaFor('doubao').name==='豆包 Seed')
 a('metaFor hunyuan', T.metaFor('hunyuan').name==='腾讯混元')
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`)
+// v1.3.2: 断言失败时以非 0 退出, 否则 CI(GitHub Actions)拦不住回归 —— 原来一律 exit 0
+if (fail > 0) process.exitCode = 1
