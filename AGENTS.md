@@ -54,7 +54,7 @@ dsh plugin --profile web add file:/root/dsha-api-dashboard
 ### ⚠️ 已知准确性问题 / 待验证项
 | 平台 | 当前状态 | 问题 | 你要注意 |
 |------|----------|------|----------|
-| 智谱 GLM | 已改(2026-08-30 真实key实测) | 实测确认：智谱**无真实余额 API**，`limits[]` 按 unit 分维度返回 Coding Plan 配额——`unit=3`=5小时窗口、`unit=6`=周配额、`unit=5`=工具(月度)；`remaining`=该维剩余积分，`percentage`=该维**填充度/已用**(100=用完)非"剩余%" | 已改**按 unit 分维度显示**(主显示 5小时窗口，顺带提示周配额/工具用完)，绝不把"已用完"当"余额100%"；`check_balance` 等参考实现也确认"仅支持配额查询，不支持余额查询"，无 public 接口枚举预付费资源包 |
+| 智谱 GLM | 已改(2026-08-30 真实key实测) + **账户分流(2026-09-04)** | 实测确认：智谱**无真实余额 API**，`limits[]` 按 unit 分维度返回 Coding Plan 配额——`unit=3`=5小时窗口、`unit=6`=周配额、`unit=5`=工具(月度)；`remaining`=该维剩余积分，`percentage`=该维**填充度/已用**(100=用完)非"剩余%"。**且仅 Coding Plan 套餐可查**：按量付费账户调同一接口返回 `{"code":500,"msg":"当前用户不存在coding plan"}`，候选余额端点(`/api/monitor/account/balance`、`/api/paas/v4/dashboard/billing/*`、`/api/paas/v4/users/me`)**全部 404** | 已改**按 unit 分维度显示**(主显示 5小时窗口，顺带提示周配额/工具用完)，绝不把"已用完"当"余额100%"；**按量付费/套餐过期走 `classifyBizError` 返回中性 `no-balance-api`**(不标红)，其余业务错误透传原始 `msg`。⚠️ 改这段务必先跑 `test-dshadb.mjs` 的 P1~P12——**套餐用户的配额解析绝不能被按量付费分支吞掉**(套餐用户 `parsed` 非空，根本走不到 `classifyBizError`) |
 | DeepSeek | 已修 | 负余额曾显示「正常」 | 负数必须显示红(err) |
 | OpenRouter | **待验证** | `total_credits-total_usage` 字段名存疑, 读错会 NaN→0 | 需要真实 key 实测 |
 | siliconflow | 待验证 | `totalBalance` 字段可能不对 | 需实测 |
@@ -71,9 +71,12 @@ dsh plugin --profile web add file:/root/dsha-api-dashboard
 3. **区分「真实 0」和「解析失败」**：`toAmount` 把无效值归 0，可能导致「余额0」假象——**2026-08-30 已在预设平台解析处加「字段存在性校验」兜底**（缺失字段→返回 null→前端显示「无法解析/未开放」）。此兜底只覆盖预设平台，改自定义中转/模型解析时仍需注意区分真实 0 与解析失败。
 4. **限流配额 ≠ 余额**：很多平台返回「每 N 小时 xx token」的限流窗口，那不是账户余额，别当余额显示。
 
-> **价格表（`MODEL_PRICES` / `V4_RATES`）来源与币种（2026-08-30 更新）**：
+> **价格表（`MODEL_PRICES` / `V4_RATES`）来源与币种（2026-09-04 更新）**：
 > - **DeepSeek 走 `V4_RATES` 峰谷 CNY 表**——已对照[官方定价页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)核实，值与时区窗口(北京时间周一至周五 9-12/14-18 高峰、空闲=半价)**完全正确**；`deepseek-v4-flash-vision-exp` 与 flash 同价，`deepseek-chat/reasoner/r1` 已 2026-07-24 退役(调用报错)。USD 表是 ~7 汇率换算的近似，非官方直发。
-> - **通用 `MODEL_PRICES`**：现役主力(OpenAI GPT-5.6 / Claude 4.x / Gemini 3.x / Kimi K3 / StepFun) 来自 NousResearch hermes-agent `usage_pricing.py`、StepFun[官方定价](https://platform.stepfun.com/docs/zh/guides/pricing/details)等，**统一存 USD/百万tokens 基准**：StepFun / MiMo / Qwen3.8-max 官方页是 CNY，入库前 **÷7 换算成 USD**（注释里标了原 CNY 价）；`resolveModelPrice` 返回时按用户「计价货币」换算（选 CNY ×7、选 USD 原样，与 DeepSeek `V4_RATES` 两套表口径一致）。Qwen3 / GLM-5 一手价未取到→遇这类模型落 defaultPrices(未定价)，**别乱填**。旧模型(2025-08)条目标为"历史/参考"。仅估算用，实际以平台为准。
+> - **通用 `MODEL_PRICES`**：现役主力(OpenAI GPT-5.6 / Claude 4.x·5 / Gemini 3.x / Kimi K3·K2.x / StepFun / 豆包 Seed 2.0 / 混元 2.0) 来自 NousResearch hermes-agent `usage_pricing.py`、StepFun[官方定价](https://platform.stepfun.com/docs/zh/guides/pricing/details)、[modelradar.cn](https://modelradar.cn/data/models.json)(各条带 sourceUrl 指向厂商官方页)等，**统一存 USD/百万tokens 基准**：StepFun / MiMo / Qwen / 豆包 / 混元官方页是 CNY，入库前 **÷7 换算成 USD**（注释里标了原 CNY 价）；`resolveModelPrice` 返回时按用户「计价货币」换算（选 CNY ×7、选 USD 原样，与 DeepSeek `V4_RATES` 两套表口径一致）。一手价未取到的模型→落 defaultPrices(未定价)，**别乱填**。旧模型(2025-08)条目标为"历史/参考"。仅估算用，实际以平台为准。
+> - ⚠️ **第三方聚合源只作参考，与原表冲突时不要盲信**：modelradar 2026-09-03 快照里 GPT-5.6 系输出价全呈「输入×1.25」异常模式(疑似抓错列)、且不跟踪促销价(qwen3.7-max 报的是原价) → **这两类已故意未采纳**，注释中有标注，别当遗漏"修回去"。
+> - 🔴 **`cacheHit` 缺官方佐证时别标「无缓存折扣」**（v1.2.3 血泪）：`glm-5.3-flash` 曾被标 `cacheHit = cacheMiss`，长会话数百万缓存读 token 全按全价计 → 用户实际充值 5 元、面板显示消耗 ¥9.93。GLM 系缓存读实为**输入的 20%**（同表 `glm-5.2` 0.26/1.4、`glm-5-turbo` 0.24/1.2 交叉佐证 + 用户真实账单反推；**非官方明文**，拿到官方价以官方为准）。已加回归断言「GLM 系 `cacheHit` 必须 < `cacheMiss`」。**真的无折扣才写等值，不确定就按同厂同系比例推并注明依据。**
+> - ⏰ **促销价有时效，到期要更新**：`glm-5.3-flash` 促销 **2026-09-09 到期**（最近）；`gemini-3.8/3.7/3.6-flash` 2026-12-31 到期后翻倍；`gpt-5.6-sol` 促销至少到 2026-11-21(列表价 $5/$30)；`qwen3.7-max` 5 折、`qwen3.8-max` 90 天/100 万 token 免费额度。`qwen3.8-max` 夜间 22:00-08:00 五折**未实现**（峰谷引擎目前只服务 DeepSeek）。
 
 ---
 
@@ -97,10 +100,19 @@ dsh plugin --profile web add file:/root/dsha-api-dashboard
 
 ---
 
-## 六、开源发布前待办（重要！）
+## 六、开源发布前待办（2026-09-04 校准）
 
-- [ ] 验证 B 栏（OpenRouter/siliconflow/Novita/one-api/xAI）的真实字段，修正解析
-- [ ] 解决 `toAmount` 归零问题（区分真实0与解析失败）
-- [ ] 用 `git filter-repo` 清历史（旧版本可能含 baseUrl 等，重写历史更干净）
-- [ ] 发布后立即在 GitHub 检查文件树，确认无 `.dsh/`、`*.json` 状态文件入库
-- [ ] 检查 API key 未泄漏（凭据文件已被 .gitignore 排除）
+### 仍未完成
+- [ ] **重启 `dsh web`** —— v1.2.1~v1.2.6 客户端改动未进 bundle（会断会话，用户在场再操作）
+- [ ] 推送前自检：文件树无 `.dsh/`、无本地状态文件、无任何 API key（**推送需仓库维护者授权，代理不得擅自推**）
+- [ ] 验证 B 栏（OpenRouter/siliconflow/Novita/one-api/xAI）的真实字段，修正解析（**需真实 key**）
+- [ ] `glm-5-turbo` model id 官方确认（`model_id_mapping.json` 标 `confirmed: false`）
+- [ ] `glm-5.3-flash` 缓存读 20% 口径求官方明文佐证（现为交叉推断，见第三节红色条目）
+
+### 已完成（别重复做）
+- [x] `toAmount` 归零问题 → 已加「字段存在性校验」兜底（缺字段→null→显示「未开放」，不冒充「余额 0」）
+- [x] ~~`git filter-repo` 清历史~~ → **不需要**：v1.1.3 时已重建全新 git 仓库，历史天生干净
+- [x] provider 官方/中转三层判定（原唯一开源阻断项）
+- [x] 价格表币种统一 USD 基准 + `resolveModelPrice` 按 currency 换算
+- [x] 安全审计（无高危）+ 4 项加固：状态文件强制 0600、请求体 256KB 上限、输入清洗、officialProviders 上限
+- [x] 测试脚本入仓 `test/` 并改相对路径（clone 即可跑，9 文件 139 断言）
