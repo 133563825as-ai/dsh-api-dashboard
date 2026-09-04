@@ -39,11 +39,16 @@ jobs:
       - name: 拉取源码
         uses: actions/checkout@v4
 
+      # ⚠️ 故意**不设** registry-url：设了 setup-node 会生成一份临时 .npmrc，里面写
+      #    //registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}，而未提供 token 时它把
+      #    NODE_AUTH_TOKEN 填成占位串 XXXXX-XXXXX-XXXXX-XXXXX —— npm 于是拿这个垃圾 token 去认证，
+      #    盖掉了 OIDC 凭据，PUT 直接被 registry 判成 404（npm 用 404 代替 403，不泄露包是否存在）。
+      #    v1.3.2 第三次 CI 就栽在这里：provenance 明明签名成功，publish 仍报 E404。
+      #    registry 默认就是 registry.npmjs.org，发布时再显式带 --registry 即可。
       - name: 准备 Node
         uses: actions/setup-node@v4
         with:
           node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
 
       # setup-node 自带的 npm 可能低于支持 OIDC 可信发布的版本 (需 >= 11.5.1)
       - name: 升级 npm
@@ -126,6 +131,12 @@ jobs:
       - name: 确认 package.json / lock 未被改动
         run: git diff --exit-code -- package.json package-lock.json
 
-      # 无 token：npm CLI 自动用 OIDC 换取发布权限，并附带 provenance 溯源
+      # 无 token：npm CLI 用 GitHub 签发的 OIDC 身份向 registry 换取发布权限，并附带 provenance 溯源。
+      # 失败时先看下面这行诊断 —— 若 _authToken 非空说明又被什么东西注入了凭据（见「准备 Node」的注释）。
       - name: 发布到 npm
-        run: npm publish --provenance --access public
+        run: |
+          echo "OIDC 可用: ${ACTIONS_ID_TOKEN_REQUEST_URL:+是}${ACTIONS_ID_TOKEN_REQUEST_URL:-否}"
+          echo "userconfig: ${NPM_CONFIG_USERCONFIG:-(未设置)}"
+          echo "npm 认证配置（应为空）:"
+          npm config get //registry.npmjs.org/:_authToken || true
+          npm publish --provenance --access public --registry=https://registry.npmjs.org
