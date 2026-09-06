@@ -1579,7 +1579,8 @@ export function apply(ctx, config) {
           const msg = /already up to date/.test(String(err?.message)) ? `already up to date`
             : /GitHub API|download|remote version/.test(String(err?.message)) ? 'network failed'
             : 'update failed'
-          sendJson(res, 500, { ok: false, error: msg })
+          const code = /already up to date/.test(String(err?.message)) ? 200 : 500
+          sendJson(res, code, { ok: false, error: msg })
         }
       },
     }), 'dsh-api-dashboard: update install route')

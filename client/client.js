@@ -1185,13 +1185,15 @@ window.__ModuleLoader__.load({
       }, []);
       react.useEffect(() => { if (isOpen) checkUpdate(false); }, [isOpen]);  // 打开面板自动检查
       const installUpdate = () => {
-        if (!window.confirm(t("update.available") + " v" + (upd.info?.remote || "") + " ?")) return;
         setUpd(s => ({ ...s, phase: "installing" }));
         fetch("/api-dashboard/update/install", { method: "POST" })
           .then(r => r.json().then(d => ({ code: r.status, body: d })))
           .then(({ code, body }) => {
             if (code === 200 && body.ok) {
               setUpd({ phase: "done", info: { ok: true, current: body.installed, remote: body.installed, hasUpdate: false }, msg: t("update.done") });
+              // v1.3.3: 更新完成后发 Toast 通知 —— 设置面板底部的 11px 灰色提示太容易被忽略,
+              // 移动端尤其如此。Toast 在屏幕中央弹出, 不会被错过。
+              try { fetch("/app/toast?text=" + encodeURIComponent("插件已更新到 v" + body.installed + "，重启 Web GUI 生效"), { mode: "no-cors" }).catch(() => {}); } catch {}
             } else {
               setUpd(s => ({ ...s, phase: "fail", msg: body.error === "already up to date" ? t("update.latest") : t("update.fail") }));
               checkUpdate(true);
@@ -1570,8 +1572,19 @@ window.__ModuleLoader__.load({
               upd.info?.hasUpdate ? react.createElement("button", { type: "button", className: "dshadb_save_btn", onClick: installUpdate, disabled: upd.phase === "installing", key: "upd_go", style: { flex: 1, padding: "8px", fontSize: "12px" } },
                 upd.phase === "installing" ? t("update.installing") : t("update.install") + " v" + upd.info.remote) : null,
             ]),
-            upd.msg || upd.info?.hasUpdate ? react.createElement("div", { key: "upd_msg", style: { color: upd.phase === "fail" ? "#e05252" : "#777b84", fontSize: "11px", marginTop: "6px" } },
-              upd.msg || (upd.info?.hasUpdate ? t("update.available") + " v" + upd.info.remote : null)) : null,
+            // v1.3.3: 更新结果改为醒目横幅 —— 原来的 11px 灰色字在移动端几乎看不到,
+            // 用户点完「一键更新」后以为没反应。成功=绿色底, 失败=红色底, 检查有新版=原来的灰色。
+            upd.msg ? react.createElement("div", { key: "upd_msg", style: {
+              color: upd.phase === "fail" ? "#b33" : upd.phase === "done" ? "#1a7a3a" : "#777b84",
+              background: upd.phase === "fail" ? "#fde8e8" : upd.phase === "done" ? "#e8fde8" : "transparent",
+              fontSize: upd.phase === "done" || upd.phase === "fail" ? "13px" : "11px",
+              fontWeight: upd.phase === "done" || upd.phase === "fail" ? "600" : "400",
+              padding: upd.phase === "done" || upd.phase === "fail" ? "8px 10px" : "0",
+              borderRadius: upd.phase === "done" || upd.phase === "fail" ? "6px" : "0",
+              marginTop: "8px",
+              lineHeight: "1.4"
+            } }, upd.msg) : (upd.info?.hasUpdate ? react.createElement("div", { key: "upd_msg", style: { color: "#777b84", fontSize: "11px", marginTop: "6px" } },
+              t("update.available") + " v" + upd.info.remote) : null),
           ]),
         ]),
       ]);
