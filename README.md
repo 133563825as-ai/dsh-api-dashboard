@@ -243,6 +243,8 @@ git tag v1.3.2 && git push origin v1.3.2
 「语法」「全套测试全绿」，全过才发布，并附带 provenance 溯源。
 首次使用需先在 npm 网页把本仓库配成 Trusted Publisher（详见该 workflow 顶部注释）。
 
+v1.3.3 — **修复「一键更新」按钮无响应**（DSHA webview 拦截 `window.confirm` 导致点击后函数在第一行 return）：去掉确认弹窗，直接执行安装；更新结果改为醒目横幅（成功绿底/失败红底），不再只显示 11px 灰色字；`already up to date` 返回 200 而非 500
+
 ## License
 
 [MIT](./LICENSE)
