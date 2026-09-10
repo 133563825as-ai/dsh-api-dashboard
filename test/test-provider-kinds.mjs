@@ -80,6 +80,17 @@ eq('夹具 kinds', realKinds, {
   'relay-one': 'relay', 'relay-two': 'relay', 'relay-three': 'relay', 'relay-four': 'relay',
 })
 
+// ==== v1.4.0 回归: 禁止「按 provider 名字猜官方」====
+// 旧代码有个兜底: 名字恰好等于某个预设 id 且没写 baseURL → 判 official。这与 AGENTS.md 铁律 9
+// (「没写 baseURL 的 provider 是不表态、交 -official 后缀兜底」)直接冲突, 会把同名的中转站会话
+// 顶上官方余额。xiaomi 就是「内置目录指向官方域名、但 key 来自中转站」的反例。
+eq('无 baseURL 的 deepseek 不再被名字兜底成 official',
+  m.computeProviderKinds('llm-pi-ai:\n  providers:\n    deepseek:\n      apiKeyEnv: DS_KEY\n'), {})
+eq('无 baseURL 的 zhipu 同样不表态',
+  m.computeProviderKinds('llm-pi-ai:\n  providers:\n    zhipu:\n      apiKeyEnv: Z_KEY\n'), {})
+eq('写了官方 baseURL 才判 official',
+  m.computeProviderKinds('llm-pi-ai:\n  providers:\n    deepseek:\n      baseURL: https://api.deepseek.com/v1\n'), { deepseek: 'official' })
+
 // ==== parseProviderBaseURLs: 边界 ====
 const y1 = `llm-pi-ai:
   providers:

@@ -182,7 +182,11 @@ window.__ModuleLoader__.load({
 @keyframes dshadb-slideup{from{transform:translateY(100%)}to{transform:translateY(0)}}
 
 /* ===== 状态条（顶部小条） ===== */
-.dshadb_bar{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:4px 10px 4px 6px;border-radius:10px;background:#f5f6f8;border:1px solid #e7e8ec;color:#777b84;cursor:pointer;white-space:nowrap;user-select:none;-webkit-tap-highlight-color:transparent}
+/* v1.4.1: 定住高度下限 —— 空态(18px 内容)与有数据态(20px 内容)差 2px, 钱数/平台名一进来
+   状态条就从 26px 变 28px, 把上面的会话区顶 2px(真机实测 CLS 0.00094+0.00053)。
+   用 min-height 而不是 height: 系统字体放大时仍可自然增高, 不会裁字。
+   28px = 有数据态的实测总高(20px 内容 + 4px 上下 padding), 所以有数据时外观完全不变。 */
+.dshadb_bar{display:inline-flex;align-items:center;gap:5px;font-size:11px;min-height:28px;box-sizing:border-box;padding:4px 10px 4px 6px;border-radius:10px;background:#f5f6f8;border:1px solid #e7e8ec;color:#777b84;cursor:pointer;white-space:nowrap;user-select:none;-webkit-tap-highlight-color:transparent}
 .dshadb_bar:active{opacity:0.8}
 .dshadb_bar_logo{width:16px;height:16px;border-radius:5px;background:#eef2ff;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;color:#4f7cff}
 .dshadb_bar_name{font-weight:700;color:#17181c;font-size:11px}
@@ -196,7 +200,18 @@ window.__ModuleLoader__.load({
 .dshadb_bar_peak.valley{background:rgba(79,124,255,0.10);color:#3d5fcc;border:1px solid rgba(79,124,255,0.18)}
 
 /* ===== 遮罩 ===== */
-.dshadb_scrim{position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,0.35);animation:dshadb-fadein .15s ease-out}
+.dshadb_scrim{position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,0.35);animation:dshadb-fadein .15s ease-out;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+.dshadb_scrim::-webkit-scrollbar{display:none}
+/* v1.4.0: 手机壳 (dsh-web-mobile) 的「左边缘滑入打开侧边栏」手势层 —— 详见 AGENTS.md ①。
+   它在 document **捕获**阶段吃 pointerdown, 起手点落在屏幕左侧 45% 内、横向位移占优时,
+   整条手势就被判成「开侧边栏」。我们面板里的横向拖拽 (大肥鱼滑块 / 文本选择 / 横向列表)
+   因此会把侧边栏拉出来, 而且它先于我们的监听器执行, 拦不住。
+   它留了一条明路: 起手元素若属于「真·横向滚动容器」(overflow-x 为 auto/scroll 且
+   scrollWidth > clientWidth + 1), beginStroke 直接放弃识别。
+   于是给遮罩补 2px **不可见**的横向溢出, 让整块面板都落在它的让路条件里。
+   溢出由 0 高度的 .dshadb_swipeguard 提供; 抽屉自身是 position:fixed,
+   所以遮罩滚动不会移动面板 —— 视觉与布局零影响。 */
+.dshadb_swipeguard{display:block;width:calc(100% + 2px);height:0;pointer-events:none}
 
 /* ===== 抽屉 ===== */
 .dshadb_drawer{position:fixed;left:0;right:0;bottom:0;z-index:99999;max-height:85vh;background:#f5f6f8;border-radius:20px 20px 0 0;box-shadow:0 -8px 32px rgba(0,0,0,0.12);display:flex;flex-direction:column;animation:dshadb-slideup .22s cubic-bezier(.16,1,.3,1);overflow:hidden}
@@ -342,6 +357,27 @@ window.__ModuleLoader__.load({
 
 /* ===== 补缺失CSS ===== */
 .dshadb_bar_cost{display:inline-flex;align-items:center;margin-left:2px;padding-left:8px;border-left:1px solid #e7e8ec;color:#9ca0aa;font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap}
+/* ===== v1.4.0 子代理消耗行 =====
+   设计约束: 无论几个子代理都**只占一行高度**(约 20px), 绝不换行挤压输入框。
+   做法 = 固定 flex-wrap:nowrap + 横向滚动(隐藏滚动条) + 名字截断到 72px。
+   完整名字/模型/精确金额 → 长按弹 .dshadb_subtip 浮层。
+   ⚠️ **别指望 title**: 手机上 title 根本不显示, 长按弹的是系统「选择/复制」菜单
+   (实测踩到, 用户反馈「长按只能复制」)。已加 user-select:none +
+   -webkit-touch-callout:none 抑制系统菜单, 详情改由 pointerdown 计时器弹浮层,
+   见 bindSubagentTip()。浮层必须挂在 document.body 上 —— 挂在胶囊里会被
+   .dshadb_subs 的 overflow-x:auto 裁掉。
+   ⚠️ 本段在 JS 模板字符串里, 注释里**不能出现反引号**(会提前结束模板串)。 */
+.dshadb_barwrap{display:inline-flex;flex-direction:column;align-items:flex-start;gap:0;max-width:100%;min-width:0}
+.dshadb_barrow{display:inline-flex;align-items:center;gap:2px;max-width:100%}
+.dshadb_subs{display:flex;flex-wrap:nowrap;align-items:center;gap:4px;margin:3px 0 0 2px;max-width:100%;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-ms-overflow-style:none;-webkit-overflow-scrolling:touch}
+.dshadb_subs::-webkit-scrollbar{display:none}
+.dshadb_sub{flex:none;display:inline-flex;align-items:center;gap:4px;font-size:10px;line-height:1.15;padding:2px 7px;border-radius:8px;background:#f5f6f8;border:1px solid #e7e8ec;color:#777b84;white-space:nowrap;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+.dshadb_sub_dot{width:5px;height:5px;border-radius:50%;background:#8b93a7;flex:none}
+.dshadb_sub_name{font-weight:700;color:#17181c;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:72px}
+.dshadb_sub_amt{font-weight:800;font-variant-numeric:tabular-nums;color:#4f7cff;flex:none}
+/* 子代理长按详情浮层 (v1.4.0): 挂在 document.body 上, 不能被 .dshadb_subs 的
+   overflow 裁掉; z-index 要高过抽屉(99999)/遮罩。纯展示, 不接收触摸事件。 */
+.dshadb_subtip{position:fixed;z-index:100000;max-width:min(280px,calc(100vw - 24px));padding:9px 11px;border-radius:12px;background:#17181c;color:#ffffff;font-size:11px;font-weight:600;line-height:1.6;white-space:pre-line;word-break:break-word;box-shadow:0 10px 30px rgba(0,0,0,0.3);pointer-events:none;animation:dshadb-fadein .12s ease-out}
 .dshadb_footer_dot{width:4px;height:4px;border-radius:50%;background:#c9cad0;opacity:0.5}
 .dshadb_group_divider{height:1px;background:#eef0f4;margin:2px 6px 4px}
 .dshadb_icon_btn{display:inline-flex;align-items:center;justify-content:center;min-width:38px;min-height:38px;padding:8px;border-radius:10px;background:transparent;border:none;color:#777b84;cursor:pointer;transition:background .1s ease}
@@ -360,7 +396,7 @@ window.__ModuleLoader__.load({
 .dshadb_wf_sub{display:block;font-size:10px;font-weight:500;color:#9ca0aa;line-height:1.4;margin-top:2px}
 .dshadb_wf_head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
 .dshadb_wf_val{font-size:11px;font-weight:800;color:#4f7cff;font-variant-numeric:tabular-nums;flex:none}
-.dshadb_wf_range{width:100%;height:24px;accent-color:#4f7cff;margin:0}
+.dshadb_wf_range{width:100%;height:34px;accent-color:#4f7cff;margin:0}
 .dshadb_wf_seg{display:flex;gap:6px;margin-left:auto;flex:none}
 .dshadb_wf_segbtn{font-size:11px;font-weight:700;font-family:inherit;padding:6px 11px;border-radius:10px;border:1px solid #e7e8ec;background:#f5f6f8;color:#9ca0aa;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background .15s ease,color .15s ease}
 .dshadb_wf_segbtn_on{background:#4f7cff;border-color:#4f7cff;color:#ffffff}
@@ -372,21 +408,79 @@ window.__ModuleLoader__.load({
 .dshadb_wf_name{color:#f2f4f8}
 .dshadb_wf_segbtn{background:#1e222a;border-color:#363c48;color:#8b91a0}
 .dshadb_wf_segbtn_on{background:#4f7cff;border-color:#4f7cff;color:#fff}}
+/* ===== v1.4.0 设置界面控件统一 (此前是浏览器默认外观 + 无深色样式) =====
+   注意: 曾把「币种」那几个 <select> 换成插件自己的分段按钮, 但在 2 列网格里
+   「人民币」会被截成「人民…」, 观感反而更差 —— 已改回 <select>, 只做外观清理:
+   去掉系统箭头/系统上下箭头, 让它长得跟旁边的 .dshadb_field 一致。 */
+.dshadb_field_select{-webkit-appearance:none;appearance:none;background-image:linear-gradient(45deg,transparent 50%,#9ca0aa 50%),linear-gradient(135deg,#9ca0aa 50%,transparent 50%);background-position:calc(100% - 18px) calc(50% - 2px),calc(100% - 13px) calc(50% - 2px);background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:36px}
+/* 数字框去掉系统上下箭头 (手机上会挤掉输入区) */
+.dshadb_field[type=number]{-moz-appearance:textfield;appearance:textfield}
+.dshadb_field[type=number]::-webkit-outer-spin-button,.dshadb_field[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+/* 滑块: accent-color 只管颜色, 这里补齐轨道/滑块的圆润观感 */
+.dshadb_wf_range{-webkit-appearance:none;appearance:none;background:transparent}
+.dshadb_wf_range::-webkit-slider-runnable-track{height:6px;border-radius:999px;background:#e7e8ec}
+.dshadb_wf_range::-webkit-slider-thumb{-webkit-appearance:none;width:24px;height:24px;margin-top:-9px;border-radius:50%;background:#4f7cff;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.18)}
+.dshadb_wf_range::-moz-range-track{height:6px;border-radius:999px;background:#e7e8ec}
+.dshadb_wf_range::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:#4f7cff;border:2px solid #fff}
+/* 深色模式: 设置面板 + 状态条 + 子代理行 (此前这些一律硬编码白底, 深色下是白块) */
+@media (prefers-color-scheme:dark){
+.dshadb_field{background:#1e222a;border-color:#363c48;color:#f2f4f8}
+.dshadb_field::placeholder{color:#6b7280}
+.dshadb_field:focus{border-color:#4f7cff}
+.dshadb_field_select{background-image:linear-gradient(45deg,transparent 50%,#8b91a0 50%),linear-gradient(135deg,#8b91a0 50%,transparent 50%)}
+.dshadb_switch{background:#3d434f}
+.dshadb_switch_on{background:#4f7cff}
+.dshadb_switch_knob{background:#f2f4f8}
+.dshadb_tab{background:#262a33;color:#9aa1b0}
+.dshadb_tab_active{background:#4f7cff;color:#fff}
+.dshadb_settings_group_title{color:#8b91a0}
+.dshadb_kinds_title,.dshadb_kinds_empty{color:#7e8494}
+.dshadb_kind{background:#262a33;border-color:#363c48;color:#9aa1b0}
+.dshadb_bar{background:#262a33;border-color:#363c48;color:#9aa1b0}
+.dshadb_bar_name,.dshadb_bar_amount{color:#f2f4f8}
+.dshadb_bar_cost{border-left-color:#363c48;color:#8b91a0}
+.dshadb_subs .dshadb_sub,.dshadb_sub{background:#262a33;border-color:#363c48;color:#9aa1b0}
+.dshadb_sub_name{color:#f2f4f8}
+.dshadb_sub_amt{color:#7d9bff}
+.dshadb_subtip{background:#f2f4f8;color:#17181c;box-shadow:0 10px 30px rgba(0,0,0,0.5)}
+.dshadb_sub_dot{background:#8b93a7}
+.dshadb_wf_range::-webkit-slider-runnable-track{background:#363c48}
+.dshadb_wf_range::-moz-range-track{background:#363c48}
+}
 /* ===== 大肥鱼互动挂件 (v1.1.0) ===== */
 .dshadb-whale{position:fixed;left:0;top:60vh;z-index:9600;--dshw-scale:1;--dshw-size:clamp(calc(96px * var(--dshw-scale)),calc(min(150px,min(100vw,100vh) * 0.30) * var(--dshw-scale)),420px);width:var(--dshw-size);height:var(--dshw-size);pointer-events:none;-webkit-user-select:none;user-select:none;touch-action:none;transition:transform .45s cubic-bezier(.34,1.4,.64,1),left .3s ease,top .3s ease}
 .dshadb-whale.dshadb-whale-dragging{transition:none}
 .dshadb-whale.dshadb-whale-flip .dshadb-whale-sprite{transform:scaleX(-1)}
 .dshadb-whale-sprite{position:absolute;left:0;top:0;width:100%;height:100%;transition:transform .3s ease}
 .dshadb-whale-body{position:absolute;left:0;top:0;width:100%;height:100%;transform-origin:50% 92%;transition:transform .2s cubic-bezier(.34,1.56,.64,1);pointer-events:auto;cursor:grab;-webkit-tap-highlight-color:transparent}
+/* 手机壳侧滑手势层会给「真·横向滚动容器」让路 (dsh-web-mobile 的 findHorizontalScroller:
+   overflow-x 为 auto/scroll 且 scrollWidth > clientWidth + 1 → beginStroke 直接放弃识别)。
+   挂件本体此前没有这层守卫: 鱼停在屏幕左侧 45% 以内时(典型 = 左边缘吸附位, 可见区只有 ~32px 宽),
+   在它身上往右拖会被判成「左边缘滑入开抽屉」(挂件自己的拖拽同时照常执行, 所以是"拖着鱼把侧边栏拉出来")。
+   这层透明抓取层就是那个滚动容器 —— 起手点落在它身上, 手机壳就不再识别。
+   ⚠️ 必须挂在 .dshadb-whale-body **内部**(不能挂 root 下): 这样 pointerdown 照常冒泡到 body 上
+      已有的拖拽处理器, 拖拽逻辑一行不用改。
+   ⚠️ touch-action:none 必须写在这一层: 滚动容器是浏览器判定可触摸行为的终点, 漏了它横向 pan
+      会被这个滚动容器自己抢走(pointercancel) → 鱼直接拖不动。
+   ⚠️ 别改成给 .dshadb-whale-body 加 overflow —— 那会把它里面 img 的 drop-shadow 裁掉, 鱼会显平。 */
+.dshadb-whale-grab{position:absolute;left:0;top:0;width:100%;height:100%;z-index:1;overflow-x:auto;overflow-y:hidden;touch-action:none;overscroll-behavior:contain;scrollbar-width:none;pointer-events:auto;cursor:grab;background:transparent;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none}
+.dshadb-whale-grab::-webkit-scrollbar{display:none;width:0;height:0}
+.dshadb-whale-grab-guard{display:block;width:calc(100% + 2px);height:0;pointer-events:none}
+/* v1.4.0: 我们自己的抽屉/面板开着时锁住挂件触摸 —— 否则它会盖在面板上抢走滑块的拖拽。
+   注意只关交互、不隐藏: 调「身体大小/露出比例」时还要看实时预览。 */
+.dshadb-whale-locked .dshadb-whale-body{pointer-events:none;cursor:default}
 .dshadb-whale-press .dshadb-whale-body{transform:scale(1.1,.88);cursor:grabbing}
+/* pointer-events 不是"继承即锁": 抓取层自己写了 auto, body 被锁成 none 时它照样吃事件, 所以必须单独上锁 */
+.dshadb-whale-locked .dshadb-whale-grab{pointer-events:none;cursor:default}
+.dshadb-whale-press .dshadb-whale-grab{cursor:grabbing}
 .dshadb-whale-img{width:100%;height:100%;object-fit:contain;display:block;pointer-events:none;-webkit-user-drag:none;filter:drop-shadow(0 6px 14px rgba(0,0,0,.18))}
-.dshadb-whale-bubble{position:absolute;left:50%;bottom:calc(100% - 6px);--dshw-bdx:0px;--dshw-btx:50%;transform:translateX(calc(-50% + var(--dshw-bdx))) translateY(10px) scale(.82);transform-origin:var(--dshw-btx) 100%;opacity:0;pointer-events:none;background:#fff;border-radius:16px;padding:10px 14px;min-width:112px;max-width:min(74vw,248px);box-shadow:0 8px 28px rgba(0,0,0,.16);transition:opacity .2s ease,transform .26s cubic-bezier(.34,1.5,.64,1);z-index:2;text-align:center;box-sizing:border-box}
+.dshadb-whale-bubble{position:absolute;left:50%;bottom:calc(100% + 6px);--dshw-bdx:0px;--dshw-btx:50%;transform:translateX(calc(-50% + var(--dshw-bdx))) translateY(10px) scale(.82);transform-origin:var(--dshw-btx) 100%;opacity:0;pointer-events:none;background:#fff;border-radius:16px;padding:10px 14px;min-width:112px;max-width:min(74vw,248px);box-shadow:0 8px 28px rgba(0,0,0,.16);transition:opacity .2s ease,transform .26s cubic-bezier(.34,1.5,.64,1);z-index:2;text-align:center;box-sizing:border-box}
 .dshadb-whale-bubble::after{content:"";position:absolute;left:var(--dshw-btx);top:100%;transform:translateX(-50%);border:8px solid transparent;border-top-color:#fff}
 .dshadb-whale-bubble-on{opacity:1;transform:translateX(calc(-50% + var(--dshw-bdx))) translateY(0) scale(1)}
 /* 连点时气泡不做淡出淡入的来回, 只跟位置走 —— 避免闪烁 */
 .dshadb-whale-bubble-on.dshadb-whale-bubble-keep{transition:transform .16s ease}
 /* 气泡在上方放不下时改到下方, 尾巴翻到顶边 */
-.dshadb-whale-bubble-below{bottom:auto;top:calc(100% - 6px);transform-origin:var(--dshw-btx) 0}
+.dshadb-whale-bubble-below{bottom:auto;top:calc(100% + 6px);transform-origin:var(--dshw-btx) 0}
 .dshadb-whale-bubble-below::after{top:auto;bottom:100%;border-top-color:transparent;border-bottom-color:#fff}
 /* 镜像只作用于鲸鱼本体, 气泡与文字保持正向 */
 .dshadb-whale-flip .dshadb-whale-bubble{transform:translateX(calc(-50% + var(--dshw-bdx))) translateY(10px) scale(.82)}
@@ -421,7 +515,7 @@ window.__ModuleLoader__.load({
       "settings.overseasCurrency": "海外模型计价", "settings.overseasFollow": "跟随主货币", "settings.overseasHint": "海外厂商官方价本就是美元, 选美元可免去 ×7 折算误差",
       "settings.safeHint": "余额高于此值显示绿色(安全)",
       "settings.warnHint": "余额低于此值显示黄色(偏低)，再低显示红",
-      "settings.refresh": "刷新间隔(秒)", "settings.refreshHint": "5~60 秒，最高一分钟",
+      "settings.refresh": "刷新间隔(秒)", "settings.refreshHint": "1~60 秒，最高一分钟",
       "settings.save": "保存并生效", "settings.saved": "已保存",
       "update.title": "版本与更新", "update.current": "当前版本",
       "update.check": "检查更新", "update.checking": "检查中…",
@@ -448,6 +542,9 @@ window.__ModuleLoader__.load({
       "settings.officialAuto": "自动判定结果",
       "settings.officialKindOfficial": "官方", "settings.officialKindRelay": "中转",
       "settings.officialAutoEmpty": "settings.yaml 里没有写 baseURL 的 provider，无法自动判定",
+      "settings.dshProviders": "来自 DSH 的中转站（自动）",
+      "settings.dshProvidersHint": "直接读 settings.yaml 的 provider 列表，默认全部自动查询余额。用右侧开关单独关掉某个；关过的不再自动打开。官方直连与没写 baseURL 的 provider 不在此列。",
+      "settings.dshNoBaseUrl": "没写 baseURL（不表态）",
       "settings.modelName": "模型名称", "settings.apiUrl": "余额接口 URL", "settings.queryType": "解析方式",
       "settings.totalPath": "总余额字段(可选)", "settings.usedPath": "已用字段(可选)",
       "settings.modelHint": "填你的余额接口(返回 JSON)，可选填 API Key 与字段路径，如 data.balance",
@@ -476,7 +573,7 @@ window.__ModuleLoader__.load({
       "settings.overseasCurrency": "Overseas models", "settings.overseasFollow": "Follow main", "settings.overseasHint": "Overseas vendors price in USD; picking USD avoids the x7 conversion error",
       "settings.safeHint": "Above this = green (safe)",
       "settings.warnHint": "Below this = yellow, lower = red",
-      "settings.refresh": "Refresh (sec)", "settings.refreshHint": "5-60s, max one minute",
+      "settings.refresh": "Refresh (sec)", "settings.refreshHint": "1-60s, max one minute",
       "settings.save": "Save", "settings.saved": "Saved",
       "update.title": "Version & Updates", "update.current": "Current",
       "update.check": "Check updates", "update.checking": "Checking…",
@@ -503,6 +600,9 @@ window.__ModuleLoader__.load({
       "settings.officialAuto": "Auto-detected",
       "settings.officialKindOfficial": "official", "settings.officialKindRelay": "relay",
       "settings.officialAutoEmpty": "No provider in settings.yaml declares a baseURL, so nothing can be auto-detected",
+      "settings.dshProviders": "Relays from DSH (automatic)",
+      "settings.dshProvidersHint": "Reads the provider list straight from settings.yaml and queries balances automatically. Use the switch to turn one off; switched-off ones stay off. Official-direct providers and ones without a baseURL are not listed here.",
+      "settings.dshNoBaseUrl": "no baseURL (stays neutral)",
       "settings.modelName": "Model name", "settings.apiUrl": "Balance API URL", "settings.queryType": "Parse type",
       "settings.totalPath": "Total field (opt)", "settings.usedPath": "Used field (opt)",
       "settings.modelHint": "A JSON endpoint for your balance; optional API key & field paths like data.balance",
@@ -526,17 +626,25 @@ window.__ModuleLoader__.load({
     const listeners = new Set();
     let timer = null, pollMs = DEFAULT_POLL_MS, inflight = null, started = false;
     function notify() { for (const fn of [...listeners]) fn(); }
-    async function refresh(force = false) {
-      if (inflight !== null && !force) return inflight;
-      if (force && snapshot.isRefreshing !== true) { snapshot = { ...snapshot, isRefreshing: true }; notify(); }
+    /**
+     * @param force 显式强刷 (手动刷新按钮 / 保存设置后) —— **阻塞**, 等服务端拉完最新数据
+     * @param peek  v1.4.0 stale-while-revalidate: 首屏 / 切回前台用 —— 服务端有缓存就**立刻**回,
+     *              刷新丢后台。force 那条路要等服务端跑完一次全量轮询(最慢端点可到 8s),
+     *              应用切回前台时用它就会「等一段时间」。
+     */
+    async function refresh(force = false, peek = false) {
+      if (inflight !== null && !force && !peek) return inflight;
+      if ((force || peek) && snapshot.isRefreshing !== true) { snapshot = { ...snapshot, isRefreshing: true }; notify(); }
       inflight = (async () => {
         try {
-          const url = force ? "/api-dashboard/balances?force=1&_t=" + Date.now() : "/api-dashboard/balances";
+          const url = peek ? "/api-dashboard/balances?stale=1"
+            : force ? "/api-dashboard/balances?force=1&_t=" + Date.now()
+              : "/api-dashboard/balances";
           // v0.5.0: 走浏览器默认缓存 (配合服务端 ETag), 数据没变时 304 空响应; force 用独立 URL + no-store 强刷
           const res = await fetch(url, { headers: { accept: "application/json" }, cache: force ? "no-store" : "default" });
           if (!res.ok) throw new Error("HTTP " + res.status);
           const data = await res.json();
-          if (data.config?.clientPollIntervalMs >= 5000) pollMs = Math.min(data.config.clientPollIntervalMs, 3600000);
+          if (data.config?.clientPollIntervalMs >= 1000) pollMs = Math.min(data.config.clientPollIntervalMs, 3600000);
           // v0.5.0 性能适配: 内容无变化就不重建快照引用, useSyncExternalStore 判定 Object.is 相同直接跳过整棵树重渲
           const newBalances = data.balances || [];
           const oldBalances = Array.isArray(snapshot.balances) ? snapshot.balances : [];
@@ -561,7 +669,7 @@ window.__ModuleLoader__.load({
       timer = setTimeout(() => { timer = null; if (document.hidden) return; refresh().then(schedule, schedule); }, pollMs);
     }
     const store = {
-      subscribe(fn) { listeners.add(fn); if (!started) { started = true; refresh(true).then(schedule, schedule); } return () => { listeners.delete(fn); if (listeners.size === 0) { started = false; if (timer !== null) { clearTimeout(timer); timer = null; } } }; },
+      subscribe(fn) { listeners.add(fn); if (!started) { started = true; refresh(false, true).then(schedule, schedule); } return () => { listeners.delete(fn); if (listeners.size === 0) { started = false; if (timer !== null) { clearTimeout(timer); timer = null; } } }; },
       getSnapshot() { return snapshot; },
       forceRefresh() { return refresh(true); },
     };
@@ -601,6 +709,107 @@ window.__ModuleLoader__.load({
         mixed: mixed,
         hasValue: hasValue,
       };
+    }
+    /* ===== v1.4.0 子代理胶囊 · 长按详情浮层 =====
+     * 为什么不用 title: **手机上 title 根本不显示**, 长按弹的是系统「选择/复制」菜单
+     * (用户实测反馈「长按只能复制」)。所以自己用 pointerdown 计时器弹浮层, 并靠 CSS 的
+     * user-select:none + -webkit-touch-callout:none 把系统菜单压掉。
+     * 浮层必须挂 document.body —— 挂在胶囊里会被 .dshadb_subs 的 overflow-x:auto 裁掉。
+     */
+    const SUBTIP_LONG_PRESS_MS = 420;
+    let subTipNode = null;
+    let subTipTimer = 0;
+    let subTipDismissBound = false;
+    function hideSubagentTip() {
+      if (subTipTimer) { clearTimeout(subTipTimer); subTipTimer = 0; }
+      if (subTipNode && subTipNode.parentNode) subTipNode.parentNode.removeChild(subTipNode);
+      subTipNode = null;
+    }
+    /** 浮层摆在胶囊上方; 上方放不下翻到下方; 左右夹在视口内。 */
+    function showSubagentTip(anchor, text) {
+      hideSubagentTip();
+      if (!anchor || !text) return;
+      const el = document.createElement("div");
+      el.className = "dshadb_subtip";
+      el.textContent = text; // 纯文本, 不走 innerHTML (label 可能来自用户/模型)
+      document.body.appendChild(el);
+      subTipNode = el;
+      const rect = anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : null;
+      const vw = window.innerWidth || 360;
+      const vh = window.innerHeight || 640;
+      const w = el.offsetWidth || Math.min(240, vw - 24);
+      const h = el.offsetHeight || 60;
+      let top = rect ? rect.top - h - 8 : 16;
+      if (top < 8) top = rect ? Math.min(vh - h - 8, rect.bottom + 8) : 8;
+      const left = rect ? rect.left : 12;
+      el.style.left = Math.max(8, Math.min(vw - w - 8, left)) + "px";
+      el.style.top = Math.max(8, top) + "px";
+      subTipTimer = setTimeout(hideSubagentTip, 5000);
+    }
+    function bindSubTipDismiss() {
+      if (subTipDismissBound) return;
+      subTipDismissBound = true;
+      // 点别处 / 滚动 / 转屏都收起。capture 阶段先于胶囊自己的 pointerdown 跑,
+      // 所以「已开着一个浮层时再长按另一个胶囊」不会被立刻收掉。
+      document.addEventListener("pointerdown", hideSubagentTip, true);
+      window.addEventListener("scroll", hideSubagentTip, true);
+      window.addEventListener("resize", hideSubagentTip);
+    }
+    /** 给一个胶囊挂长按: 位移 > 8px(其实是在滑动这一行) 或抬手都取消; 长按抬手后的 click 吞掉。 */
+    function bindSubagentTip(node, text) {
+      let timer = 0, sx = 0, sy = 0, fired = false;
+      const cancel = () => { if (timer) { clearTimeout(timer); timer = 0; } };
+      node.addEventListener("pointerdown", (e) => {
+        bindSubTipDismiss();
+        fired = false;
+        sx = e.clientX; sy = e.clientY;
+        cancel();
+        timer = setTimeout(() => { timer = 0; fired = true; showSubagentTip(node, text); }, SUBTIP_LONG_PRESS_MS);
+      });
+      node.addEventListener("pointermove", (e) => {
+        if (timer && (Math.abs(e.clientX - sx) > 8 || Math.abs(e.clientY - sy) > 8)) cancel();
+      });
+      node.addEventListener("pointerup", cancel);
+      node.addEventListener("pointercancel", cancel);
+      node.addEventListener("pointerleave", cancel);
+      // Android WebView 有时仍会弹系统「复制」长按菜单, 再压一道
+      node.addEventListener("contextmenu", (e) => e.preventDefault());
+      node.addEventListener("click", (e) => {
+        if (fired) { fired = false; e.preventDefault(); e.stopPropagation(); }
+      });
+    }
+    /**
+     * v1.4.0: 子代理消耗行节点 (换行显示在状态条下方, 左→右 = 服务端给的创建顺序)。
+     * 抽成独立函数便于单测 —— 挂载点里的内联 JSX 测不到。
+     * 完整详情同时写进 `data-tip`(长按浮层读它, 也是单测抓手) 与 `title`(桌面 hover)。
+     * @param cost 会话消耗投影视图 (取其 subagents 与主币种)
+     * @returns 节点, 没有子代理时返回 null
+     */
+    function buildSubagentRow(cost) {
+      const list = Array.isArray(cost && cost.subagents) ? cost.subagents : [];
+      if (list.length === 0) return null;
+      const mainCur = (cost && cost.currency) || "CNY";
+      return react.createElement("span", { className: "dshadb_subs", key: "subs" },
+        list.map((s, i) => {
+          const f = formatSessionCost({ cost: s.cost, currency: mainCur, costByCurrency: s.costByCurrency, waiting: false });
+          const amt = f !== null && f.hasValue ? "~" + f.text : "~—";
+          const kind = s.mode === "continuable" ? "可续聊子代理" : "一次性子代理";
+          const models = (s.models || []).join(", ");
+          const tip = [
+            kind + " " + (s.label || "子代理"),
+            "消耗 " + (f !== null ? f.title : "—"),
+            models ? "模型 " + models : "",
+            s.id ? "ID " + String(s.id).slice(0, 8) : "",
+          ].filter(Boolean).join("\n");
+          return react.createElement("span", {
+            className: "dshadb_sub", key: s.id || ("s" + i), title: tip, "data-tip": tip,
+            ref: (n) => { if (n) bindSubagentTip(n, tip); },
+          }, [
+            react.createElement("span", { className: "dshadb_sub_dot", key: "d" }),
+            react.createElement("span", { className: "dshadb_sub_name", key: "n" }, s.label || "子代理"),
+            react.createElement("span", { className: "dshadb_sub_amt", key: "a" }, amt),
+          ]);
+        }));
     }
     function formatMoney(amount, currency) {
       if (typeof amount !== "number" || isNaN(amount)) return currencySymbol(currency) + "0";
@@ -669,7 +878,7 @@ window.__ModuleLoader__.load({
       if (/^claude/.test(m)) return "claude";
       if (/^gemini/.test(m)) return "gemini";
       if (/^qwen/.test(m)) return "qwen";
-      if (/^doubao/.test(m)) return "doubao";
+      if (/^doubao/.test(m) || /^seed[-_]/.test(m)) return "doubao";
       if (/hunyuan/.test(m)) return "hunyuan";
       if (/^mimo/.test(m)) return "mimo";
       if (/glm|chatglm/.test(m)) return "zhipu";
@@ -859,13 +1068,17 @@ window.__ModuleLoader__.load({
         const meta = metaFor(b.platform), level = getLevel(b, config), isSelected = b.platform === selectedId;
         const cardClass = "dshadb_card " + (isSelected ? "dshadb_card_active " : "");
         // descText 逻辑
+        // v1.4.0 修复: 原分支硬编码 "· 配额正常", 与三色灯(level)完全无关 —— GLM 配额耗尽时
+        // (level=err、note 已写「配额已用完(0), 待重置」) 会渲染成「…待重置 · 配额正常」, 自相矛盾。
+        // 改为统一按 level 取状态标签, 保证文案与灯色一致。
+        // (sessionCost/modelId 服务端目前从不产出, 该分支保留仅为将来兼容, 不再是唯一出口。)
         let descText;
         if (b.status === "ok" && b.sessionCost != null) {
           descText = (b.modelId || "—") + " · 会话消耗 " + (typeof b.sessionCost === "number" ? b.sessionCost.toFixed(2) : b.sessionCost);
         } else if (b.status === "ok" && b.note) {
-          descText = b.note + " · 配额正常";
+          descText = b.note + " · " + statusLabel(level, t);
         } else if (b.status === "ok") {
-          descText = "已启用";
+          descText = statusLabel(level, t);
         } else if (b.status === "local") {
           descText = "本地模型";
         } else if (b.status === "noBalance" || b.status === "no-balance-api") {
@@ -943,6 +1156,8 @@ window.__ModuleLoader__.load({
       }
 
       return react.createElement("div", { className: "dshadb_scrim", onClick: (e) => { if (e.target === e.currentTarget) onClose(); } }, [
+        // v1.4.0: 侧滑守卫 —— 让手机壳的「左边缘开侧边栏」手势层放弃识别 (CSS 与 AGENTS.md ① 有详解)
+        react.createElement("div", { className: "dshadb_swipeguard", "aria-hidden": "true", key: "swipeguard" }),
         react.createElement("div", { className: "dshadb_drawer", onClick: (e) => e.stopPropagation(), key: "drawer" }, [
           react.createElement(SwipeHandle, { onClose, key: "handle" }),
           react.createElement("div", { className: "dshadb_header", key: "header" }, [
@@ -1063,6 +1278,7 @@ window.__ModuleLoader__.load({
 
       // v0.5.3: 回退为底部抽屉样式 (全屏卡片观感不佳, 复用看板同款 scrim+drawer)
       return react.createElement("div", { className: "dshadb_scrim", onClick: (e) => { if (e.target === e.currentTarget) onClose(); } }, [
+        react.createElement("div", { className: "dshadb_swipeguard", "aria-hidden": "true", key: "swipeguard" }),
         react.createElement("div", { className: "dshadb_drawer", style: { maxHeight: "70vh" }, onClick: (e) => e.stopPropagation(), key: "drawer" }, [
           react.createElement(SwipeHandle, { onClose, key: "handle" }),
           react.createElement("div", { className: "dshadb_header", key: "header" }, [
@@ -1155,6 +1371,15 @@ window.__ModuleLoader__.load({
       // 服务端按 baseURL 域名自动判定的结果 (只读, 供用户判断还需不需要手填)
       const [providerKinds, setProviderKinds] = react.useState(
         (config && config.providerKinds) || {});
+      // v1.4.0「真自动」: 从 settings.yaml 自动发现的 DSH provider + 用户关掉的名单。
+      // 服务端只下发「名字/baseURL/是否官方」, **不下发 key**。
+      const [dshProviders, setDshProviders] = react.useState(
+        Array.isArray(config && config.dshProviders) ? config.dshProviders : []);
+      const [dshOff, setDshOff] = react.useState(
+        Array.isArray(config && config.dshProviderOptOut) ? config.dshProviderOptOut : []);
+      // v1.4.0: 来自 DSH 的中转站列表默认收起 (跟首页分组同一套折叠手法)。
+      // 维护者原话「应该折叠的是来自 DSH 中转站下面的那一罗列」—— 「自动判定结果」保持平铺不折。
+      const [showDsh, setShowDsh] = react.useState(false);
       // v1.1.0: 大肥鱼细项 (独立页签, 走 /api-dashboard/whale/settings, 与看板主配置分开)
       const [wf, setWf] = react.useState({
         scale: 1, peekRatio: 0.5, soundOn: true, soundSet: "duck",
@@ -1228,6 +1453,8 @@ window.__ModuleLoader__.load({
             if (typeof d.whaleEnabled === "boolean") setWhaleOn(d.whaleEnabled);
             if (Array.isArray(d.officialProviders)) setOfficialText(d.officialProviders.join(", "));
             if (d.providerKinds && typeof d.providerKinds === "object") setProviderKinds(d.providerKinds);
+            if (Array.isArray(d.dshProviders)) setDshProviders(d.dshProviders);
+            if (Array.isArray(d.dshProviderOptOut)) setDshOff(d.dshProviderOptOut);
           }
         }).finally(() => { if (!cancelled) setLoading(false); });
         // 大肥鱼细项与主配置并行拉取, 失败保持默认值
@@ -1249,14 +1476,18 @@ window.__ModuleLoader__.load({
       }, [isOpen]);
       if (!isOpen) return null;
       const save = async () => {
+        const nextRefreshSec = Math.min(Math.max(Number(refreshSec) || 5, 5), 60)
+        setRefreshSec(nextRefreshSec)
         setSaving(true);
         try {
           await fetch("/api-dashboard/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
             customRelays: relays, customModels: models,
             safeThreshold: Number(safe), warnThreshold: Number(warn), currency, overseasCurrency,
-            refreshIntervalSec: Math.min(Math.max(Number(refreshSec) || 5, 5), 60),
+            refreshIntervalSec: nextRefreshSec,
             whaleEnabled: !!whaleOn,
             officialProviders: officialText,
+            // v1.4.0「真自动」: 关掉的 DSH provider (空数组 = 全部启用)
+            dshProviderOptOut: dshOff,
           }) });
           // v1.1.0: 保存后立刻强拉一次, 让开关类设置(大肥鱼)即时生效, 不必等下一轮轮询
           try { await store.forceRefresh(); } catch (e) { /* 忽略 */ }
@@ -1340,7 +1571,7 @@ window.__ModuleLoader__.load({
         react.createElement("div", { className: "dshadb_grid2", key: "misc" }, [
           react.createElement("div", { key: "cur" }, [
             react.createElement("label", { className: "dshadb_label", key: "cur_l" }, t("settings.currency")),
-            react.createElement("select", { className: "dshadb_field", value: currency, onChange: (e) => setCurrency(e.target.value), key: "cur_s" }, [
+            react.createElement("select", { className: "dshadb_field dshadb_field_select", value: currency, onChange: (e) => setCurrency(e.target.value), key: "cur_s" }, [
               react.createElement("option", { value: "CNY", key: "c1" }, t("cmn")),
               react.createElement("option", { value: "USD", key: "c2" }, t("usd")),
             ]),
@@ -1348,7 +1579,7 @@ window.__ModuleLoader__.load({
           // v1.3.2: 海外模型 (gpt/claude/gemini/grok...) 可独立选币种, follow=跟随上面的主货币
           react.createElement("div", { key: "ocur" }, [
             react.createElement("label", { className: "dshadb_label", key: "ocur_l" }, t("settings.overseasCurrency")),
-            react.createElement("select", { className: "dshadb_field", value: overseasCurrency, onChange: (e) => setOverseasCurrency(e.target.value), key: "ocur_s" }, [
+            react.createElement("select", { className: "dshadb_field dshadb_field_select", value: overseasCurrency, onChange: (e) => setOverseasCurrency(e.target.value), key: "ocur_s" }, [
               react.createElement("option", { value: "follow", key: "o0" }, t("settings.overseasFollow")),
               react.createElement("option", { value: "USD", key: "o1" }, t("usd")),
               react.createElement("option", { value: "CNY", key: "o2" }, t("cmn")),
@@ -1357,7 +1588,7 @@ window.__ModuleLoader__.load({
           ]),
           react.createElement("div", { key: "refresh" }, [
             react.createElement("label", { className: "dshadb_label", key: "rf_l" }, t("settings.refresh")),
-            react.createElement("input", { className: "dshadb_field", type: "number", min: 5, max: 60, step: 5, value: refreshSec, onChange: (e) => setRefreshSec(e.target.value), key: "rf_i" }),
+            react.createElement("input", { className: "dshadb_field", type: "number", min: 1, max: 60, step: 1, value: refreshSec, onChange: (e) => setRefreshSec(Math.min(Math.max(Number(e.target.value) || 1, 1), 60)), key: "rf_i" }),
             react.createElement("span", { style: { fontSize: "10px", color: "var(--dsw-alias-label-tertiary)" }, key: "rf_h" }, t("settings.refreshHint")),
           ]),
         ]),
@@ -1389,6 +1620,39 @@ window.__ModuleLoader__.load({
                 }, name + " · " + t(providerKinds[name] === "official" ? "settings.officialKindOfficial" : "settings.officialKindRelay")))),
           ]),
         ]),
+        // v1.4.0「真自动」: 从 settings.yaml 自动发现的中转站 (默认全开, 可单独关;
+        // 官方直连与没写 baseURL 的只展示、不可开 —— 前者归预设平台管, 后者按铁律 9 不表态)
+        // v1.4.0: 列表默认收起, 直接复用首页的分组折叠组件 GroupSection
+        // (表头 + 条数 + 箭头 + max-height 过渡), 维护者要求「跟首页一样的折叠方法」。
+        dshProviders.length > 0
+          ? react.createElement(GroupSection, {
+            label: t("settings.dshProviders"), count: dshProviders.length,
+            open: showDsh, onToggle: () => setShowDsh(!showDsh), key: "dshprov",
+          }, [
+            react.createElement("span", { className: "dshadb_kinds_empty", key: "dp_h", style: { marginBottom: "6px" } }, t("settings.dshProvidersHint")),
+            react.createElement("div", { key: "dp_list" }, dshProviders.map((p) => {
+              const locked = p.kind === "official" || p.kind === "no-base-url";
+              const name = String(p.name || "");
+              const off = dshOff.some((n) => String(n).toLowerCase() === name.toLowerCase());
+              return react.createElement("div", { className: "dshadb_settings_row", key: name, style: { margin: "6px 0" } }, [
+                react.createElement("div", { className: "dshadb_settings_row_main", key: "m" }, [
+                  react.createElement("span", { className: "dshadb_settings_row_title", key: "n" }, name),
+                  react.createElement("span", { className: "dshadb_settings_row_sub", key: "s" }, p.baseURL || t("settings.dshNoBaseUrl")),
+                ]),
+                locked
+                  ? react.createElement("span", { className: "dshadb_refresh_badge", key: "lock" },
+                    t(p.kind === "official" ? "settings.officialKindOfficial" : "settings.dshNoBaseUrl"))
+                  : react.createElement(Switch, {
+                    checked: !off, key: "sw",
+                    // 关掉 = 加进 optOut; 打开 = 从 optOut 移除 (大小写不敏感, 与后端一致)
+                    onChange: (next) => setDshOff(next
+                      ? dshOff.filter((n) => String(n).toLowerCase() !== name.toLowerCase())
+                      : dshOff.concat([name])),
+                  }),
+              ]);
+            })),
+          ])
+          : null,
       ]);
 
       // 中转站区块
@@ -1430,7 +1694,7 @@ window.__ModuleLoader__.load({
             ]),
             react.createElement("div", { key: "m4" }, [
               react.createElement("label", { className: "dshadb_label", key: "ml4" }, t("settings.queryType")),
-              react.createElement("select", { className: "dshadb_field", value: mform.queryType, onChange: (e) => setMform({ ...mform, queryType: e.target.value }), key: "mi4" }, [
+              react.createElement("select", { className: "dshadb_field dshadb_field_select", value: mform.queryType, onChange: (e) => setMform({ ...mform, queryType: e.target.value }), key: "mi4" }, [
                 react.createElement("option", { value: "auto", key: "q0" }, t("qt.auto")),
                 react.createElement("option", { value: "openai", key: "q1" }, t("qt.openai")),
                 react.createElement("option", { value: "quota", key: "q2" }, t("qt.quota")),
@@ -1456,7 +1720,7 @@ window.__ModuleLoader__.load({
             ]),
             react.createElement("div", { key: "m7" }, [
               react.createElement("label", { className: "dshadb_label", key: "ml7" }, t("settings.currency")),
-              react.createElement("select", { className: "dshadb_field", value: mform.currency || "CNY", onChange: (e) => setMform({ ...mform, currency: e.target.value }), key: "mi7" }, [
+              react.createElement("select", { className: "dshadb_field dshadb_field_select", value: mform.currency || "CNY", onChange: (e) => setMform({ ...mform, currency: e.target.value }), key: "mi7" }, [
                 react.createElement("option", { value: "CNY", key: "cc1" }, t("cmn")),
                 react.createElement("option", { value: "USD", key: "cc2" }, t("usd")),
               ]),
@@ -1588,7 +1852,10 @@ window.__ModuleLoader__.load({
           ]),
         ]),
       ]);
-      return react.createElement("div", { className: "dshadb_scrim", onClick: (e) => { if (e.target === e.currentTarget) onClose(); } }, output);
+      return react.createElement("div", { className: "dshadb_scrim", onClick: (e) => { if (e.target === e.currentTarget) onClose(); } }, [
+        react.createElement("div", { className: "dshadb_swipeguard", "aria-hidden": "true", key: "swipeguard" }),
+        output,
+      ]);
     }
     //#endregion
 
@@ -1690,6 +1957,15 @@ window.__ModuleLoader__.load({
       img.src = "/api-dashboard/whale/image.png";
       img.alt = "大肥鱼"; img.draggable = false;
       body.appendChild(img);
+      // 透明抓取层: 让手机壳的侧滑手势层对挂件让路(它自己是「真·横向滚动容器」,
+      // 由 0 高度的守卫子元素提供 2px 不可见横向溢出)。放在 body 内部 →
+      // pointerdown 照常冒泡到下面绑在 body 上的拖拽处理器, 拖拽代码一行都不用改。
+      var grab = document.createElement("div");
+      grab.className = "dshadb-whale-grab";
+      var grabGuard = document.createElement("div");
+      grabGuard.className = "dshadb-whale-grab-guard";
+      grab.appendChild(grabGuard);
+      body.appendChild(grab);
       sprite.appendChild(body);
       var bubble = document.createElement("div");
       bubble.className = "dshadb-whale-bubble";
@@ -1708,8 +1984,9 @@ window.__ModuleLoader__.load({
       // 初始化时禁用 CSS transition, 避免 left:0 → 实际位置 的 300ms 滑动动画
       // (CSS 里写死了 left:0, JS 第一次设 left 时会触发 transition)
       root.style.transition = "none";
+      // v1.4.1: 拿到保存的设置之前**先不显示** —— 见下面 reveal() 的注释。
+      root.style.visibility = "hidden";
       document.body.appendChild(root);
-
       // ---------- 音效 ----------
       var audio = { press: null, release: null };
       function reloadAudio() {
@@ -1912,6 +2189,8 @@ window.__ModuleLoader__.load({
 
       // ---------- 拖拽 ----------
       function onDown(e) {
+        // v1.4.0: 面板开着时挂件已被 setLocked 关掉 pointer-events, 这里再兜一道
+        if (root.classList.contains("dshadb-whale-locked")) return;
         if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
         drag = {
           id: e.pointerId, sx: e.clientX, sy: e.clientY,
@@ -2028,8 +2307,22 @@ window.__ModuleLoader__.load({
       };
       document.addEventListener("visibilitychange", onVis);
 
+      // v1.4.0: 挂件是在面板可能已经开着的时候才挂上来的(用户在设置里刚打开大肥鱼) → 立刻套用锁定态
+      if (whaleLocked) root.classList.add("dshadb-whale-locked");
       whaleWidget = {
         applyPatch: applyPatch,
+        /**
+         * v1.4.0: 我们自己的抽屉/面板开着时, 挂件**不能**再接收触摸。
+         * 挂件是 document.body 的直接子元素 (z-index 9600), 而设置面板嵌在 DSH 的 composer dock 里 ——
+         * 只要面板的某个祖先带 transform/filter/contain, 面板就会被关进一个更低的层叠上下文,
+         * 于是挂件反而盖在面板上面, 拖「身体大小 / 露出比例」滑块时变成**拖挂件**(用户反馈
+         * 「滑动的时候容易把侧边栏拉过来」)。这里只关交互、**不隐藏** ——
+         * 调大小/露出比例时还要看挂件的实时预览。
+         */
+        setLocked: function (locked) {
+          if (locked) root.classList.add("dshadb-whale-locked");
+          else root.classList.remove("dshadb-whale-locked");
+        },
         dispose: function () {
           disposed = true;
           body.removeEventListener("pointerdown", onDown);
@@ -2042,12 +2335,32 @@ window.__ModuleLoader__.load({
           if (hideTimer) clearTimeout(hideTimer);
           if (bubbleTimer) clearTimeout(bubbleTimer);
           if (saveTimer) clearTimeout(saveTimer);
+          if (revealTimer) clearTimeout(revealTimer);   // v1.4.1: 卸载后别再回调
           if (root.parentNode) root.parentNode.removeChild(root);
           whaleWidget = null;
         },
       };
 
       // ---------- 拉取已存设置 ----------
+      /**
+       * v1.4.1: 拿到保存的设置之前**不显示**挂件。
+       * 旧行为: 先用默认值(scale=1 → 108px、贴右边、top=62% 屏高)画出来, 等 /whale/settings
+       * 回来再改成保存值 —— 真机实测那一下是「往上跳 307px + 从 108px 缩到 65px」,
+       * LayoutShift 记 0.0119(我们这边最大的一笔), 而且冷启动时它发生在首屏之后十几秒
+       * (配置要等一次全量轮询), 用户正好在看设置面板时就以为「打开设置界面才抖」。
+       * 现在: 首帧隐藏 → 设置到位(或失败/2s 兜底)才露出, 鱼直接出现在正确的位置和大小。
+       * ⚠️ 露出必须覆盖**所有**分支(成功/失败/早退), 否则请求异常会让鱼永远不出现。
+       */
+      var revealed = false;
+      var revealTimer = null;
+      function reveal() {
+        if (revealed) return;
+        revealed = true;
+        if (revealTimer) { clearTimeout(revealTimer); revealTimer = null; }
+        root.style.visibility = "";
+        root.style.transition = "";  // 初始化完成, 恢复过渡动画(拖拽/吸附时平滑)
+      }
+      revealTimer = setTimeout(reveal, 2000);   // 兜底: 请求挂住也不能让鱼永远不出现
       applyAll();
       fetch("/api-dashboard/whale/settings", { cache: "no-store" })
         .then(function (r) { return r.json(); })
@@ -2069,11 +2382,9 @@ window.__ModuleLoader__.load({
             peekRatio: st.peekRatio, left: st.left, top: st.top, side: st.side,
           };
           applyAll();
-          root.style.transition = "";  // 初始化完成, 恢复过渡动画(拖拽/吸附时平滑)
         })
-        .catch(function () {
-          root.style.transition = "";
-        });
+        .catch(function () { /* 网络异常静默, 由 2s 兜底露出 */ })
+        .then(reveal);   // 成功 / 失败 / 上面提前 return 都会走到这里
     }
     function removeWhaleWidget() { if (whaleWidget) whaleWidget.dispose(); }
     /** 引用计数: 多个 dock 实例并存时, 只有最后一个释放才真正卸载挂件 */
@@ -2082,6 +2393,13 @@ window.__ModuleLoader__.load({
     /** 设置面板改动后推给活着的挂件 (未挂载时静默忽略, 值已由端点落盘) */
     function patchWhaleWidget(patch) {
       if (whaleWidget && whaleWidget.applyPatch) whaleWidget.applyPatch(patch);
+    }
+    /** v1.4.0: 我们自己的抽屉/面板是否开着 —— 开着就锁住挂件的触摸 (见 setLocked 注释)。
+     *  记在模块变量里: 面板开着时挂件才被打开(比如刚在设置里开启大肥鱼)也能立刻套用。 */
+    var whaleLocked = false;
+    function setWhaleLocked(locked) {
+      whaleLocked = !!locked;
+      if (whaleWidget && whaleWidget.setLocked) whaleWidget.setLocked(whaleLocked);
     }
     //#endregion
 
@@ -2130,6 +2448,14 @@ window.__ModuleLoader__.load({
             acquireWhaleWidget();
             return releaseWhaleWidget;
           }, [whaleOn]);
+          // v1.4.0: 看板/详情/设置任一开着 → 锁住大肥鱼挂件的触摸。
+          // 不这么做的话, 挂件(在 body 上, z-index 9600)会盖在设置面板上面,
+          // 拖「身体大小 / 露出比例」滑块时实际拖的是挂件。
+          const overlayOpen = isSettingsOpen || view !== "bar";
+          react.useEffect(() => {
+            setWhaleLocked(overlayOpen);
+            return () => setWhaleLocked(false);
+          }, [overlayOpen]);
           // 峰谷时段变化同步给挂件 (台词里的「当前时间段」用它, 不涉及任何金额)
           react.useEffect(() => {
             updateWhaleContext({ isPeak: !!(config && config.isPeak) });
@@ -2207,19 +2533,27 @@ window.__ModuleLoader__.load({
           }
           const costDisp = { text: costText, title: costTitle };
 
-          return react.createElement("span", { style: { display: "inline-flex", alignItems: "center", gap: "2px", maxWidth: "100%" } }, [
-            // v0.5.7: 本会话消耗并入同一个胶囊, 不再裸露在外
-            react.createElement(BarReadout, { t, onOpen: openList, onOpenSettings: () => openSettings("basic"), selectedId, onSelect: handleSelect, config, cost: costDisp, provider: curProvider, key: "bar" }),
-            view === "list" ? react.createElement(DashboardDrawer, { isOpen: true, onClose: closeList, t, selectedId, onSelect: handleSelect, onOpenDetail: (id) => { setDetailId(id); setView("detail"); }, onAddRelay: () => openSettings("relays"), onAddCustom: () => openSettings("models"), onOpenSettings: () => openSettings("basic"), config, currentModel, key: "drawer" }) : null,
-            view === "detail" ? react.createElement(PlatformDetail, { isOpen: true, onClose: closeDetail, platformId: detailId, t, useProjection, config, key: "detail" }) : null,
-            isSettingsOpen ? react.createElement(SettingsModal, { isOpen: true, onClose: () => setSettingsOpen(false), onBack: () => { setSettingsOpen(false); setView("list"); }, t, config, initialSection: settingsSection, key: "settings" }) : null,
+          // v1.4.0: 子代理消耗行 —— 有子代理时在状态条**下面换行**追加一行,
+          // 按父会话里的创建顺序从左到右排列 (顺序由服务端 subagentCatalog 决定, 这里不排序)。
+          // 金额是「该子代理及其后代」的汇总, 与主板数字同一套计价口径。
+          const subRow = buildSubagentRow(cost);
+
+          return react.createElement("span", { className: "dshadb_barwrap" }, [
+            react.createElement("span", { className: "dshadb_barrow", key: "row" }, [
+              // v0.5.7: 本会话消耗并入同一个胶囊, 不再裸露在外
+              react.createElement(BarReadout, { t, onOpen: openList, onOpenSettings: () => openSettings("basic"), selectedId, onSelect: handleSelect, config, cost: costDisp, provider: curProvider, key: "bar" }),
+              view === "list" ? react.createElement(DashboardDrawer, { isOpen: true, onClose: closeList, t, selectedId, onSelect: handleSelect, onOpenDetail: (id) => { setDetailId(id); setView("detail"); }, onAddRelay: () => openSettings("relays"), onAddCustom: () => openSettings("models"), onOpenSettings: () => openSettings("basic"), config, currentModel, key: "drawer" }) : null,
+              view === "detail" ? react.createElement(PlatformDetail, { isOpen: true, onClose: closeDetail, platformId: detailId, t, useProjection, config, key: "detail" }) : null,
+              isSettingsOpen ? react.createElement(SettingsModal, { isOpen: true, onClose: () => setSettingsOpen(false), onBack: () => { setSettingsOpen(false); setView("list"); }, t, config, initialSection: settingsSection, key: "settings" }) : null,
+            ]),
+            subRow,
           ]);
         });
         return () => { dispose(); };
       });
 
       ctx.effect(() => {
-        const onVisibility = () => { if (!document.hidden) refresh(true).then(schedule, schedule); };
+        const onVisibility = () => { if (!document.hidden) refresh(false, true).then(schedule, schedule); };
         document.addEventListener("visibilitychange", onVisibility);
         return () => document.removeEventListener("visibilitychange", onVisibility);
       }, "dsh-api-dashboard: visibility resume");

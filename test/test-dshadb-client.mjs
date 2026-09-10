@@ -9,8 +9,11 @@ const react = {
   useCallback: (fn) => fn,
   useSyncExternalStore: (sub, get) => get(),
 }
-const mkEl = () => ({ tag:'', className:'', dataset:{}, textContent:'', style:{ setProperty(){}, removeProperty(){} }, classList:{ add(){}, remove(){}, contains:()=>false }, appendChild(){}, removeChild(){}, addEventListener(){}, removeEventListener(){}, setPointerCapture(){}, releasePointerCapture(){}, contains:()=>false, offsetWidth:120, offsetHeight:60, getBoundingClientRect:()=>({left:10,top:20,width:100,height:100}), parentNode:null })
-const doc = { head:{ appendChild(){} }, body:{ appendChild(){}, removeChild(){}, addEventListener(){}, removeEventListener(){}, contains:()=>true }, documentElement:{ classList:{ add(){} } }, createElement: mkEl, addEventListener(){}, removeEventListener(){}, getElementById:()=>null, querySelector:()=>null, querySelectorAll:()=>[], hidden:false }
+// 元素树可追踪: appendChild 记 children/parentNode, createElement 记下每个建出来的元素 ——
+// 用来断言挂件的 DOM 接线(抓取层必须挂在鱼身内部, 否则事件冒泡不到拖拽处理器)。
+const created = []
+const mkEl = () => ({ tag:'', className:'', dataset:{}, textContent:'', style:{ setProperty(){}, removeProperty(){} }, classList:{ add(){}, remove(){}, contains:()=>false }, appendChild(c){ if(!this.children) this.children=[]; this.children.push(c); if(c) c.parentNode=this }, removeChild(){}, addEventListener(){}, removeEventListener(){}, setPointerCapture(){}, releasePointerCapture(){}, contains:()=>false, offsetWidth:120, offsetHeight:60, getBoundingClientRect:()=>({left:10,top:20,width:100,height:100}), parentNode:null })
+const doc = { head:{ appendChild(){} }, body:{ appendChild(){}, removeChild(){}, addEventListener(){}, removeEventListener(){}, contains:()=>true }, documentElement:{ classList:{ add(){} } }, createElement: (tag)=>{ const el = mkEl(); el.tag = tag; created.push(el); return el }, addEventListener(){}, removeEventListener(){}, getElementById:()=>null, querySelector:()=>null, querySelectorAll:()=>[], hidden:false }
 globalThis.document = doc
 globalThis.window = { addEventListener(){}, removeEventListener(){}, innerWidth:412, innerHeight:892, location:{origin:'http://x'}, confirm:()=>false, matchMedia:()=>({matches:false,addEventListener(){}}) }
 const nav = { hardwareConcurrency:8, language:'zh-CN' }
@@ -43,6 +46,19 @@ assert('C2 0 → $0.00 (2位)', T.formatMoney(0, 'USD') === '$0.00')
 T.acquireWhaleWidget()
 assert('C12 首次 acquire refs=1', T.getWhaleRefs() === 1)
 assert('C12 首次 acquire widget 存在', T.getWidget() != null)
+
+// C14 大肥鱼抓取层(让路层)的 DOM 接线 —— 这是"改一行就悄悄失效"的地方, 用真建出来的元素钉住:
+// 抓取层必须挂在 .dshadb-whale-body **内部**, 这样 pointerdown 才会冒泡到 body 上已有的拖拽处理器;
+// 挂在 root 直下的话手机壳确实会让路, 但鱼也拖不动了。
+const byClass = (c) => created.find((el) => el.className === c)
+const kids = (el) => (el && el.children) || []
+const grabEl = byClass('dshadb-whale-grab'), bodyEl = byClass('dshadb-whale-body'), imgEl = byClass('dshadb-whale-img'), rootEl = byClass('dshadb-whale')
+assert('C14 抓取层已创建', grabEl != null)
+assert('C14 抓取层挂在鱼身(body)内部', grabEl != null && grabEl.parentNode === bodyEl)
+assert('C14 抓取层不在 root 直下 (否则事件冒泡不到拖拽处理器)', rootEl != null && !kids(rootEl).includes(grabEl))
+assert('C14 抓取层在图片之后 (盖在鱼身上才接得到起手)', kids(bodyEl).indexOf(grabEl) > kids(bodyEl).indexOf(imgEl))
+assert('C14 抓取层带 1 个 0 高度守卫子元素', kids(grabEl).length === 1 && kids(grabEl)[0].className === 'dshadb-whale-grab-guard')
+assert('C14 拖拽处理器仍绑在 body 上', typeof bodyEl.addEventListener === 'function')
 T.acquireWhaleWidget()
 assert('C12 二次 acquire refs=2', T.getWhaleRefs() === 2)
 T.releaseWhaleWidget()

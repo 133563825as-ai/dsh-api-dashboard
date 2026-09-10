@@ -1,5 +1,9 @@
 # Dependencies
 node_modules/
+# 上面那条带斜杠只匹配**目录**；开发机上 node_modules 常常是指向容器内绝对路径的**软链**，
+# git 把软链当文件 → `node_modules/` 匹配不到，`git add -A` 会把这条机器专属软链提交进去。
+# 无斜杠这条把目录与软链一起盖住。
+node_modules
 
 # Local state & secrets (never commit!)
 *.json.tmp

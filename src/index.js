@@ -202,12 +202,33 @@ async function getUpdateStatus(force = false) {
 // ============================================================
 const STATE_FILE = join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'dsh-api-dashboard.json')
 
+/**
+ * 状态文件结构版本。**改动已持久化字段的默认值时必须 +1 并补一段迁移**,
+ * 否则老用户的状态文件会把字段钉死在旧值上 —— 新默认值对老用户永远不生效。
+ *   1 → 2: v1.4.0 `overseasCurrency` 默认 'follow' → 'USD'。
+ *          老状态文件里那行 'follow' 是**旧默认值写下来的**, 不是用户的显式选择,
+ *          因此迁移时把它改成 'USD'; 迁移后用户再手动选 'follow' 就会被正常尊重。
+ */
+const CONFIG_VERSION = 2
+
+const migratePersistedState = (parsed) => {
+  const s = (parsed && typeof parsed === 'object') ? parsed : {}
+  const ver = Number.isFinite(s.configVersion) ? s.configVersion : 1
+  let out = s
+  if (ver < 2) {
+    if (out.overseasCurrency === 'follow' || out.overseasCurrency === undefined) {
+      out = { ...out, overseasCurrency: 'USD' }
+    }
+  }
+  if (out.configVersion !== CONFIG_VERSION) out = { ...out, configVersion: CONFIG_VERSION }
+  return out
+}
+
 const loadPersistedState = () => {
   try {
     const raw = readFileSync(STATE_FILE, 'utf8')
-    const parsed = JSON.parse(raw)
-    return parsed && typeof parsed === 'object' ? parsed : {}
-  } catch { return {} }
+    return migratePersistedState(JSON.parse(raw))
+  } catch { return migratePersistedState({}) }
 }
 
 const savePersistedState = (state) => {
@@ -293,13 +314,15 @@ export function isOfficialHost(host) {
 }
 
 /**
- * 手写最小缩进解析器: 从 settings.yaml 文本里抓 `llm-pi-ai.providers.<name>.baseURL`。
- * 刻意不引 yaml 依赖 —— package.json 的 dependencies 保持为空 (只有 4 个可选 peerDeps),
+ * settings.yaml 里 `llm-pi-ai.providers.<name>.<field>` 的通用取值器 (v1.4.0 抽出,
+ * 原先只取 baseURL 一个字段, 「真自动」要连 apiKeyEnv 一起取)。
+ * 手写最小缩进解析器 —— 刻意不引 yaml 依赖: package.json 的 dependencies 保持为空,
  * 引依赖会破坏零依赖安装。只认这一条路径, 别的 YAML 语法一概不管。
  * @param {string} text settings.yaml 全文
- * @returns {Record<string,string>} { providerName: baseURL }
+ * @param {string[]} wanted 想取的字段名 (provider 直接子字段那一层)
+ * @returns {Record<string,Record<string,string>>} { providerName: { field: value } }
  */
-export function parseProviderBaseURLs(text) {
+const collectProviderFields = (text, wanted) => {
   const out = {}
   if (typeof text !== 'string' || text === '') return out
   const indentOf = (line) => line.length - line.replace(/^[ \t]+/, '').length
@@ -357,12 +380,153 @@ export function parseProviderBaseURLs(text) {
     if (indent <= nameIndent) continue
     if (fieldIndent < 0) fieldIndent = indent     // provider 下第一个字段定基准缩进
     if (indent !== fieldIndent) continue          // 更深的层 (models 项内部等) 不认
-    if (kv.key === 'baseURL' || kv.key === 'baseUrl') {
+    if (wanted.includes(kv.key)) {
       const value = cleanValue(kv.value)
-      if (value !== '') out[current] = value
+      if (value !== '') {
+        if (out[current] === undefined) out[current] = {}
+        out[current][kv.key] = value
+      }
     }
   }
   return out
+}
+
+/**
+ * 从 settings.yaml 文本里抓 `llm-pi-ai.providers.<name>.baseURL` (第 2 层判定用)。
+ * @param {string} text settings.yaml 全文
+ * @returns {Record<string,string>} { providerName: baseURL }
+ */
+export function parseProviderBaseURLs(text) {
+  const out = {}
+  for (const [name, fields] of Object.entries(collectProviderFields(text, ['baseURL', 'baseUrl']))) {
+    const url = fields.baseURL !== undefined ? fields.baseURL : fields.baseUrl
+    if (url !== undefined) out[name] = url
+  }
+  return out
+}
+
+/**
+ * v1.4.0「真自动」: 抓 provider 的 baseURL **和 apiKeyEnv**。
+ * 插件据此把用户在 DSH 里配好的中转站直接变成可查余额的条目 ——
+ * 不必再去插件设置里手抄一遍 baseUrl + key。
+ * @param {string} text settings.yaml 全文
+ * @returns {Record<string,{baseURL:string,apiKeyEnv:string}>}
+ */
+export function parseProviderEntries(text) {
+  const out = {}
+  for (const [name, fields] of Object.entries(collectProviderFields(text, ['baseURL', 'baseUrl', 'apiKeyEnv']))) {
+    out[name] = {
+      baseURL: fields.baseURL !== undefined ? fields.baseURL : (fields.baseUrl !== undefined ? fields.baseUrl : ''),
+      apiKeyEnv: fields.apiKeyEnv !== undefined ? fields.apiKeyEnv : '',
+    }
+  }
+  return out
+}
+
+/**
+ * v1.4.0「真自动」: 从 settings.yaml 派生数据里挑出「该自动去查余额」的 provider。
+ * 纯函数, 不碰文件/网络, 便于单测。**不在这里解析 key** —— 那步要访问 credentials 服务, 是异步的。
+ *
+ * 过滤规则 (三条, 每条都对应一条既有铁律):
+ *   1. 只收**写了 baseURL** 的 provider —— 没写的按铁律 9「不表态」, 交 `-official` 后缀兜底
+ *      (本机 `xiaomi` 正是「内置目录指向官方域名、但 key 实际来自中转站」的反例);
+ *   2. 第 2 层判成 `official` 的跳过 —— 官方直连由预设平台负责, 别重复成一条中转站;
+ *   3. 用户关掉的 (`dshProviderOptOut`) 跳过 —— 关过不会被下次自动发现又打开。
+ * @param {Record<string,{baseURL?:string,apiKeyEnv?:string}>} entries parseProviderEntries 的结果
+ * @param {Record<string,string>} kinds computeProviderKinds 的结果
+ * @param {string[]} optOut 用户关掉的 provider 名 (大小写不敏感)
+ * @returns {{name:string,baseURL:string,apiKeyEnv:string}[]} 按 provider 名排序, baseURL 已剥尾斜杠
+ */
+export const selectDshProviders = (entries, kinds, optOut) => {
+  const off = new Set((Array.isArray(optOut) ? optOut : []).map((x) => String(x).toLowerCase()))
+  const src = (entries && typeof entries === 'object') ? entries : {}
+  const kindMap = (kinds && typeof kinds === 'object') ? kinds : {}
+  const out = []
+  for (const name of Object.keys(src).sort()) {
+    const e = (src[name] && typeof src[name] === 'object') ? src[name] : {}
+    const baseURL = typeof e.baseURL === 'string' ? e.baseURL : ''
+    if (baseURL === '') continue
+    if (kindMap[name] === 'official') continue
+    if (off.has(String(name).toLowerCase())) continue
+    out.push({
+      name,
+      baseURL: baseURL.replace(/\/+$/, ''),
+      apiKeyEnv: typeof e.apiKeyEnv === 'string' ? e.apiKeyEnv : '',
+    })
+  }
+  return out
+}
+
+/**
+ * v1.4.0: `/api-dashboard/balances` 的取数策略 —— 纯函数, 便于单测 (策略很容易被"顺手改坏")。
+ *
+ * 背景: `force=1` 那条路底下是 `await refreshAll()` —— 一次全量轮询要等**最慢**的端点,
+ * 最长可以拖满 `timeoutMs`(默认 8s)。应用切回前台 / 页面重载时如果走 force,
+ * 用户看到的就是「插件加载很慢, 要等一段时间」。
+ *
+ * @returns {'wait'|'background'|'none'}
+ *   wait       = 阻塞刷新后返回新数据 (没有东西可显示, 或用户显式强刷)
+ *   background = 立刻回手上有的, 刷新丢后台 (stale-while-revalidate)
+ *   none       = 缓存够新, 直接用
+ */
+export const planBalancesFetch = ({ force = false, peek = false, hasData = false, age = 0, intervalMs = 5000 } = {}) => {
+  const stale = age > (intervalMs || 300000)   // 兼容旧行为: intervalMs 缺失时用 5 分钟
+  if (!hasData) return 'wait'                  // 冷启动(服务端刚重启): 确实没东西可显示, 只能等
+  if (!force && !stale) return 'none'
+  if (peek) return age > 1000 ? 'background' : 'none'  // 1 秒内刚拉过就不重复打
+  return age > 2000 ? 'wait' : 'none'          // 显式强刷留 2 秒节流, 防连点打爆平台接口
+}
+
+/** v1.4.0: 刷新间隔白名单化 —— 1~60 秒 (下限由 5 秒放宽到 1 秒, 用户要求更快) */
+export const clampRefreshSec = (v) => Math.min(Math.max(Math.round(Number(v) || 1), 1), 60)
+
+/**
+ * 第 2 层自动判定的补充素材: 提取 settings.yaml 里 `llm-pi-ai.providers.<name>` 的
+ * **全部 provider 名**，包括没有写 baseURL 的 provider。这样即使别人没有手写 URL，
+ * 只要用的是已知官方 preset 名，也能自动判定为官方，而不必先手动补 settings。
+ * 注意：只提取 provider 名本身，不改变 parseProviderBaseURLs 的返回语义。
+ */
+export function parseProviderNames(text) {
+  const names = []
+  if (typeof text !== 'string' || text === '') return names
+  const indentOf = (line) => line.length - line.replace(/^[ \t]+/, '').length
+  const keyOf = (line) => {
+    if (line.startsWith('-')) return null
+    const m = /^([^\s#][^:]*):(.*)$/.exec(line)
+    return m === null ? null : { key: m[1].trim(), value: m[2].trim() }
+  }
+  let sectionIndent = -1
+  let sectionChildIndent = -1
+  let providersIndent = -1
+  let nameIndent = -1
+  for (const raw of text.split(/\r?\n/)) {
+    const trimmed = raw.trim()
+    if (trimmed === '' || trimmed.startsWith('#')) continue
+    const indent = indentOf(raw)
+    if (nameIndent >= 0 && indent <= nameIndent) { nameIndent = -1 }
+    if (providersIndent >= 0 && indent <= providersIndent) { providersIndent = -1; nameIndent = -1 }
+    if (sectionIndent >= 0 && indent <= sectionIndent && providersIndent < 0) {
+      const kv = keyOf(trimmed)
+      if (kv !== null && kv.key !== 'llm-pi-ai') { sectionIndent = -1; sectionChildIndent = -1 }
+    }
+    const kv = keyOf(trimmed)
+    if (kv === null) continue
+    if (sectionIndent < 0) {
+      if (kv.key === 'llm-pi-ai' && kv.value === '') { sectionIndent = indent; sectionChildIndent = -1 }
+      continue
+    }
+    if (providersIndent < 0) {
+      if (indent <= sectionIndent) continue
+      if (sectionChildIndent < 0) sectionChildIndent = indent
+      if (indent === sectionChildIndent && kv.key === 'providers' && kv.value === '') providersIndent = indent
+      continue
+    }
+    if (indent > providersIndent && kv.value === '') {
+      if (nameIndent < 0) nameIndent = indent
+      if (indent === nameIndent) names.push(kv.key)
+    }
+  }
+  return names
 }
 
 /**
@@ -376,6 +540,11 @@ export function computeProviderKinds(text) {
     if (host === '') continue
     kinds[name] = isOfficialHost(host) ? 'official' : 'relay'
   }
+  // v1.4.0 移除「按 provider 名字猜官方」的兜底。
+  // 旧代码把「名字恰好等于某个预设 id 且没写 baseURL」判成 official —— 这与本文件 232-240 行的政策
+  // 和 AGENTS.md 铁律 9 直接冲突:「没写 baseURL 的 provider 是不表态、交 `-official` 后缀兜底」。
+  // 理由(AGENTS.md 原话): 内置目录指向官方域名 ≠ 用户的 key 来自官方(`xiaomi` 就是反例)。
+  // 只看名字会把「恰好同名的中转站会话」顶上官方余额 —— 不表态比猜错安全。
   return kinds
 }
 
@@ -399,22 +568,31 @@ export const normalizeOfficialProviders = (input) => {
 }
 
 const SETTINGS_FILE = join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'settings.yaml')
-let providerKindsCache = { mtimeMs: -1, kinds: {} }
+/**
+ * settings.yaml 派生数据缓存, 按 mtime 失效 (轮询每 5s 一次, 别每次都解析)。
+ *   kinds   = 第 2 层官方/中转判定素材
+ *   entries = v1.4.0「真自动」: 各 provider 的 baseURL / apiKeyEnv,
+ *             用来把 DSH 里配好的中转站合成可查余额的条目
+ */
+let settingsDerivedCache = { mtimeMs: -1, kinds: {}, entries: {} }
 
-/** 读 settings.yaml 算第 2 层判定, 按 mtime 缓存 (轮询每 5s 一次, 别每次都解析) */
-const readProviderKinds = () => {
+/** 读 settings.yaml 并算出全部派生数据 (mtime 缓存) */
+const readSettingsDerived = () => {
   try {
     const mtimeMs = statSync(SETTINGS_FILE).mtimeMs
-    if (mtimeMs === providerKindsCache.mtimeMs) return providerKindsCache.kinds
-    const kinds = computeProviderKinds(readFileSync(SETTINGS_FILE, 'utf8'))
-    providerKindsCache = { mtimeMs, kinds }
-    return kinds
+    if (mtimeMs === settingsDerivedCache.mtimeMs) return settingsDerivedCache
+    const text = readFileSync(SETTINGS_FILE, 'utf8')
+    settingsDerivedCache = { mtimeMs, kinds: computeProviderKinds(text), entries: parseProviderEntries(text) }
+    return settingsDerivedCache
   } catch {
-    // settings.yaml 不存在/读不动: 不表态, 全交给第 1、3 层
-    providerKindsCache = { mtimeMs: -1, kinds: {} }
-    return providerKindsCache.kinds
+    // settings.yaml 不存在/读不动: 不表态, 全交给第 1、3 层, 也没有可自动发现的中转站
+    settingsDerivedCache = { mtimeMs: -1, kinds: {}, entries: {} }
+    return settingsDerivedCache
   }
 }
+
+/** 读 settings.yaml 算第 2 层判定 */
+const readProviderKinds = () => readSettingsDerived().kinds
 
 // ============================================================
 // 工具函数
@@ -438,18 +616,28 @@ const fnv1a = (str) => {
 // DeepSeek 峰谷计费引擎 (学习 dsh-balance)
 // 北京时间 09:00~12:00 / 14:00~18:00 为峰时(100%), 其余时段谷时特惠(5折)
 // ============================================================
+// v1.3.4 (2026-09-10): 官方同日 12:00 起调整 Flash 系列定价(最高降幅 60%), 并收敛模型名 ——
+//   deepseek-v4-flash → deepseek-flash (旧名仍可调用, 由 V4.1-Flash 服务并按 Flash 价计费, 定价页注 1);
+//   2026-09-14 12:00 后 deepseek-v4-pro 的请求将全部路由到 V4.1-Flash 并按 Flash 价计费(官方计划下线 Pro, 注 2)。
+// 来源: https://api-docs.deepseek.com/zh-cn/quick_start/pricing (CNY) 与 /quick_start/pricing (USD) ——
+//   USD 表为官方直发(非 ÷7 换算, 实际口径约 1 USD ≈ 6.67 CNY), pro 档与调整前一致, 未变动。
 export const V4_RATES = {
   CNY: {
-    peak: { 'deepseek-v4-flash': { cacheHit: 0.1, cacheMiss: 3, output: 9 }, 'deepseek-v4-pro': { cacheHit: 0.3, cacheMiss: 9, output: 27 } },
-    offPeak: { 'deepseek-v4-flash': { cacheHit: 0.05, cacheMiss: 1.5, output: 4.5 }, 'deepseek-v4-pro': { cacheHit: 0.15, cacheMiss: 4.5, output: 13.5 } },
+    peak: { 'deepseek-flash': { cacheHit: 0.04, cacheMiss: 2, output: 8 }, 'deepseek-v4-pro': { cacheHit: 0.3, cacheMiss: 9, output: 27 } },
+    offPeak: { 'deepseek-flash': { cacheHit: 0.02, cacheMiss: 1, output: 4 }, 'deepseek-v4-pro': { cacheHit: 0.15, cacheMiss: 4.5, output: 13.5 } },
   },
   USD: {
-    peak: { 'deepseek-v4-flash': { cacheHit: 0.014, cacheMiss: 0.44, output: 1.32 }, 'deepseek-v4-pro': { cacheHit: 0.044, cacheMiss: 1.32, output: 3.96 } },
-    offPeak: { 'deepseek-v4-flash': { cacheHit: 0.007, cacheMiss: 0.22, output: 0.66 }, 'deepseek-v4-pro': { cacheHit: 0.022, cacheMiss: 0.66, output: 1.98 } },
+    peak: { 'deepseek-flash': { cacheHit: 0.006, cacheMiss: 0.3, output: 1.2 }, 'deepseek-v4-pro': { cacheHit: 0.044, cacheMiss: 1.32, output: 3.96 } },
+    offPeak: { 'deepseek-flash': { cacheHit: 0.003, cacheMiss: 0.15, output: 0.6 }, 'deepseek-v4-pro': { cacheHit: 0.022, cacheMiss: 0.66, output: 1.98 } },
   },
 }
 
-/** 通用表 USD → CNY 换算汇率 (与 V4_RATES.USD 表的 ~7 汇率一致) */
+/**
+ * 通用表 USD → CNY 换算汇率 —— **近似值**, 只在「用户把币种设成非原生币种」时才用到。
+ * v1.4.0 起 MODEL_PRICES 按原生币种存储, 默认配置(国内 CNY / 海外 USD)下两边同币种, 根本不走换算;
+ * 且 DeepSeek 走 V4_RATES 自带的两套官方表, 本汇率对它无效。
+ * ⚠️ 官方 DeepSeek 的 USD 直发价口径约 1 USD ≈ 6.67 CNY, 与本值不同 —— 别拿它去"校正" V4_RATES.USD。
+ */
 const USD_TO_CNY_RATE = 7
 
 /** 北京时间(UTC+8)的星期与小时, 先 +8h 再取值, 避免跨日界(00:00~08:00)星期比北京时间早一天 */
@@ -478,20 +666,35 @@ export const isWeekend = (timestamp = Date.now()) => {
 
 
 // ============================================================
-// 通用模型价格表 — 每百万token, **统一存 USD 基准**。
-// resolveModelPrice 返回时会按用户「计价货币」换算: 选 CNY 则 ×7, 选 USD 原样。
-// (CNY 官方价的 StepFun/MiMo/Qwen3.8-max 入库前已 ÷7 换算回 USD, 注释里标了原 CNY 价。)
+// 通用模型价格表 — 每百万token, **按「模型原生币种」存储** (v1.4.0)。
+//
+// 规则: 国内厂商官方定价页给的是 CNY → 这里直接写官方 CNY 原值;
+//       海外厂商官方定价页给的是 USD → 这里直接写官方 USD 原值。
+// 币种由 modelRegion(model) 判定 (与 currencyForModel 同源), resolveModelPrice 只在
+// 「显示币种 ≠ 原生币种」时才换算 —— 默认配置(currency=CNY / overseasCurrency=USD)下
+// 国内走 CNY、海外走 USD, 两边都是原样返回, 零换算误差。
+//
+// ⚠️ 为什么不继续用「统一存 USD 基准」(v1.3.4 及以前):
+//   CNY 官方价 ÷7 入库、显示时再 ×7, 既留舍入尾巴, 更容易把官方 CNY 直接填进 USD 槽位
+//   → 面板按 7 倍计费。历史上已被咬过两次:
+//     ① MiMo: ¥1 被写成 0.020 (等于又除了一次 7), 少算成 1/7;
+//     ② glm-4-plus / 整个「历史/参考」段: ¥2.5/¥5/¥5 被当 USD, 显示 ¥17.5/¥35/¥35。
+//   原生币种存储让这类错误**无法表达** —— 改表时直接抄官方页数字, 不要再做任何 ÷7。
+//
 // ⚠️ DeepSeek 计费请走上面 V4_RATES 峰谷表(自带 CNY/USD 两套, 官方价, 准确); 本通用表覆盖 OpenAI/Claude/Gemini/国产等。
-// 来源: ① 现役主力(2026-08) 来自 NousResearch hermes-agent usage_pricing.py(追踪各官方文档, 逐条注明 source_url);
+// 来源: ① 现役主力(2026-09-03) NousResearch hermes-agent usage_pricing.py + 各厂商官方定价页;
+//          v1.4.0 (2026-09-10) 复核抓取原文: api-docs.deepseek.com 中英双页 / platform.kimi.com /
+//          platform.minimaxi.com / platform.stepfun.com / docs.bigmodel.cn / help.aliyun.com(百炼) /
+//          MiMo 官方永久降价公告。逐条核对, 差异已就地注明。
 //       ② 旧模型(2025-08) 为历史参考价. 仅做参考, 实际以平台为准.
 // ============================================================
 export const MODEL_PRICES = {
-  // —— 现役主力 (2026-09-03 更新; 统一 USD/百万tokens) ——
-  // 来源: ① model_pricing_2026_09.json (USD) + StepFun/MiMo/Qwen3.8 官方页 (CNY, 已 ÷7 换算并标注)
-  //       ② v1.2.0 补充: modelradar.cn/data/models.json 2026-09-03 快照 (各模型 sourceUrl 均指官方定价页)。
-  //          仅采纳与官方口径无分歧的条目; 与原表冲突时保留原值并注明 ——
-  //          radar 的 GPT-5.6 系输出价全呈「输入×1.25」异常模式, 疑似抓错列, 未采纳;
-  //          促销价 (qwen3.7-max 5折等) radar 不跟踪, 保留原促销值。
+  // —— 海外厂商: 单位 USD/百万tokens (原生) ——
+  // 来源: modelradar.cn 2026-09-03 快照 (各模型 sourceUrl 均指官方定价页)。
+  //       仅采纳与官方口径无分歧的条目; 与原表冲突时保留原值并注明 ——
+  //       radar 的 GPT-5.6 系输出价全呈「输入×1.25」异常模式, 疑似抓错列, 未采纳。
+  // ⚠️ OpenAI / Anthropic / Gemini 官方定价页在本容器环境被 403 / 地域封锁, v1.4.0 未能取到原文复核,
+  //    下列海外条目仍为 radar/hermes-agent 二手源, 未逐条核实 —— 有账单单据时优先以单据为准。
   // OpenAI GPT-5.6 系列 (radar 报 sol 输出 $5 / terra $2.5 / luna $0.25, 均为输入×1.25 异常模式, 未采纳)
   'gpt-5.6-sol':          { cacheHit: 0.5,   cacheMiss: 4.0,   output: 20.0 },  // 临时促销价(至少到 2026-11-21)
   'gpt-5.6-terra':        { cacheHit: 0.2,   cacheMiss: 2.0,   output: 12.0 },  // 2026-07-30 降价
@@ -511,47 +714,69 @@ export const MODEL_PRICES = {
   'gemini-3.1-pro':       { cacheHit: 2.0,   cacheMiss: 2.0,   output: 12.0 },  // 无缓存折扣; 长上下文 $4/$24
   'gemini-2.5-pro':       { cacheHit: 0.125, cacheMiss: 1.25,  output: 10.00 },
   'gemini-2.5-flash':     { cacheHit: 0.03,  cacheMiss: 0.3,   output: 2.5 },   // radar 2026-09-03, 1M ctx
-  // —— 国产主力 (2026-09) ——
-  // 阿里云百炼 Qwen3
-  'qwen3.8-max':          { cacheHit: 1.71,  cacheMiss: 1.71,  output: 5.14 },  // 100万token/90天免费额度, 超出按 ¥12/¥36 (÷7); 夜间22:00-08:00五折未实现
-  'qwen3.7-max':          { cacheHit: 0.83,  cacheMiss: 0.83,  output: 2.48 },  // 5折促销, 无缓存折扣
-  'qwen3.7-plus':         { cacheHit: 0.55,  cacheMiss: 0.55,  output: 1.65 },  // 无缓存折扣
-  'qwen3.7-flash':        { cacheHit: 0.03,  cacheMiss: 0.03,  output: 0.13 },  // 0-32k 最优价
-  'qwen3.8-flash':        { cacheHit: 0.011, cacheMiss: 0.11,  output: 0.372 }, // radar 2026-09-03 (官方页 CNY ÷7), 1M ctx
-  'qwen3.8-27b':          { cacheHit: 0.05,  cacheMiss: 0.503, output: 3.017 }, // radar (CNY ÷7)
-  'qwen3.6-plus':         { cacheHit: 0.028, cacheMiss: 0.276, output: 1.655 }, // radar (CNY ÷7), 256K ctx
-  // 智谱 GLM-5
-  'glm-5.2':              { cacheHit: 0.26,  cacheMiss: 1.4,   output: 4.4 },
-  'glm-5-turbo':          { cacheHit: 0.24,  cacheMiss: 1.2,   output: 4.0 },
-  'glm-5.3-flash':        { cacheHit: 0.03,  cacheMiss: 0.15,  output: 0.5 },   // v1.2.3 修正缓存读价: GLM 系缓存读=输入×20% (与 glm-5.2 0.26/1.4、glm-5-turbo 0.24/1.2 口径一致; 原误标"无缓存折扣"致长会话消耗虚高 5 倍)
-  // Kimi
-  'kimi-k3':              { cacheHit: 0.3,   cacheMiss: 3.0,   output: 15.0 },  // 缓存价已修正
-  'kimi-k2.6':            { cacheHit: 0.152, cacheMiss: 0.897, output: 3.724 }, // radar 2026-09-03, 262K ctx (官方页 CNY ÷7)
-  'kimi-k2.5':            { cacheHit: 0.097, cacheMiss: 0.552, output: 2.897 }, // radar, 262K ctx
-  // 字节豆包 Seed 2.0 (radar 2026-09-03, 火山方舟官方页; 计费随上下文档位不同, 前缀匹配按最长命中)
-  'doubao-seed-2.0-pro-32k':   { cacheHit: 0.088, cacheMiss: 0.441, output: 2.207 },
-  'doubao-seed-2.0-pro-128k':  { cacheHit: 0.132, cacheMiss: 0.662, output: 3.31 },
-  'doubao-seed-2.0-pro-256k':  { cacheHit: 0.265, cacheMiss: 1.324, output: 6.621 },
-  'doubao-seed-2.0-lite-32k':  { cacheHit: 0.017, cacheMiss: 0.083, output: 0.497 },
-  'doubao-seed-2.0-lite-128k': { cacheHit: 0.025, cacheMiss: 0.124, output: 0.745 },
-  'doubao-seed-2.0-lite-256k': { cacheHit: 0.05,  cacheMiss: 0.248, output: 1.49 },
-  'doubao-seed-2.0-mini-32k':  { cacheHit: 0.006, cacheMiss: 0.028, output: 0.276 },
-  'doubao-seed-2.0-mini-128k': { cacheHit: 0.011, cacheMiss: 0.055, output: 0.552 },
-  'doubao-seed-2.0-mini-256k': { cacheHit: 0.022, cacheMiss: 0.11,  output: 1.103 },
-  'doubao-seed-2.0-code-32k':  { cacheHit: 0.088, cacheMiss: 0.441, output: 2.207 },
-  'doubao-seed-2.0-code-128k': { cacheHit: 0.132, cacheMiss: 0.662, output: 3.31 },
-  'doubao-seed-2.0-code-256k': { cacheHit: 0.265, cacheMiss: 1.324, output: 6.621 },
-  // 腾讯混元 (radar 2026-09-03, cloud.tencent.com 官方页; 无缓存价 → cacheHit=cacheMiss)
-  'hunyuan-2.0-instruct-128k': { cacheHit: 0.621, cacheMiss: 0.621, output: 1.535 },
-  'hunyuan-2.0-think-128k':    { cacheHit: 0.731, cacheMiss: 0.731, output: 2.924 },
-  'hunyuan-turbo-s':           { cacheHit: 0.11,  cacheMiss: 0.11,  output: 0.276 },
-  // 阶跃星辰 (官方页为 CNY, 已 ÷7 换 USD)
-  'step-3.7-flash':       { cacheHit: 0.039, cacheMiss: 0.193, output: 1.157 },
-  'step-3.5-flash':       { cacheHit: 0.02,  cacheMiss: 0.10,  output: 0.30 },
-  // 小米 MiMo (官方页为 CNY ¥1/0.02/2 与 ¥3/0.025/6, 已 ÷7 换 USD)
-  'mimo-v2.5':            { cacheHit: 0.0004, cacheMiss: 0.020, output: 0.041 },
-  'mimo-v2.5-pro':        { cacheHit: 0.001,  cacheMiss: 0.061, output: 0.122 },
+  // —— 国内厂商: 单位 CNY/百万tokens (原生官方价, 不要再 ÷7) ——
+  // 阿里云百炼 Qwen3 (华北2/北京; help.aliyun.com/zh/model-studio/model-pricing 2026-09-10 抓取)
+  //   官方上下文缓存规则: 命中按「标准输入单价 10%」计费。
+  //   ⚠️ 官方明文例外: qwen3.8-max / qwen3.8-flash / qwen3.8-2.4t-a95b 的缓存命中价**不是 10%**,
+  //      且未在文档给数字(只写「参见百炼控制台」)→ 这两条 cacheHit 沿用中转站实测报价, 标为「例外价」。
+  'qwen3.8-max':          { cacheHit: 1.5,  cacheMiss: 12,  output: 36 },  // 官方 ¥12/¥36; cacheHit ¥1.5 为控制台例外价(非 10% 规则)
+  'qwen3.7-max':          { cacheHit: 1.2,  cacheMiss: 12,  output: 36 },  // v1.4.0: 官方页现为原价 ¥12/¥36 (旧「5 折促销值」官方页已不存在, 已废)
+  'qwen3.7-plus':         { cacheHit: 0.16, cacheMiss: 1.6, output: 6.4 }, // v1.4.0: 官方限时 8 折 (原价 ¥2/¥8)
+  'qwen3.7-flash':        { cacheHit: 0.02, cacheMiss: 0.2, output: 0.8 }, // v1.4.0: 官方 ¥0.2/¥0.8 (旧值 0.21/0.91 系中转站高档位, 已废)
+  'qwen3.8-flash':        { cacheHit: 0.1,  cacheMiss: 0.8, output: 2.7 }, // 官方 ¥0.8/¥2.7; cacheHit ¥0.1 同 3.8-max 为控制台例外价
+  'qwen3.8-27b':          { cacheHit: 0.3,  cacheMiss: 3,   output: 12 },  // v1.4.0: 官方 ¥3/¥12; 缓存命中按官方 10% 规则 → ¥0.3 (旧值 ¥0.6 偏高 100%)
+  'qwen3.6-plus':         { cacheHit: 0.2,  cacheMiss: 2,   output: 12 },  // 官方 ¥2/¥12 (256K 档 ¥8/¥48 未做分档)
+  // 智谱 GLM (docs.bigmodel.cn/cn/guide/start/pricing 2026-09-10 抓取)
+  //   ⚠️ GLM-5 系官方分档: 「[0,32K)」与「≥32K」两套价。本表按 ≥32K(更贵) 入库 —— 估算偏保守高估。
+  'glm-5.3':              { cacheHit: 2,    cacheMiss: 8,   output: 28 },  // 官方 ¥8/¥28/缓存 ¥2
+  'glm-5.2':              { cacheHit: 2,    cacheMiss: 8,   output: 28 },  // 官方 ¥8/¥28/缓存 ¥2
+  'glm-5.1':              { cacheHit: 2,    cacheMiss: 8,   output: 28 },  // 官方 ≥32K 档 ¥8/¥28/缓存 ¥2 ([0,32K) 档为 ¥6/¥24/¥1.3)
+  'glm-5-turbo':          { cacheHit: 1.8,  cacheMiss: 7,   output: 26 },  // v1.4.0: 官方 ≥32K 档 ¥7/¥26/缓存 ¥1.8 (旧值 1.68/8.4/28 两档都不符)
+  'glm-5.3-flash':        { cacheHit: 0.23, cacheMiss: 0.8, output: 2.8 }, // 官方 ¥0.8/¥2.8/缓存 ¥0.23
+  // Kimi / Moonshot (platform.kimi.com/docs/pricing/* 2026-09-10 抓取, 均 CNY)
+  'kimi-k3':              { cacheHit: 2,    cacheMiss: 20,  output: 100 }, // v1.4.0: 官方 ¥2/¥20/¥100 (旧值全线 +5%)
+  'kimi-k2.7-code':       { cacheHit: 1.3,  cacheMiss: 6.5, output: 27 },  // 官方 ¥1.3/¥6.5/¥27
+  'kimi-k2.7-code-highspeed': { cacheHit: 2.6, cacheMiss: 13, output: 54 },// v1.4.0 新增: 官方高速版 ¥2.6/¥13/¥54
+  'kimi-k2.6':            { cacheHit: 1.1,  cacheMiss: 6.5, output: 27 },  // v1.4.0: 官方缓存命中 ¥1.1 (旧值误抄成 k2.7-code 的 ¥1.3)
+  'kimi-k2.5':            { cacheHit: 0.679, cacheMiss: 3.864, output: 20.279 }, // ⚠️ 未核实: 官方页未列(历史款), 由 v1.3.4 USD 值 ×7 保号迁移
+  // 字节豆包 Seed (火山方舟; ⚠️ 官方页是 SPA, v1.4.0 未能取到原文 → ×7 保号迁移, 未核实)
+  'doubao-seed-2.0-pro-32k':   { cacheHit: 0.616, cacheMiss: 3.087, output: 15.449 },
+  'doubao-seed-2.0-pro-128k':  { cacheHit: 0.924, cacheMiss: 4.634, output: 23.17 },
+  'doubao-seed-2.0-pro-256k':  { cacheHit: 1.855, cacheMiss: 9.268, output: 46.347 },
+  'doubao-seed-2.0-lite-32k':  { cacheHit: 0.119, cacheMiss: 0.581, output: 3.479 },
+  'doubao-seed-2.0-lite-128k': { cacheHit: 0.175, cacheMiss: 0.868, output: 5.215 },
+  'doubao-seed-2.0-lite-256k': { cacheHit: 0.35,  cacheMiss: 1.736, output: 10.43 },
+  'doubao-seed-2.0-mini-32k':  { cacheHit: 0.042, cacheMiss: 0.196, output: 1.932 },
+  'doubao-seed-2.0-mini-128k': { cacheHit: 0.077, cacheMiss: 0.385, output: 3.864 },
+  'doubao-seed-2.0-mini-256k': { cacheHit: 0.154, cacheMiss: 0.77,  output: 7.721 },
+  'doubao-seed-2.0-code-32k':  { cacheHit: 0.616, cacheMiss: 3.087, output: 15.449 },
+  'doubao-seed-2.0-code-128k': { cacheHit: 0.924, cacheMiss: 4.634, output: 23.17 },
+  'doubao-seed-2.0-code-256k': { cacheHit: 1.855, cacheMiss: 9.268, output: 46.347 },
+  // 字节 Seed 2.1 (中转站实测; 未分档, 按单一价入库)
+  'seed-2.1-turbo':       { cacheHit: 0.6,  cacheMiss: 3,   output: 15 },  // 实测 ¥3/¥15/缓存 ¥0.6
+  'seed-2.1-pro':         { cacheHit: 1.2,  cacheMiss: 6,   output: 30 },  // 实测 ¥6/¥30/缓存 ¥1.2
+  // MiniMax (platform.minimaxi.com/docs/guides/pricing-paygo 2026-09-10 抓取)
+  'minimax-m2.7':           { cacheHit: 0.42, cacheMiss: 2.1, output: 8.4 },  // v1.4.0 修复: 官方缓存读 ¥0.42 (旧值拿 cacheMiss ¥2.1 顶替 → 长会话高估 5 倍, 同 AGENTS.md 红线 4)
+  'minimax-m2.7-highspeed': { cacheHit: 0.42, cacheMiss: 4.2, output: 16.8 }, // v1.4.0 新增: 官方高速版
+  // 美团 LongCat (中转站实测; 官方页未取到明文)
+  'longcat-2.0':          { cacheHit: 0.1,  cacheMiss: 5,   output: 20 },  // 实测 ¥5/¥20/缓存 ¥0.1
+  // 腾讯混元 (⚠️ 官方页是 SPA, v1.4.0 未能取到原文 → ×7 保号迁移, 未核实)
+  'hunyuan-2.0-instruct-128k': { cacheHit: 4.347, cacheMiss: 4.347, output: 10.745 },
+  'hunyuan-2.0-think-128k':    { cacheHit: 5.117, cacheMiss: 5.117, output: 20.468 },
+  'hunyuan-turbo-s':           { cacheHit: 0.77,  cacheMiss: 0.77,  output: 1.932 },
+  // 阶跃星辰 (platform.stepfun.com/docs/zh/guides/pricing/details 2026-09-10 抓取)
+  'step-3.7-flash':       { cacheHit: 0.27, cacheMiss: 1.35, output: 8.1 }, // 官方 ¥1.35/¥8.1/缓存 ¥0.27
+  'step-3.5-flash':       { cacheHit: 0.14, cacheMiss: 0.7,  output: 2.1 }, // 官方 ¥0.7/¥2.1/缓存 ¥0.14
+  // 小米 MiMo — 官方 2026-05-27 起「永久降价」(最高降幅 99%), 取消上下文分档; 与中转站 tokenrhythm 实时报价一致。
+  // v1.3.4 修的「除两次 7」结论正确, v1.4.0 起改为直接存官方 CNY 原值, 不再有 ÷7 环节。
+  'mimo-v2.5':            { cacheHit: 0.02,  cacheMiss: 1, output: 2 },    // 官方 ¥1/¥2/缓存 ¥0.02
+  'mimo-v2.5-pro':        { cacheHit: 0.025, cacheMiss: 3, output: 6 },    // 官方 ¥3/¥6/缓存 ¥0.025
   // —— 以下为历史/参考模型 (2025-08, 实际以平台为准) ——
+  // 币种规则同上: 海外的写 USD, 国内的写 CNY。
+  // 🔴 v1.4.0 重要修复: 本段「国内」条目历来填的是**官方 CNY 原值**(不是 ÷7 后的 USD),
+  //    在旧的「统一 USD 基准」口径下被又 ×7 了一次 → 面板把这些模型高估 7 倍。
+  //    已核对的样本: glm-4-plus ¥2.5/¥5/¥5、qwen-plus ¥0.8/¥2、qwen-turbo ¥0.3/¥0.6、
+  //    qwen2.5-72b ¥4/¥12 均与官方页逐项吻合 → 全段按 CNY 原值解读, 未再 ×7。
   'gpt-4o':               { cacheHit: 1.25,  cacheMiss: 2.5,  output: 10 },
   'gpt-4o-mini':          { cacheHit: 0.075, cacheMiss: 0.15, output: 0.6 },
   'gpt-4-turbo':          { cacheHit: 5,     cacheMiss: 10,   output: 30 },
@@ -559,37 +784,40 @@ export const MODEL_PRICES = {
   'o1':                   { cacheHit: 7.5,   cacheMiss: 15,   output: 60 },
   'o1-mini':              { cacheHit: 0.55,  cacheMiss: 1.1,  output: 4.4 },
   'o3-mini':              { cacheHit: 0.55,  cacheMiss: 1.1,  output: 4.4 },
-  // Claude
-  'claude-3-5-sonnet':    { cacheHit: 1.5,   cacheMiss: 3,    output: 15 },
-  'claude-3-5-haiku':     { cacheHit: 0.4,   cacheMiss: 0.8,  output: 4 },
-  'claude-3-opus':        { cacheHit: 7.5,   cacheMiss: 15,   output: 75 },
-  // Gemini
-  'gemini-2.0-flash':     { cacheHit: 0.05,  cacheMiss: 0.1,  output: 0.4 },
-  'gemini-2.0-pro':       { cacheHit: 1.25,  cacheMiss: 2.5,  output: 10 },
-  'gemini-1.5-pro':       { cacheHit: 1.75,  cacheMiss: 3.5,  output: 10.5 },
+  // Claude — v1.4.0 修正: 缓存读 = 输入 ×10% (Anthropic 官方规则)。旧值用的是 OpenAI 的 50% 口径,
+  // 会让老 Claude 模型的长会话消耗高估 5 倍 (同表新条目 claude-opus-5 等已是 10%, 口径原本就不一致)。
+  'claude-3-5-sonnet':    { cacheHit: 0.3,   cacheMiss: 3,    output: 15 },
+  'claude-3-5-haiku':     { cacheHit: 0.08,  cacheMiss: 0.8,  output: 4 },
+  'claude-3-opus':        { cacheHit: 1.5,   cacheMiss: 15,   output: 75 },
+  // Gemini — v1.4.0 修正: 缓存读 = 输入 ×25% (Gemini 官方 75% off 口径)。旧值 50% 偏高。
+  'gemini-2.0-flash':     { cacheHit: 0.025, cacheMiss: 0.1,  output: 0.4 },
+  'gemini-2.0-pro':       { cacheHit: 0.625, cacheMiss: 2.5,  output: 10 },
+  'gemini-1.5-pro':       { cacheHit: 0.875, cacheMiss: 3.5,  output: 10.5 },
   // DeepSeek (标准价兜底) — ⚠️ 2026-07-24 起 deepseek-chat / deepseek-reasoner / deepseek-r1 已 RETIRED,
-  // 官方 API 调用会直接报错(不再重定向到 V4)。现役仅 deepseek-v4-flash / deepseek-v4-pro / deepseek-v4-flash-vision-exp。
-  // 保留这三条仅作为「若仍在用的旧配置」的估算占位, 真实计费请走上面 V4 峰谷表。
+  // 官方 API 调用会直接报错(不再重定向到 V4)。现役为 deepseek-flash (旧名 deepseek-v4-flash / -vision-exp 仍可调用)
+  // 与 deepseek-v4-pro。⚠️ 2026-09-14 12:00 后 deepseek-v4-pro 的请求将全部路由到 V4.1-Flash 并按 Flash 价计费。
+  // 保留这三条仅作为「若仍在用的旧配置」的估算占位(单位 CNY), 真实计费请走上面 V4 峰谷表。
+  // ⚠️ 未核实: 与 DeepSeek 官方历史价(¥2/¥8 一档)对不上, 暂时原样保留待重新取证。
   'deepseek-chat':        { cacheHit: 0.1,   cacheMiss: 1,    output: 2 },
   'deepseek-reasoner':    { cacheHit: 0.2,   cacheMiss: 2,    output: 8 },
   'deepseek-r1':          { cacheHit: 0.2,   cacheMiss: 2,    output: 8 },
   // 智谱
-  'glm-4-plus':           { cacheHit: 2.5,   cacheMiss: 5,    output: 5 },
-  'glm-4-flash':          { cacheHit: 0.05,  cacheMiss: 0.1,  output: 0.1 },
-  // 通义千问
-  'qwen-plus':            { cacheHit: 0.4,   cacheMiss: 0.8,  output: 2 },
-  'qwen-max':             { cacheHit: 10,    cacheMiss: 20,   output: 60 },
-  'qwen-turbo':           { cacheHit: 0.15,  cacheMiss: 0.3,  output: 0.6 },
-  'qwen2.5-72b-instruct': { cacheHit: 2,     cacheMiss: 4,    output: 12 },
-  // Kimi
+  'glm-4-plus':           { cacheHit: 2.5,   cacheMiss: 5,    output: 5 },  // ✅ v1.4.0 修复: 官方 ¥2.5/¥5/¥5 (旧口径下显示 ¥17.5/¥35/¥35, 高 7 倍)
+  'glm-4-flash':          { cacheHit: 0.05,  cacheMiss: 0.1,  output: 0.1 }, // ⚠️ 官方 GLM-4-Flash-250414 现为免费; 此处保留历史 ¥0.1 档(宁高不低, 中转站可能仍计费)
+  // 通义千问 (官方 CNY; 2026-09-10 抓取)
+  'qwen-plus':            { cacheHit: 0.4,   cacheMiss: 0.8,  output: 2 },  // 官方 ¥0.8/¥2 ✅; ⚠️ cacheHit 0.4(=50%) 未核实
+  'qwen-max':             { cacheHit: 0.24,  cacheMiss: 2.4,  output: 9.6 },// v1.4.0: 官方现价 ¥2.4/¥9.6 (旧值 20/60 是远古价)
+  'qwen-turbo':           { cacheHit: 0.15,  cacheMiss: 0.3,  output: 0.6 },// 官方 ¥0.3/¥0.6 ✅; ⚠️ cacheHit 未核实
+  'qwen2.5-72b-instruct': { cacheHit: 2,     cacheMiss: 4,    output: 12 }, // 官方 ¥4/¥12 ✅
+  // Kimi — ⚠️ 未核实: 官方页未列旧款, 且这些值与 Moonshot 官方历史价(¥12/¥12 一档)对不上, 待重新取证
   'moonshot-v1-8k':       { cacheHit: 0.6,   cacheMiss: 1.2,  output: 2.4 },
   'moonshot-v1-32k':      { cacheHit: 1.2,   cacheMiss: 2.4,  output: 4.8 },
   'moonshot-v1-128k':     { cacheHit: 3,     cacheMiss: 6,    output: 12 },
-  // 阶跃星辰
+  // 阶跃星辰 — ⚠️ 未核实: 官方页未列旧款
   'step-1-flash':         { cacheHit: 0.5,   cacheMiss: 1,    output: 2 },
   'step-1-8k':            { cacheHit: 2,     cacheMiss: 4,    output: 8 },
   'step-1-32k':           { cacheHit: 4,     cacheMiss: 8,    output: 15 },
-  // 其他
+  // 其他 (海外 USD)
   'mistral-large':        { cacheHit: 1.5,   cacheMiss: 3,    output: 9 },
   'groq-llama-3.3-70b':  { cacheHit: 0.29,  cacheMiss: 0.59, output: 0.79 },
   'openrouter-auto':      { cacheHit: 0.5,   cacheMiss: 1,    output: 2 },
@@ -597,10 +825,11 @@ export const MODEL_PRICES = {
 
 // v1.3.2: 模型产地判定 —— 供「海外模型独立计价货币」使用。
 // 海外厂商官方定价页本来就是 USD, ×7 折人民币只是近似且容易被误读成美元
-// (用户实测: 面板 ¥1285 被看成 $1285, 实为 $183.7); 国内厂商官方页是 CNY, 入库时已 ÷7 存 USD 基准。
+// (用户实测: 面板 ¥1285 被看成 $1285, 实为 $183.7)。
+// v1.4.0 起本判定还兼任 MODEL_PRICES 的「存储币种」判定 (见 nativeCurrencyOf), 见下方注释。
 // 判定按前缀, 与 MODEL_PRICES 的键同源; 未命中 → null (不表态, 走主货币, 保守)。
 const OVERSEAS_MODEL_PREFIXES = ['gpt-', 'gpt', 'o1', 'o3', 'o4', 'chatgpt', 'claude', 'gemini', 'grok', 'mistral', 'groq-', 'llama', 'command-', 'openrouter-']
-const DOMESTIC_MODEL_PREFIXES = ['deepseek', 'glm', 'kimi', 'moonshot', 'step-', 'qwen', 'mimo', 'doubao', 'hunyuan', 'minimax', 'abab', 'ernie', 'spark', 'yi-']
+const DOMESTIC_MODEL_PREFIXES = ['deepseek', 'glm', 'kimi', 'moonshot', 'step-', 'qwen', 'mimo', 'doubao', 'seed-', 'hunyuan', 'minimax', 'longcat', 'abab', 'ernie', 'spark', 'yi-']
 
 /** 判定模型产地: '海外' | '国内' | null(未知, 不表态)。前缀匹配取最长, 避免短前缀误命中。 */
 export const modelRegion = (model) => {
@@ -616,47 +845,91 @@ export const modelRegion = (model) => {
 }
 
 /**
+ * v1.4.0: MODEL_PRICES 条目的**存储币种** —— 国内厂商官方页是 CNY, 海外厂商是 USD。
+ * 与 modelRegion 同源, 因此「写表的人抄官方页数字」即为正确, 不需要任何人工 ÷7。
+ * 未命中产地的模型不表态 → 按 CNY (国内口径), 与 defaultPrices 的 USD 基准无关。
+ */
+export const nativeCurrencyOf = (model) => (modelRegion(model) === '海外' ? 'USD' : 'CNY')
+
+/**
+ * 把一份单价从 from 币种换算到 to 币种。同币种原样返回(浅拷贝, 不泄露表内对象引用)。
+ * 汇率是**近似值**(USD_TO_CNY_RATE), 仅用于「用户自定义了非原生币种」这种少数情况;
+ * 默认配置(国内 CNY / 海外 USD)下两边同币种, 根本不走换算 —— 这正是 v1.4.0 想达到的效果。
+ */
+const convertPrice = (price, from, to) => {
+  if (from === to) return { cacheHit: price.cacheHit, cacheMiss: price.cacheMiss, output: price.output }
+  const k = from === 'USD' ? USD_TO_CNY_RATE : 1 / USD_TO_CNY_RATE
+  return { cacheHit: price.cacheHit * k, cacheMiss: price.cacheMiss * k, output: price.output * k }
+}
+
+/**
  * v1.3.2: 算出某模型实际该用哪种计价货币。
  * 海外模型且 overseasCurrency 不是 'follow' 时用它, 其余一律跟主货币 currency。
- * 默认 overseasCurrency='follow' → 行为与 v1.2.6 完全一致。
+ * v1.4.0: 默认值由 'follow' 改为 'USD' —— 即「国内的用国内价(CNY), 海外的用海外价(USD)」。
+ * 想要 v1.2.6 的老行为(全部跟主货币), 显式设成 'follow' 即可。
  */
 export const currencyForModel = (config, model) => {
   const main = (config?.currency ?? 'CNY').toUpperCase()
-  const over = String(config?.overseasCurrency ?? 'follow').toLowerCase()
+  const over = String(config?.overseasCurrency ?? 'USD').toLowerCase()
   if (over === 'follow' || over === '') return main
   if (modelRegion(model) !== '海外') return main
   return over.toUpperCase() === 'USD' ? 'USD' : 'CNY'
 }
 
-/** 解析模型单价, 仅 deepseek-v4-* 支持峰谷自动切换; chat/reasoner 等走通用价格表 */
+/**
+ * v1.4.0: 前缀兜底匹配 —— 只接受「安全后缀」。
+ *
+ * 旧实现是「取最长前缀」，只保证同族内选最长，模型名比某个**老键**长且不属同族时会被老键吞掉:
+ *   gpt-4.1        → 命中 gpt-4 键 → $15/$30/$60 (真价 $0.40/$1.60, 输出虚高约 37 倍)
+ *   gpt-4.5-preview→ 命中 gpt-4 键 → 同上
+ *   gemini-2.5-flash-lite → 命中 gemini-2.5-flash 键 (真价 $0.10/$0.40)
+ * 而 gpt-4o-mini-2024-07-18 / claude-3-5-sonnet-20241022 这类**日期后缀**才是设计意图。
+ * 因此: 只有当剩余部分是日期/版本/预览标记时才认前缀, 其余一律落 defaultPrices。
+ */
+const SAFE_SUFFIX_RE = /^[-_](?:v?\d[\w.-]*|latest|preview|exp|experimental)$/i
+
+/** 精确命中优先; 否则按「安全后缀」前缀兜底; 都不中返回 null。 */
+const matchModelPrice = (model) => {
+  const exact = MODEL_PRICES[model]
+  if (exact) return exact
+  const hits = Object.keys(MODEL_PRICES).filter(k => model.startsWith(k)).sort((a, b) => b.length - a.length)
+  for (const k of hits) {
+    if (SAFE_SUFFIX_RE.test(model.slice(k.length))) return MODEL_PRICES[k]
+  }
+  return null
+}
+
+/** 解析模型单价, 仅 deepseek-flash / deepseek-v4-* 支持峰谷自动切换; chat/reasoner 等走通用价格表 */
 export const resolveModelPrice = (configOrGetter, model, timestamp = Date.now()) => {
   const config = typeof configOrGetter === 'function' ? configOrGetter() : configOrGetter
   const peak = isPeakTime(timestamp)
-  // v1.3.2: 币种按「该模型」决定, 而非全局唯一 —— 海外模型可独立走 USD (见 currencyForModel)
-  const isUsd = currencyForModel(config, model) === 'USD'
-  // MODEL_PRICES 与 defaultPrices 都存 USD 基准; 用户计价货币非 USD 时 ×7 换算, 与 V4_RATES 两套表口径一致
-  const toCurrency = (price) => (isUsd ? price : { cacheHit: price.cacheHit * USD_TO_CNY_RATE, cacheMiss: price.cacheMiss * USD_TO_CNY_RATE, output: price.output * USD_TO_CNY_RATE })
+  const display = currencyForModel(config, model)
 
   // 自定义价格优先 (用户自填, 币种由用户自己把握, 不做换算)
-  if (config?.prices && Object.prototype.hasOwnProperty.call(config.prices, model) && config.prices[model]) {
+  if (typeof model === 'string' && config?.prices && Object.prototype.hasOwnProperty.call(config.prices, model) && config.prices[model]) {
     return config.prices[model]
   }
 
   // v0.5.3 修复: 原 startsWith('deepseek') 会把 deepseek-chat/reasoner 劫持进 V4 峰谷表,
-  // 导致其按 v4-flash 价格计费 (output 虚高至 4.5 倍)。仅精确匹配 v4 系列。
-  // DeepSeek v4 走 V4_RATES 峰谷表 (自带 CNY/USD 两套, 按 currency 选表; 兜底 defaultPrices 也按 USD 基准换算)
-  if (model === 'deepseek-v4-pro' || model === 'deepseek-v4-flash' || model.startsWith('deepseek-v4')) {
-    const table = V4_RATES[isUsd ? 'USD' : 'CNY'] ?? V4_RATES.CNY
-    const key = model === 'deepseek-v4-pro' || model.startsWith('deepseek-v4-pro') ? 'deepseek-v4-pro' : 'deepseek-v4-flash'
-    return (peak ? table.peak[key] : table.offPeak[key]) ?? toCurrency(config?.defaultPrices ?? { cacheHit: 0.1, cacheMiss: 1, output: 2 })
+  // 导致其按 v4-flash 价格计费 (output 虚高至 4.5 倍)。仅匹配现役 v4 系列 + 收敛后的 deepseek-flash。
+  // v1.3.4: 官方收敛模型名后, deepseek-flash 与旧名 deepseek-v4-flash / -vision-exp 同档
+  //   (旧名仍可调用, 由 V4.1-Flash 服务并按 Flash 价计费) → 一律映射到 flash 档位。
+  // DeepSeek v4 走 V4_RATES 峰谷表 (自带 CNY/USD 两套, 按显示币种选表)
+  if (typeof model === 'string' && (model.startsWith('deepseek-v4') || model.startsWith('deepseek-flash'))) {
+    const table = V4_RATES[display] ?? V4_RATES.CNY
+    const key = model.startsWith('deepseek-v4-pro') ? 'deepseek-v4-pro' : 'deepseek-flash'
+    const hit = (peak ? table.peak[key] : table.offPeak[key])
+    if (hit) return { ...hit }
   }
 
-  // 查询 MODEL_PRICES 表兜底 (优先匹配完整模型名, 再试前缀匹配; 单向最长前缀, 避免短输入 "g" 命中长键 "gpt-5.6-sol")
-  const exact = MODEL_PRICES[model]
-  if (exact) return toCurrency(exact)
-  const prefix = Object.keys(MODEL_PRICES).filter(k => model.startsWith(k)).sort((a, b) => b.length - a.length)[0]
-  if (prefix) return toCurrency(MODEL_PRICES[prefix])
-  return toCurrency(config?.defaultPrices ?? { cacheHit: 0.1, cacheMiss: 1, output: 2 })
+  // 查通用表 (精确名 → 安全后缀前缀兜底)。条目按原生币种存储, 换算到显示币种。
+  if (typeof model === 'string' && model !== '') {
+    const entry = matchModelPrice(model)
+    if (entry) return convertPrice(entry, nativeCurrencyOf(model), display)
+  }
+
+  // 都未命中: 落 defaultPrices。⚠️ defaultPrices 的单位是 **USD** (与 v1.2.x 一致, 未随 v1.4.0 改动)。
+  return convertPrice(config?.defaultPrices ?? { cacheHit: 0.1, cacheMiss: 1, output: 2 }, 'USD', display)
 }
 
 /** 通用 fetch 请求, 带超时。 */
@@ -755,10 +1028,12 @@ export const Config = Schema.object({
   /** 计价货币 */
   currency: Schema.string().default('CNY'),
   /**
-   * v1.3.2: 海外模型独立计价货币 —— 'follow'(跟随 currency, 默认) | 'USD' | 'CNY'。
+   * v1.3.2: 海外模型独立计价货币 —— 'USD'(默认, 见 v1.4.0) | 'CNY' | 'follow'(跟随 currency)。
    * 海外厂商官方价本来就是 USD, 选 'USD' 可免掉 ×7 折算带来的误差与「¥ 被看成 $」的误读。
+   * v1.4.0: 默认值从 'follow' 改为 'USD' —— 即「国内的用国内价(CNY)、海外的用海外价(USD)」。
+   * 想要旧行为(所有模型都跟主货币)请显式设成 'follow'。
    */
-  overseasCurrency: Schema.string().default('follow'),
+  overseasCurrency: Schema.string().default('USD'),
   prices: Schema.dict(Schema.object({
     cacheHit: Schema.number().min(0).default(0.2),
     cacheMiss: Schema.number().min(0).default(2),
@@ -777,6 +1052,10 @@ export const Config = Schema.object({
    *  写在这里的 provider 名一律按「官方直连」处理, 状态条显示官方余额;
    *  没写的按 baseURL 域名 / `-official` 后缀自动判定, 都不命中则按中转站显示「—」。 */
   officialProviders: Schema.array(Schema.string()).default([]),
+  /** v1.4.0「真自动」: 用户主动关掉的 DSH provider 名 (来自 settings.yaml llm-pi-ai.providers)。
+   *  默认空数组 = 全部启用。关过的记在这里, 下次自动发现不会再打开 (除非用户又点开)。
+   *  ⚠️ 这与 officialProviders 是**两回事**: 那个决定「按官方显示」, 这个决定「要不要去查余额」。 */
+  dshProviderOptOut: Schema.array(Schema.string()).default([]),
   /** 大肥鱼挂件设置: 大小/音效/音量/气泡/峰谷文案/吸附/位置记忆 */
   whaleSettings: Schema.object({
     scale: Schema.number().min(0.6).max(2.5).default(1),
@@ -846,6 +1125,9 @@ export function parseResponse(queryType, json) {
       const infos = Array.isArray(json?.balance_infos) ? json.balance_infos : []
       const p = infos[0]
       if (!p) return null
+      // v1.4.0 修复: total_balance 缺失时 toAmount(null)=0 会伪造「余额 0」。
+      // 与 AGENTS.md「字段存在性校验」一致 —— 缺关键字段即返回 null, 交给上层显示「未开放」。
+      if (p.total_balance == null) return null
       // total_balance 当前余额, granted_balance 赠送, topped_up_balance 充值
       const total = toAmount(p.total_balance)
       const grant = toAmount(p.granted_balance)
@@ -875,8 +1157,10 @@ export function parseResponse(queryType, json) {
       const d = json?.data
       if (!d) return null
       // 数据红线: total_credits / total_usage 字段名未用真实 key 实测, 可能不叫这个名。
-      // 若两个预期字段都缺失 → 视为解析失败(返回 null, 前端标"无法解析/未开放"), 绝不显示假"余额0"。
-      if (d.total_credits == null && d.total_usage == null) return null
+      // v1.4.0 修复: 原守卫用 `&&`(两个都缺才放弃), 只缺 total_credits 时 toAmount(null)=0,
+      // total 变成 `0 - usage` 的**负数**, 客户端渲染成红色「余额不足」—— 正好是这条红线要防的伪造数字。
+      // 改为 `||`: 任一关键字段缺失即视为解析失败, 返回 null(前端显示「未开放」), 绝不编数。
+      if (d.total_credits == null || d.total_usage == null) return null
       return { total: toAmount(d.total_credits) - toAmount(d.total_usage), currency: 'USD', available: toAmount(d.total_credits), used: toAmount(d.total_usage), note: 'OpenRouter 余额(字段待实测)' }
     }
     case 'novita': {
@@ -936,11 +1220,11 @@ export function parseResponse(queryType, json) {
         const l = usedUp[0]
         return { total: 0, currency: 'tokens', available: 0, used: null, percent: null, note: '智谱配额已用完(0)' + (l.nextResetTime ? ', 待重置' : ''), resetAt: l?.nextResetTime ?? null }
       }
-      // 兜底: 只有 percentage 无 remaining → 限流填充度(非余额)
-      if (limits.length > 0) {
-        const p = pctOf(limits[0])
-        if (p !== null) return { total: p, currency: '%', available: null, used: null, percent: null, note: '智谱限流填充度%(非余额)', resetAt: limits[0]?.nextResetTime ?? null }
-      }
+      // 兜底: 只有 percentage 无 remaining。
+      // v1.4.0 修复: percentage 是**已用/填充度**(100=用完), 不是余额, 方向还是反的 ——
+      // 旧代码把它当 total 下发, 客户端 `percent ?? total` 取到 88 → getLevel 与 50 阈值比 → 判「绿灯」,
+      // 于是「快用完」显示成「余额充足」, 同时踩 AGENTS.md 红线 4 与 README:9「查不到就如实显示未开放」。
+      // 这里不再冒充余额, 直接返回 null, 交给 classifyBizError 走中性的 no-balance-api。
       return null
     }
 
@@ -949,7 +1233,14 @@ export function parseResponse(queryType, json) {
       if (!u) return null
       if (u.limit == null && u.remaining == null) return null
       const limit = toAmount(u.limit), remaining = toAmount(u.remaining)
-      return { total: limit, currency: 'tokens', available: remaining, used: limit - remaining, note: 'Kimi 套餐剩余 tokens', percent: limit > 0 ? (remaining / limit) * 100 : null }
+      // v1.4.0 修复: `limit` 是限流窗口的**上限**, 不是可用余额。旧代码把它当 total 下发, 而客户端
+      // 的状态条/卡片/详情大数字都取 `b.total`(从不看 available) → 配额耗尽也显示满额 + 绿灯。
+      // 与同文件 glm 适配器语义对齐: total = 剩余量; 上限与用量放在 note/used 里。
+      return {
+        total: remaining, currency: 'tokens', available: remaining, used: limit - remaining,
+        note: `Kimi 套餐剩余 tokens (窗口上限 ${limit})`,
+        percent: limit > 0 ? (remaining / limit) * 100 : null,
+      }
     }
     case 'minimax': {
       const models = Array.isArray(json?.model_remains) ? json.model_remains : []
@@ -1088,8 +1379,10 @@ function relayTypePath(queryType) {
 
 async function queryCustomRelay(relay, config) {
   const { id, name, baseUrl, apiKey, queryType } = relay
+  // v1.4.0: 这条中转站是不是从 DSH settings.yaml 自动发现的 (客户端据此显示「DSH」标)
+  const fromDsh = relay.fromDsh === true
   if (!apiKey) {
-    return { platform: id, name: name || '中转站', icon: 'relay', color: '#64748B', category: '中转站', status: 'no-key', error: '未配置 API Key', noBalance: true }
+    return { platform: id, name: name || '中转站', icon: 'relay', color: '#64748B', category: '中转站', status: 'no-key', error: '未配置 API Key', noBalance: true, fromDsh }
   }
   const base = (baseUrl || '').replace(/\/+$/, '')
 
@@ -1120,7 +1413,7 @@ async function queryCustomRelay(relay, config) {
           platform: id, name: name || '中转站', icon: 'relay', color: '#64748B', category: '中转站',
           status: 'ok', total: parsed.total, currency: parsed.currency, available: parsed.available,
           used: parsed.used, note: parsed.note || cand.type, percent: parsed.percent,
-          noBalance: false, queryType: cand.type, fetchedAt: Date.now(),
+          noBalance: false, queryType: cand.type, fetchedAt: Date.now(), fromDsh,
         }
       }
     } catch { /* 尝试下一个 */ }
@@ -1128,7 +1421,7 @@ async function queryCustomRelay(relay, config) {
 
   return {
     platform: id, name: name || '中转站', icon: 'relay', color: '#64748B', category: '中转站',
-    status: 'no-balance-api', error: '该平台未开放余额查询', noBalance: true,
+    status: 'no-balance-api', error: '该平台未开放余额查询', noBalance: true, fromDsh,
   }
 }
 
@@ -1198,7 +1491,194 @@ export async function queryCustomModel(model, config) {
 // ============================================================
 // 会话消耗投影 (学习 dsh-balance queryBalanceCost)
 // ============================================================
-export function makeCostProjection(configOrGetter) {
+/**
+ * v1.4.0: 子代理消耗汇总。
+ *
+ * 背景: 本投影只折叠**本会话**的事件, 而子代理(subagent)跑在自己的子会话里 —— 手机会话
+ * 开了子代理后, 子代理烧的 token 完全不在主板数字里。
+ *
+ * 数据源分两条, 因为子代理会话会「由热转冷」:
+ *   ① **热路径(首选)**: `ctx.sessions.get(id)` + `sessionProjections.snapshot/stateOf`。
+ *      父会话的 `subagentCatalog` 投影给出**按创建顺序**的直接子会话; 每个子会话的
+ *      `queryBalanceCost` 投影(就是本插件注册的同一个 unit)给出它的消耗。
+ *   ② **冷路径(兜底)**: 读持久化投影缓存文件 `storages/session_projcache/sessions/<id>.json`。
+ *      ⚠️ 为什么必须要这条: 框架的 `SubagentListEntry.activity` 只有 `'running' | 'inactive'`,
+ *      **inactive = 只存在于持久化里** —— 子代理跑完(或其 turn 结束)后就不在 `ctx.sessions`
+ *      的常驻表里了, `sessions.get()` 取不到 → 面板显示 `~—`(实测踩到)。框架自己的
+ *      `listChildren()` 走"投影缓存读"解决这件事, 但它是 **async**, 而投影的 `view()`
+ *      契约要求**同步** —— 所以这里同步读缓存文件。形状取自实测, 读不到/形状不符一律静默返回 null。
+ *
+ * 递归展开孙代理并把金额**向上汇总**到直接子代理那一条 (深度 / 行数都有封顶)。
+ *
+ * @param services 惰性取服务: () => ({ sessions, projections }) | null。取不到就静默返回空数组
+ *                 (老框架 / 单测环境), 绝不让子代理汇总拖垮主投影。
+ */
+const SUBAGENT_MAX_DEPTH = 4
+const SUBAGENT_MAX_ROWS = 12
+/** 冷路径的文件读缓存 TTL —— view() 会随每次投影变化被调用, 不能每次都去读盘。 */
+const SUBAGENT_FILE_TTL_MS = 3000
+const sessionCacheFiles = new Map()
+let subagentCostSummarize = null
+
+const safeSessionId = (id) => typeof id === 'string' && /^[A-Za-z0-9._-]{1,128}$/.test(id) ? id : null
+
+/** 读某会话的投影缓存记录(带 TTL 内存缓存)。任何异常 → null。 */
+const readSessionCacheRecord = (sessionId) => {
+  const id = safeSessionId(sessionId)
+  if (id === null) return null
+  const now = Date.now()
+  const hit = sessionCacheFiles.get(id)
+  if (hit !== undefined && now - hit.at < SUBAGENT_FILE_TTL_MS) return hit.rows
+  let rows = null
+  try {
+    const home = process.env.DSH_HOME || join(homedir(), '.dsh')
+    const file = join(home, 'storages', 'session_projcache', 'sessions', `${id}.json`)
+    const parsed = JSON.parse(readFileSync(file, 'utf8'))
+    const r = parsed?.record?.rows
+    if (r !== null && typeof r === 'object') rows = r
+  } catch { rows = null }
+  // 只缓存成功结果, 避免一次读失败被 TTL 钉住 3 秒
+  if (rows !== null) sessionCacheFiles.set(id, { at: now, rows })
+  if (sessionCacheFiles.size > 256) sessionCacheFiles.clear()
+  return rows
+}
+
+/** 冷路径: 从缓存文件里取该会话的 queryBalanceCost **状态**(不是 wire 视图)。 */
+const cachedCostState = (sessionId) => {
+  const val = readSessionCacheRecord(sessionId)?.queryBalanceCost?.val
+  return (val !== null && typeof val === 'object' && Array.isArray(val.modelOrder) && val.byModel !== null && typeof val.byModel === 'object') ? val : null
+}
+
+/** 冷路径: 从缓存文件里取该会话的 subagentCatalog 条目。 */
+const cachedCatalog = (sessionId) => {
+  const st = readSessionCacheRecord(sessionId)?.subagentCatalog?.val
+  const values = st?.head?.values
+  if (!Array.isArray(values)) return []
+  return values
+    .filter((v) => v !== null && typeof v === 'object' && typeof v.childId === 'string')
+    .map((v) => ({
+      id: v.childId,
+      createdAt: typeof v.childCreatedAt === 'number' ? v.childCreatedAt : 0,
+      mode: v.mode === 'continuable' ? 'continuable' : 'one-shot',
+      label: typeof v.label === 'string' ? v.label : undefined,
+    }))
+}
+
+export function collectSubagentCosts(services, rootSessionId, summarize) {
+  const out = []
+  if (typeof rootSessionId !== 'string' || rootSessionId === '') return out
+  let sessions = null, projections = null
+  try {
+    const svc = typeof services === 'function' ? services() : services
+    sessions = svc?.sessions ?? null
+    projections = svc?.projections ?? null
+  } catch { /* 服务取不到 → 只能走冷路径 */ }
+  subagentCostSummarize = typeof summarize === 'function' ? summarize : null
+
+  /** 取常驻会话对象。任何异常一律当成"取不到"(宿主服务在极端情况下可能抛)。 */
+  const getSession = (id) => {
+    try { return sessions?.get?.(id) ?? null } catch { return null }
+  }
+
+  /** 某会话的直接子会话(按创建顺序): 热路径优先, 空则回落到缓存文件。 */
+  const childrenOf = (sessionId) => {
+    const s = getSession(sessionId)
+    if (s !== null && projections !== null) {
+      try {
+        const list = projections.snapshot(s, ['subagentCatalog'])?.values?.subagentCatalog
+        if (Array.isArray(list) && list.length > 0) return list
+      } catch { /* 落到冷路径 */ }
+    }
+    return cachedCatalog(sessionId)
+  }
+
+  /** 某会话的消耗投影状态: 热路径优先(更新鲜), 无数据则回落到缓存文件。 */
+  const costStateOf = (sessionId) => {
+    const s = getSession(sessionId)
+    if (s !== null && projections !== null) {
+      try {
+        const st = projections.stateOf(s, 'queryBalanceCost')
+        if (st !== null && st !== undefined && Array.isArray(st.modelOrder) && st.modelOrder.length > 0) return st
+      } catch { /* 落到冷路径 */ }
+    }
+    return cachedCostState(sessionId)
+  }
+
+  /** 递归汇总: 自身 + 后代, 返回与 summarize 同形的汇总。 */
+  const rollup = (sessionId, depth) => {
+    const st = costStateOf(sessionId)
+    let acc = (st !== null && subagentCostSummarize !== null) ? subagentCostSummarize(st) : null
+    if (depth >= SUBAGENT_MAX_DEPTH) return acc
+    for (const entry of childrenOf(sessionId)) {
+      acc = mergeSummary(acc, rollup(entry.id, depth + 1))
+    }
+    return acc
+  }
+
+  for (const entry of childrenOf(rootSessionId)) {
+    if (out.length >= SUBAGENT_MAX_ROWS) break
+    const s = rollup(entry.id, 1) ?? emptySummary()
+    out.push({
+      id: String(entry.id),
+      label: typeof entry.label === 'string' && entry.label !== '' ? entry.label : String(entry.id).slice(0, 12),
+      mode: entry.mode === 'continuable' ? 'continuable' : 'one-shot',
+      createdAt: typeof entry.createdAt === 'number' ? entry.createdAt : 0,
+      cost: s.cost,
+      costByCurrency: s.costByCurrency,
+      currencyByModel: s.currencyByModel,
+      mixedCurrency: s.mixedCurrency,
+      tokens: s.tokens,
+      models: s.models,
+    })
+  }
+  return out
+}
+
+/** 一份空的汇总 (与 summarize 同形)。 */
+export const emptySummary = () => ({
+  cost: 0, costByModel: {}, costByCurrency: {}, currencyByModel: {}, mixedCurrency: false, models: [],
+  tokens: { uncachedInput: 0, cacheRead: 0, cacheWrite: 0, output: 0 }, tokensByModel: {},
+})
+
+/** 把两份汇总按币种/模型/token 相加 (子代理树向上汇总用)。 */
+export const mergeSummary = (a, b) => {
+  const x = a ?? emptySummary(), y = b ?? emptySummary()
+  const round6 = (n) => Math.round(n * 1e6) / 1e6
+  const sumMap = (p, q) => {
+    const out = { ...(p || {}) }
+    for (const [k, v] of Object.entries(q || {})) out[k] = round6((out[k] ?? 0) + v)
+    return out
+  }
+  const costByCurrency = sumMap(x.costByCurrency, y.costByCurrency)
+  const costByModel = sumMap(x.costByModel, y.costByModel)
+  const tokens = {
+    uncachedInput: x.tokens.uncachedInput + y.tokens.uncachedInput,
+    cacheRead: x.tokens.cacheRead + y.tokens.cacheRead,
+    cacheWrite: x.tokens.cacheWrite + y.tokens.cacheWrite,
+    output: x.tokens.output + y.tokens.output,
+  }
+  const tokensByModel = { ...(x.tokensByModel || {}) }
+  for (const [m, t] of Object.entries(y.tokensByModel || {})) {
+    const p = tokensByModel[m] ?? { uncachedInputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0 }
+    tokensByModel[m] = {
+      uncachedInputTokens: p.uncachedInputTokens + (t?.uncachedInputTokens ?? 0),
+      cacheReadTokens: p.cacheReadTokens + (t?.cacheReadTokens ?? 0),
+      cacheWriteTokens: p.cacheWriteTokens + (t?.cacheWriteTokens ?? 0),
+      outputTokens: p.outputTokens + (t?.outputTokens ?? 0),
+    }
+  }
+  const models = [...new Set([...(x.models || []), ...(y.models || [])])]
+  const mainCur = Object.keys(costByCurrency)[0]
+  return {
+    cost: mainCur === undefined ? 0 : costByCurrency[mainCur],
+    costByModel, costByCurrency,
+    currencyByModel: { ...x.currencyByModel, ...y.currencyByModel },
+    mixedCurrency: Object.keys(costByCurrency).length > 1,
+    models, tokens, tokensByModel,
+  }
+}
+
+export function makeCostProjection(configOrGetter, services) {
   const getConfig = () => typeof configOrGetter === 'function' ? configOrGetter() : configOrGetter
   const zero = () => ({ uncachedInputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0 })
   const bucketsOf = (usage) => ({
@@ -1223,6 +1703,73 @@ export function makeCostProjection(configOrGetter) {
     outputTokens: a.outputTokens - b.outputTokens,
   })
   const round6 = (n) => Math.round(n * 1e6) / 1e6
+
+  /**
+   * v1.4.0: 从一条 assistant stream 里取**最后一次** usage chunk。
+   * 与 dsh-llm 的 `lastAssistantStreamChunk(stream, 'usage')` 同语义, 本地实现以免给插件引入额外依赖
+   * (`dependencies` 必须保持为空是硬约束)。
+   */
+  const lastUsageFromStream = (stream) => {
+    if (!Array.isArray(stream)) return undefined
+    for (let i = stream.length - 1; i >= 0; i -= 1) {
+      const rec = stream[i]
+      if (rec !== null && typeof rec === 'object' && rec.type === 'chunk' && rec.chunk?.type === 'usage') return rec.chunk.usage
+    }
+    return undefined
+  }
+
+  /**
+   * v1.4.0: 一个事件所携带的用量样本。对齐 dsh-token-meter 的 usage-projection:
+   *   - `assistant/message` 优先用自带 `usage`, 没有则回落到 stream 里的 usage chunk;
+   *   - `assistant/attempt`(失败/重试/取消/流错误、没有产出可见消息的尝试) 从 stream 里取。
+   * ⚠️ 旧代码读的是 `assistant/chunk` —— 该事件名**不在**框架 `KNOWN_SESSION_EVENT_TYPES` 里, 是死分支,
+   *    导致上面两种真实事件里 `assistant/attempt` 的 token 被整段漏计。
+   */
+  const usageOfEvent = (event) => {
+    if (event.type === 'assistant/message' && event.data.usage !== undefined) return event.data.usage
+    if (event.type !== 'assistant/message' && event.type !== 'assistant/attempt') return undefined
+    return lastUsageFromStream(event.data.stream)
+  }
+
+  /**
+   * v1.4.0: 把一份投影状态折成金额汇总 —— 主视图与子代理汇总**共用同一套口径**,
+   * 保证「子代理那行」与「主板数字」算法完全一致 (含峰谷、币种、缓存读写分桶)。
+   */
+  const summarize = (state) => {
+    const cfg = getConfig()
+    const mainCurrency = (cfg.currency ?? 'CNY').toUpperCase()
+    const tokens = { uncachedInput: 0, cacheRead: 0, cacheWrite: 0, output: 0 }
+    const costByModel = {}
+    const costByCurrency = {}
+    const currencyByModel = {}
+    let cost = 0
+    const order = Array.isArray(state?.modelOrder) ? state.modelOrder : []
+    for (const model of order) {
+      const b = state.byModel?.[model] ?? zero()
+      tokens.uncachedInput += b.uncachedInputTokens
+      tokens.cacheRead += b.cacheReadTokens
+      tokens.cacheWrite += b.cacheWriteTokens
+      tokens.output += b.outputTokens
+      // 支持 DeepSeek 谷峰自动计费
+      const price = resolveModelPrice(cfg, model)
+      const c = ((b.uncachedInputTokens + b.cacheWriteTokens) * price.cacheMiss + b.cacheReadTokens * price.cacheHit + b.outputTokens * price.output) / 1e6
+      // v1.3.2: 该模型实际币种 (海外模型可能与主货币不同)
+      const cur = currencyForModel(cfg, model)
+      if (c > 0) {
+        costByModel[model] = round6(c)
+        currencyByModel[model] = cur
+        costByCurrency[cur] = round6((costByCurrency[cur] ?? 0) + c)
+      }
+      // cost 仍只汇总「主货币」那一份, 保持字段语义单一 (混合时另一半在 costByCurrency 里)。
+      // overseasCurrency='follow' 时所有模型都是主货币, cost === 全部合计, 与 v1.2.6 一致。
+      if (cur === mainCurrency) cost += c
+    }
+    return {
+      cost: round6(cost), costByModel, costByCurrency, currencyByModel,
+      mixedCurrency: Object.keys(costByCurrency).length > 1,
+      tokens, tokensByModel: state?.byModel ?? {}, models: order, mainCurrency,
+    }
+  }
 
   return {
     key: 'queryBalanceCost',
@@ -1249,9 +1796,23 @@ export function makeCostProjection(configOrGetter) {
         outputTokens: z.number(),
       })),
       modelOrder: z.array(z.string()),
+      /** v1.4.0: 本投影所属会话 id —— 子代理汇总要拿它去查 `subagentCatalog`。空串表示未知。 */
+      sessionId: z.string(),
     }),
-    init: () => ({ currentModel: null, currentProvider: null, last: null, byModel: {}, modelOrder: [] }),
+    init: (header) => ({
+      currentModel: null, currentProvider: null, last: null, byModel: {}, modelOrder: [],
+      sessionId: typeof header?.id === 'string' ? header.id : '',
+    }),
     apply: (state, event) => {
+      // v1.4.0: `llm/retry-started` 关闭「替换槽位」—— 被重试的那次 attempt 的用量要**留在总量里**,
+      // 下一次 attempt 是**新增**而不是替换。与 dsh-token-meter 的 usage-projection 对齐。
+      if (event.type === 'llm/retry-started') {
+        const turn = event.data?.turn
+        const step = event.data?.step
+        return state.last !== null && state.last.turn === turn && state.last.step === step
+          ? { ...state, last: null }
+          : state
+      }
       let nextModel = state.currentModel
       let nextProvider = state.currentProvider
       if (event.type === 'request/header') {
@@ -1266,10 +1827,11 @@ export function makeCostProjection(configOrGetter) {
         if (typeof prov === 'string' && prov !== '') nextProvider = prov
       }
       let usage = null, turn = 0, step = 0
-      if (event.type === 'assistant/chunk' && event.data.chunk.type === 'usage') {
-        ({ turn, step } = event.data); usage = event.data.chunk.usage
-      } else if (event.type === 'assistant/message' && event.data.usage !== undefined) {
-        ({ turn, step, usage } = event.data)
+      const sample = usageOfEvent(event)
+      if (sample !== undefined && sample !== null) {
+        turn = event.data.turn
+        step = event.data.step
+        usage = sample
       }
       const unchanged = nextModel === state.currentModel && nextProvider === state.currentProvider
       if (usage === null) return unchanged ? state : { ...state, currentModel: nextModel, currentProvider: nextProvider }
@@ -1304,46 +1866,45 @@ export function makeCostProjection(configOrGetter) {
         currency: z.string(),
         isPeak: z.boolean().optional(),
         waiting: z.boolean().optional(),
+        // v1.4.0: 子代理消耗, 按父会话 catalog 事件顺序 (= 创建顺序) 从左到右展示。
+        // 金额是「该子代理 + 其后代」的向上汇总; 取不到会话服务时为空数组。
+        subagents: z.array(z.object({
+          id: z.string(),
+          label: z.string(),
+          mode: z.enum(['one-shot', 'continuable']),
+          createdAt: z.number(),
+          cost: z.number(),
+          costByCurrency: z.record(z.string(), z.number().nonnegative()),
+          currencyByModel: z.record(z.string(), z.string()),
+          mixedCurrency: z.boolean(),
+          tokens: z.object({
+            uncachedInput: z.number().int().nonnegative(),
+            cacheRead: z.number().int().nonnegative(),
+            cacheWrite: z.number().int().nonnegative(),
+            output: z.number().int().nonnegative(),
+          }).strict(),
+          models: z.array(z.string()),
+        }).strict()).optional(),
       }).strict(),
       view: (state) => {
       const cfg = getConfig()
+      const mainCurrency = (cfg.currency ?? 'CNY').toUpperCase()
+      // v1.4.0: 子代理消耗 (换行单独展示)。取不到服务/没有子代理 → 空数组。
+      const subagents = collectSubagentCosts(services, state.sessionId, summarize)
       // 无事件时返回 waiting 标记, 客户端据此显示 "~—" 而非 "~¥0"
       if (state.modelOrder.length === 0) {
-        return { models: [], currentModel: state.currentModel ?? null, currentProvider: state.currentProvider ?? null, cost: -1, costByModel: {}, costByCurrency: {}, currencyByModel: {}, mixedCurrency: false, tokens: { uncachedInput: 0, cacheRead: 0, cacheWrite: 0, output: 0 }, tokensByModel: {}, currency: cfg.currency ?? 'CNY', isPeak: isPeakTime(), waiting: true }
+        return { models: [], currentModel: state.currentModel ?? null, currentProvider: state.currentProvider ?? null, cost: -1, costByModel: {}, costByCurrency: {}, currencyByModel: {}, mixedCurrency: false, tokens: { uncachedInput: 0, cacheRead: 0, cacheWrite: 0, output: 0 }, tokensByModel: {}, currency: mainCurrency, isPeak: isPeakTime(), waiting: true, subagents }
       }
-      const tokens = { uncachedInput: 0, cacheRead: 0, cacheWrite: 0, output: 0 }
-      const costByModel = {}
-      const costByCurrency = {}
-      const currencyByModel = {}
-      const mainCurrency = (cfg.currency ?? 'CNY').toUpperCase()
-      let cost = 0
-      const defaultPrice = cfg.defaultPrices ?? { cacheHit: 0.1, cacheMiss: 1, output: 2 }
-      const peak = isPeakTime()
-      for (const model of state.modelOrder) {
-        const b = state.byModel[model] ?? zero()
-        tokens.uncachedInput += b.uncachedInputTokens
-        tokens.cacheRead += b.cacheReadTokens
-        tokens.cacheWrite += b.cacheWriteTokens
-        tokens.output += b.outputTokens
-        // 支持 DeepSeek 谷峰自动计费
-        const price = resolveModelPrice(cfg, model)
-        const c = ((b.uncachedInputTokens + b.cacheWriteTokens) * price.cacheMiss + b.cacheReadTokens * price.cacheHit + b.outputTokens * price.output) / 1e6
-        // v1.3.2: 该模型实际币种 (海外模型可能与主货币不同)
-        const cur = currencyForModel(cfg, model)
-        if (c > 0) {
-          costByModel[model] = round6(c)
-          currencyByModel[model] = cur
-          costByCurrency[cur] = round6((costByCurrency[cur] ?? 0) + c)
-        }
-        // cost 仍只汇总「主货币」那一份, 保持字段语义单一 (混合时另一半在 costByCurrency 里)。
-        // overseasCurrency='follow' (默认) 时所有模型都是主货币, cost === 全部合计, 与 v1.2.6 一致。
-        if (cur === mainCurrency) cost += c
+      const s = summarize(state)
+      return {
+        models: s.models, currentModel: state.currentModel ?? null, currentProvider: state.currentProvider ?? null,
+        cost: s.cost, costByModel: s.costByModel, costByCurrency: s.costByCurrency, currencyByModel: s.currencyByModel,
+        mixedCurrency: s.mixedCurrency, tokens: s.tokens, tokensByModel: s.tokensByModel,
+        currency: mainCurrency, isPeak: isPeakTime(), waiting: false, subagents,
       }
-      const mixedCurrency = Object.keys(costByCurrency).length > 1
-      return { models: state.modelOrder, currentModel: state.currentModel ?? null, currentProvider: state.currentProvider ?? null, cost: round6(cost), costByModel, costByCurrency, currencyByModel, mixedCurrency, tokens, tokensByModel: state.byModel, currency: mainCurrency, isPeak: peak, waiting: false }
       },
     },
-    stateVersion: 1,
+    stateVersion: 2,
   }
 }
 
@@ -1370,6 +1931,8 @@ export function apply(ctx, config) {
     whaleEnabled: persisted.whaleEnabled ?? config.whaleEnabled ?? false,
     showNoBalanceBrands: persisted.showNoBalanceBrands ?? config.showNoBalanceBrands ?? false,
     officialProviders: normalizeOfficialProviders(persisted.officialProviders ?? config.officialProviders ?? []),
+    // v1.4.0「真自动」: 被用户关掉的 DSH provider (默认空 = 全部启用)。复用同一个名单规范化器。
+    dshProviderOptOut: normalizeOfficialProviders(persisted.dshProviderOptOut ?? config.dshProviderOptOut ?? []),
     whaleSettings: {
       scale: 1, soundOn: true, soundSet: 'duck', volume: 0.5, bubbleOn: true,
       peakMode: 'default', snapOn: true, peekRatio: 0.5, left: null, top: null, side: 'right',
@@ -1380,16 +1943,56 @@ export function apply(ctx, config) {
 
   const getConfig = () => runtimeConfig
 
+  /** 直接读 ~/.dsh/.credentials.yaml 的 refs: 段 —— 拿不到 credentials 服务时的兜底。
+   *  @param {string[]} names 要找的 ref 名 (遇到第一个有值的就返回) */
+  const readCredentialRefs = (names) => {
+    const wanted = Array.isArray(names) ? names : []
+    if (wanted.length === 0) return ''
+    try {
+      const home = process.env.DSH_HOME || join(homedir(), '.dsh')
+      const raw = readFileSync(join(home, '.credentials.yaml'), 'utf8')
+      let inRefs = false
+      for (const line of raw.split('\n')) {
+        if (line === 'refs:') { inRefs = true; continue }
+        if (!inRefs) continue
+        if (!line.startsWith('  ')) { inRefs = false; continue }
+        const idx = line.indexOf(':')
+        if (idx === -1) continue
+        const key = line.slice(0, idx).trim()
+        const val = line.slice(idx + 1).trim()
+        if (key && val && wanted.includes(key)) return val
+      }
+    } catch { /* 忽略 */ }
+    return ''
+  }
+
+  /** 解析一个 apiKeyEnv 名 → 真实 key (环境变量 → credentials 服务 → 凭据文件)。
+   *  v1.4.0「真自动」用它取 DSH provider 的 key, 与预设平台同一套三层兜底。 */
+  const resolveApiKeyRef = async (ref) => {
+    const name = typeof ref === 'string' ? ref.trim() : ''
+    if (name === '') return ''
+    if (process.env[name]) return process.env[name]
+    const creds = ctx.get('credentials')
+    if (creds !== undefined) {
+      try {
+        const hit = await creds.resolve(name)
+        if (hit !== undefined) return hit.value
+      } catch { /* 忽略 */ }
+    }
+    return readCredentialRefs([name])
+  }
+
   /** 解析预设平台的 API key (从环境变量、credentials 系统或直接读凭据文件) */
   const resolvePresetKey = async (platform) => {
+    const refs = platform.envKeys || []
     // 1) 环境变量
-    for (const name of platform.envKeys || []) {
+    for (const name of refs) {
       if (process.env[name]) return process.env[name]
     }
     // 2) DSH credentials 服务
     const creds = ctx.get('credentials')
     if (creds !== undefined) {
-      for (const ref of (platform.envKeys || [])) {
+      for (const ref of refs) {
         try {
           const hit = await creds.resolve(ref)
           if (hit !== undefined) return hit.value
@@ -1397,27 +2000,48 @@ export function apply(ctx, config) {
       }
     }
     // 3) 直接读 ~/.dsh/.credentials.yaml 文件兜底
-    try {
-      const { readFileSync } = await import('node:fs')
-      const { homedir } = await import('node:os')
-      const { join } = await import('node:path')
-      const home = process.env.DSH_HOME || join(homedir(), '.dsh')
-      const raw = readFileSync(join(home, '.credentials.yaml'), 'utf8')
-      const lines = raw.split('\n')
-      let inRefs = false
-      for (const line of lines) {
-        if (line === 'refs:') { inRefs = true; continue }
-        if (inRefs) {
-          if (!line.startsWith('  ')) { inRefs = false; continue }
-          const idx = line.indexOf(':')
-          if (idx === -1) continue
-          const key = line.slice(0, idx).trim()
-          const val = line.slice(idx + 1).trim()
-          if (key && val && (platform.envKeys || []).includes(key)) return val
-        }
+    return readCredentialRefs(refs)
+  }
+
+  /**
+   * v1.4.0「真自动」: 把 DSH settings.yaml 里的 provider 合成为可查余额的中转站条目。
+   * 挑选规则见模块级纯函数 `selectDshProviders` (可单测)。
+   * 这里只多一步: 解析 key —— 要访问 credentials 服务, 所以必须是异步的。
+   * 与手填的 customRelays 合并时**手填优先** (同 id / 同 baseUrl 都算重复), 见 refreshAll。
+   */
+  const listDshProviderRelays = async () => {
+    const { entries, kinds } = readSettingsDerived()
+    const picked = selectDshProviders(entries, kinds, runtimeConfig.dshProviderOptOut)
+    const out = []
+    for (const p of picked) {
+      out.push({
+        id: 'dsh:' + p.name,
+        name: p.name + ' (DSH)',
+        baseUrl: p.baseURL,
+        apiKey: await resolveApiKeyRef(p.apiKeyEnv),
+        queryType: 'auto',
+        fromDsh: true,
+      })
+    }
+    return out
+  }
+
+  /** 设置面板用: DSH provider 自动发现结果 (只读展示 + 开关状态)。**绝不下发 key**。 */
+  const readDshProviderStatus = () => {
+    const { entries, kinds } = readSettingsDerived()
+    const on = new Set(selectDshProviders(entries, kinds, runtimeConfig.dshProviderOptOut).map((p) => p.name))
+    return Object.keys(entries).sort().map((name) => {
+      const e = entries[name]
+      const kind = e.baseURL ? (kinds[name] || 'unknown') : 'no-base-url'
+      return {
+        name,
+        baseURL: e.baseURL,
+        apiKeyEnv: e.apiKeyEnv,
+        // official | relay | unknown(主机名解析不出) | no-base-url(没写 baseURL, 不表态)
+        kind,
+        enabled: on.has(name),
       }
-    } catch { /* 忽略 */ }
-    return ''
+    })
   }
 
   let cache = { balances: [], fetchedAt: 0, error: null }
@@ -1427,7 +2051,16 @@ export function apply(ctx, config) {
     if (inflight !== null) return inflight
     inflight = (async () => {
       const presetList = PLATFORM_PRESETS.filter(p => runtimeConfig.presets.includes(p.id))
-      const relayList = runtimeConfig.customRelays
+      // v1.4.0「真自动」: 手填的 customRelays + 从 settings.yaml 自动发现的 DSH provider。
+      // 手填优先 —— 同 id 或同 baseUrl 时不重复查一遍 (用户手填的那条口径由他自己定)。
+      const manualRelays = runtimeConfig.customRelays
+      const dshRelays = await listDshProviderRelays()
+      const manualIds = new Set(manualRelays.map(r => String(r.id)))
+      const manualUrls = new Set(manualRelays.map(r => String(r.baseUrl || '').replace(/\/+$/, '')))
+      const relayList = [
+        ...manualRelays,
+        ...dshRelays.filter(r => !manualIds.has(r.id) && !manualUrls.has(r.baseUrl)),
+      ]
       const modelList = runtimeConfig.customModels
       const tasks = [
         ...presetList.map(async (p) => queryPreset(p, await resolvePresetKey(p), runtimeConfig)),
@@ -1465,6 +2098,8 @@ export function apply(ctx, config) {
           // provider 官方/中转判定素材下发给客户端 (第 1 层: 用户名单; 第 2 层: baseURL 域名判定)
           officialProviders: runtimeConfig.officialProviders,
           providerKinds: readProviderKinds(),
+          // v1.4.0「真自动」: DSH provider 发现结果 (只读, 不含 key)
+          dshProviders: readDshProviderStatus(),
         },
       }
       cache.etag = '"' + fnv1a(JSON.stringify(cache.balances) + '|' + JSON.stringify(cache.config)) + '"'
@@ -1498,10 +2133,25 @@ export function apply(ctx, config) {
       kind: 'exact', path: '/api-dashboard/balances',
       async handler(req, res) {
         if (!['GET', 'HEAD', 'POST'].includes(req.method)) { res.writeHead(405, { Allow: 'GET, HEAD, POST' }); res.end(); return }
-        const force = req.method === 'POST' || new URL(req.url ?? '/', 'http://127.0.0.1').searchParams.get('force') === '1'
-        // 自动刷新: 缓存为空 或 缓存超过 refreshIntervalMs 时自动拉取最新 (解决进入页面要手动刷新)
-        const stale = Date.now() - cache.fetchedAt > (runtimeConfig.refreshIntervalMs || 300000)
-        if ((force || stale || cache.balances.length === 0) && (Date.now() - cache.fetchedAt > 2000 || cache.balances.length === 0)) await refreshAll()
+        const params = new URL(req.url ?? '/', 'http://127.0.0.1').searchParams
+        const force = req.method === 'POST' || params.get('force') === '1'
+        /**
+         * v1.4.0 `?stale=1` = stale-while-revalidate:
+         * 「把手上有的先给我」。应用切回前台 / 页面重载时用它打首屏。
+         * 为什么需要它: `force=1` 是**阻塞**的 —— 底下 `await refreshAll()` 要等最慢的那个
+         * 端点(最长 timeoutMs=8s)。首屏卡这么久, 用户看到的就是「插件加载很慢」。
+         * 有缓存时改成「立刻回旧数据 + 后台刷新」, 由下一次轮询把新数据带上来。
+         * 没有缓存(服务端刚重启)时仍然只能等 —— 那时确实没有东西可显示。
+         */
+        const peek = params.get('stale') === '1'
+        const plan = planBalancesFetch({
+          force, peek,
+          hasData: cache.balances.length > 0,
+          age: Date.now() - cache.fetchedAt,
+          intervalMs: runtimeConfig.refreshIntervalMs,
+        })
+        if (plan === 'wait') await refreshAll()                    // 冷启动/显式强刷: 等新数据
+        else if (plan === 'background') refreshAll().catch(() => {}) // 有缓存: 立刻回旧的, 刷新丢后台
         // v0.5.0: ETag 协商缓存 — 轮询期间数据没变就 304 空响应, 省 JSON 序列化与流量
         const etag = cache.etag || '"' + Number(cache.fetchedAt || 0).toString(36) + '"'
         if (req.method === 'HEAD') { res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', ETag: etag }); res.end(); return }
@@ -1530,11 +2180,12 @@ export function apply(ctx, config) {
         const cur = (cfg.currency ?? 'CNY').toUpperCase() === 'USD' ? 'USD' : 'CNY'
         const table = V4_RATES[cur] ?? V4_RATES.CNY
         const mk = (p) => p ? { cacheHit: p.cacheHit, cacheMiss: p.cacheMiss, output: p.output } : null
-        // v4 峰谷系列
+        // v1.3.4: 官方定价页与 GET https://api.deepseek.com/models (2026-09-10 实测) 一致 ——
+        // 现役仅 deepseek-flash / deepseek-v4-pro 两个模型。旧名 deepseek-v4-flash / -vision-exp
+        // 仍可调用但由 V4.1-Flash 服务、按 Flash 价计费, 解析层已映射到 flash 档, 故此处不再单列免误导。
         const models = []
-        for (const key of ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-v4-flash-vision-exp']) {
-          // v4-flash-vision-exp 与 flash 同价 (vision 不加价), 复用 flash 费率
-          const src = key === 'deepseek-v4-flash-vision-exp' ? 'deepseek-v4-flash' : key
+        for (const key of ['deepseek-flash', 'deepseek-v4-pro']) {
+          const src = key.startsWith('deepseek-v4-pro') ? 'deepseek-v4-pro' : 'deepseek-flash'
           models.push({ model: key, peak: mk(table.peak[src]), offPeak: mk(table.offPeak[src]), peakValley: true })
         }
         sendJson(res, 200, { ok: true, currency: cfg.currency ?? 'CNY', peakNow: isPeakTime(), weekend: isWeekend(), models })
@@ -1717,6 +2368,7 @@ export function apply(ctx, config) {
       },
     }), 'dsh-api-dashboard: whale settings route')
 
+
     webCtx.effect(() => webCtx.webServer.register({
       kind: 'exact', path: '/api-dashboard/config',
       async handler(req, res) {
@@ -1734,6 +2386,9 @@ export function apply(ctx, config) {
             officialProviders: runtimeConfig.officialProviders,
             // 只读: 供设置面板显示「自动判定结果」, 让用户知道哪些还需要手填
             providerKinds: readProviderKinds(),
+            // v1.4.0「真自动」: 从 settings.yaml 自动发现的 provider 及启用状态 (不含 key)
+            dshProviders: readDshProviderStatus(),
+            dshProviderOptOut: runtimeConfig.dshProviderOptOut,
           })
           return
         }
@@ -1767,9 +2422,9 @@ export function apply(ctx, config) {
                 }
               })
             }
-            // 自定义刷新时间 (5~60 秒, 最高一分钟)
+            // 自定义刷新时间 (1~60 秒; v1.4.0 下限由 5 秒放宽到 1 秒)
             if (typeof body.refreshIntervalSec === 'number' && Number.isFinite(body.refreshIntervalSec)) {
-              const sec = Math.min(Math.max(Math.round(body.refreshIntervalSec), 5), 60)
+              const sec = clampRefreshSec(body.refreshIntervalSec)
               runtimeConfig.refreshIntervalMs = sec * 1000
               runtimeConfig.clientPollIntervalMs = sec * 1000
             }
@@ -1790,6 +2445,10 @@ export function apply(ctx, config) {
             if (Array.isArray(body.officialProviders) || typeof body.officialProviders === 'string') {
               runtimeConfig.officialProviders = normalizeOfficialProviders(body.officialProviders)
             }
+            // v1.4.0「真自动」: 被关掉的 DSH provider 名单 (默认空 = 全部启用)
+            if (Array.isArray(body.dshProviderOptOut) || typeof body.dshProviderOptOut === 'string') {
+              runtimeConfig.dshProviderOptOut = normalizeOfficialProviders(body.dshProviderOptOut)
+            }
             // 持久化: 写入状态文件, 重启后恢复 (用户配置优先)
             savePersistedState({
               refreshIntervalMs: runtimeConfig.refreshIntervalMs,
@@ -1804,6 +2463,7 @@ export function apply(ctx, config) {
               whaleEnabled: runtimeConfig.whaleEnabled,
               showNoBalanceBrands: runtimeConfig.showNoBalanceBrands,
               officialProviders: runtimeConfig.officialProviders,
+              dshProviderOptOut: runtimeConfig.dshProviderOptOut,
             })
             resetLoop(); await refreshAll()
             sendJson(res, 200, {
@@ -1817,6 +2477,8 @@ export function apply(ctx, config) {
               showNoBalanceBrands: !!runtimeConfig.showNoBalanceBrands,
               officialProviders: runtimeConfig.officialProviders,
               providerKinds: readProviderKinds(),
+              dshProviders: readDshProviderStatus(),
+              dshProviderOptOut: runtimeConfig.dshProviderOptOut,
             })
           } catch (err) {
             const code = err && err.statusCode === 413 ? 413 : 400
@@ -1832,6 +2494,13 @@ export function apply(ctx, config) {
 
   // 会话消耗投影
   ctx.inject(['sessionProjections'], (projectionCtx) => {
-    projectionCtx.sessionProjections.register(makeCostProjection(getConfig))
+    // v1.4.0: 把 session 存储与投影注册表惰性交给投影, 用于汇总子代理消耗。
+    // 惰性 (每次读取时才 get) 是为了不把服务解析绑死在注册时刻 —— 服务可能后挂载。
+    const services = () => {
+      let sessions = null
+      try { sessions = ctx.get('sessions') ?? projectionCtx.get('sessions') ?? null } catch { sessions = null }
+      return { sessions, projections: projectionCtx.sessionProjections }
+    }
+    projectionCtx.sessionProjections.register(makeCostProjection(getConfig, services))
   })
 }
