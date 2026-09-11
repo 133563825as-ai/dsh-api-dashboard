@@ -125,7 +125,7 @@ dsh plugin --profile web add link:/root/dsha-api-dashboard
 
 ## 更新日志
 
-最近一版 **v1.4.2** —— 修复 DeepSeek 多币种钱包读错（有余额的账户会一秒一跳地显示成「$0.00 · 异常」）。一版一行的完整历史见 [`CHANGELOG.md`](CHANGELOG.md)。
+最近一版 **v1.4.3** —— 子代理胶囊只显示**它自己新产生**的消耗（不再把父会话继承来的历史、兄弟或后代子代理的消耗算进去）。一版一行的完整历史见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## License
 
