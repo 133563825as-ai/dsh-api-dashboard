@@ -14,6 +14,16 @@
 - 服务端：`src/index.js`（余额轮询 + HTTP 路由 `/api-dashboard/*` + 自动更新）
 - 客户端：`client/client.js`（UI，dsh bundle 启动时打包；改它后需**重启 web GUI** 才生效）
 
+### 📚 文档地图（v1.4.1 起 README 已精简）
+
+| 文件 | 给谁看 | 内容 |
+|---|---|---|
+| `README.md` | **用户** | 简介、界面预览、功能、支持平台、安装、配置、安全。**保持精简**，别把排查过程/历史写回去。 |
+| `AGENTS.md`（本文件） | **代理 / 维护者** | 红线、踩坑、机制说明 —— 冗长的排查记录放这里。 |
+| `CHANGELOG.md` | 用户 / 维护者 | 完整版本历史（README 只留最近一版摘要）。 |
+| `docs/RELEASING.md` | 维护者 | npm 发布流程（OIDC）。 |
+| `docs/screenshots/` | — | README 用的真机截图，**不在 `package.json` 的 `files` 里，不进 npm 包**。 |
+
 ---
 
 ## 二、安装须知（AI 代理注意！）
@@ -112,7 +122,7 @@ dsh plugin --profile web add link:/root/dsha-api-dashboard
 6. **版本闭环 + 版本号规则**：任何对已发布功能的改动，记得 bump `package.json`/`package-lock.json` 版本 + 更新 README changelog，推 GitHub 后老用户面板会提示更新。
    **版本号 `X.Y.Z` 的含义（维护者 2026-09-10 明确）：`Y` = 大版本更新（新功能 / 结构性改动），`Z` = 修补 bug。** 别把 bugfix 当大版本发，也别一个功能跳两个 `Y`。
    ⚠️ **一次连续的、尚未发布的开发要合并进同一个版本号**：`v1.4.0`（原生币种）/ `v1.5.0`（子代理可见）/ `v1.5.1`（子代理冷会话自测修复）本来是同一轮工作里连着的三个号，维护者反馈「版本太夸张，之前是 1.3 现在已经 1.5」—— **已全部并回 `v1.4.0`**（三段日志合成一条）。以后：**没发布过就别连着跳号**，更别为一个「上线前自测发现的缺陷」单开版本。
-7. **npm 发布只走 Trusted Publishing (OIDC)**：`git tag v<版本> && git push origin v<版本>` 触发
+7. **npm 发布只走 Trusted Publishing (OIDC)**（完整流程见 [`docs/RELEASING.md`](docs/RELEASING.md)）：`git tag v<版本> && git push origin v<版本>` 触发
    `.github/workflows/publish.yml`，仓库内**不存任何 npm token**。
    ⚠️ **别再试 `npm publish` + token/OTP**：npm 已限制「绕过 2FA 的 token」用于直接发布
    (https://gh.io/npm-gat-bypass2fa-deprecation)，Granular / Automation token 加 `--otp` 在开启 2FA
