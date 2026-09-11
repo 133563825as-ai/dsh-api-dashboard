@@ -84,10 +84,85 @@ else
   say "    ln -sfn <DSH安装目录>/node_modules $TARGET/node_modules"
 fi
 
+# ---- 3.5 备份 profile 清单 + 记录「装之前」的健康状况 ----
+# 为什么要有这一步：DSH 启动时会把 profile 里 dsh.profile.bundles 的每个包**逐个 import**，
+# 只要有一个解析不了（没装 / 软链断掉），**整个 dsh web 就拒绝启动**，日志尾部是
+#   [cause]: Error [ERR_MODULE_NOT_FOUND]: Cannot find package '<包名>'
+# 这类坏条目常常在本次安装**之前**就存在了（上一次装插件失败留下的），
+# 但用户是在「按你的教程装完 + 重启」之后才看到崩溃 —— 于是算到我们头上。
+# 所以：装前先备份清单、先体检一次，装后再体检一次，把责任分清楚。
+PROFILE_DIR="$DSH_HOME_DIR/profiles/$PROFILE"
+MANIFEST="$PROFILE_DIR/package.json"
+CHECKER="${TMPDIR:-/tmp}/dsh-profile-check-$$.cjs"
+BEFORE_BAD=0
+
+cat > "$CHECKER" <<'CHECKEOF'
+const fs = require("fs");
+const path = require("path");
+const { createRequire } = require("module");
+const dir = process.argv[2];
+const anchor = path.join(dir, "package.json");
+let m;
+try {
+  m = JSON.parse(fs.readFileSync(anchor, "utf8"));
+} catch {
+  console.log("  (profile 清单读不了，跳过自检)");
+  process.exit(0);
+}
+const bundles = (m.dsh && m.dsh.profile && m.dsh.profile.bundles) || [];
+const deps = m.dependencies || {};
+const bad = [];
+for (const name of bundles) {
+  let ok = false;
+  try {
+    for (const sp of createRequire(anchor).resolve.paths(name) || []) {
+      if (fs.existsSync(path.join(sp, name, "package.json"))) { ok = true; break; }
+    }
+  } catch { /* 解析链拿不到就当解析不了 */ }
+  if (!ok) bad.push(name + (Object.hasOwn(deps, name)
+    ? "   (dependencies: " + deps[name] + ")"
+    : "   (DSH 自带 in-box —— 别动清单)"));
+}
+if (bad.length === 0) {
+  console.log("  ✓ " + bundles.length + " 个 bundle 全部可解析");
+  process.exit(0);
+}
+console.log("  ✗ " + bad.length + " 个 bundle 解析不了：");
+for (const b of bad) console.log("      " + b);
+process.exit(1);
+CHECKEOF
+
+if [ -f "$MANIFEST" ]; then
+  cp "$MANIFEST" "$MANIFEST.before-install-$STAMP"
+  say "→ profile 清单已备份：$MANIFEST.before-install-$STAMP"
+  say "→ 安装前自检："
+  node "$CHECKER" "$PROFILE_DIR" || BEFORE_BAD=1
+fi
+
 # ---- 4. 装进 profile ----
 say "→ 注册到 profile: $PROFILE"
 dsh plugin --profile "$PROFILE" add "link:$TARGET" || die "dsh plugin add 失败"
 
+# ---- 5. 装完自检 ----
 say ""
-say "✓ 安装完成。下一步：重启 dsh web 生效。"
+if [ -f "$MANIFEST" ]; then
+  say "→ 安装后自检："
+  if node "$CHECKER" "$PROFILE_DIR"; then
+    say ""
+    say "✓ 安装完成。下一步：重启 dsh web 生效。"
+  else
+    say ""
+    if [ "$BEFORE_BAD" = 1 ]; then
+      say "⚠ 上面这些 bundle 在**安装之前**就解析不了 —— 不是本次安装造成的。"
+      say "  但你现在重启 dsh web 会起不来（不是你装错了，是 profile 里本来就有坏条目）。"
+    else
+      say "⚠ 安装前是好的、装完变成这样 —— 先别重启，把上面的输出发出来。"
+    fi
+    say "  抢救工具："
+    say "    curl -fsSL https://raw.githubusercontent.com/133563825as-ai/dsh-api-dashboard/main/tools/profile-doctor.mjs -o /tmp/dsh-profile-doctor.mjs"
+    say "    node /tmp/dsh-profile-doctor.mjs --profile $PROFILE"
+    say "  （只摘掉 dependencies 里那些坏条目，DSH 自带 in-box bundle 一律不动）"
+  fi
+fi
+rm -f "$CHECKER"
 say "  卸载：dsh plugin --profile $PROFILE remove dsh-api-dashboard && rm -rf $TARGET"

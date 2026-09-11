@@ -67,6 +67,30 @@ dsh plugin --profile web add link:/root/dsha-api-dashboard
    「名字等于包名的 package.json」，store 目录的祖先链里没有 → 直接当作非客户端插件，**没有任何日志**。
    只有让插件文件保持真实路径（`link:` / 真拷贝）才能修。
 
+### ⚠️ 一个坏 bundle 会让整个 `dsh web` 起不来（2026-09-11 用户反馈后查清）
+
+DSH 启动时会把 profile 的 `dsh.profile.bundles` **逐个 import**，只要有一个解析不了
+（没装 / `link:` 目标被删被移导致软链断掉），**整个 dsh web 拒绝启动**，日志尾部：
+
+```
+[cause]: Error [ERR_MODULE_NOT_FOUND]: Cannot find package '<包名>' imported from .../profiles/<profile>/...
+```
+
+**`dsh plugin add` 本身不会删掉别的插件** —— 已用真包 `dsh-better-sidebar`（90 个依赖）完整复现：
+`pnpm add link:<插件>` 前后它一个不少；连「有依赖取不到导致 pnpm 失败」时 node_modules 也原样保留。
+但它确实是 `pnpm add`（`dsh plugin` 只是 pnpm 转发器，cwd = profile 目录），会做一次全量解析，
+**而且必须重启才生效** —— 所以「照教程装完就炸」多半是：**profile 里本来就有坏条目，重启才暴露**。
+
+- `install.sh` 现在会：装前备份 `profiles/<p>/package.json` → 装前体检 → 装后体检，
+  并明确区分「装前就坏」和「装后才坏」，避免背锅。
+- 抢救：`node tools/profile-doctor.mjs --profile web [--fix]`
+- ⚠️ `--fix` **只摘 `dependencies` 里的条目**（与 DSH 自己的 `reconcilePlugins` 同规则）；
+  `@deepseek-ai/dsh-base` / `dsh-web-app` 这类 in-box bundle 从 `$DSH_HOME/profiles/node_modules` 解析，
+  **绝不许从清单里摘** —— 摘了 DSH 直接哑掉。
+- ⚠️ 判断 bundle 能否解析必须用 `createRequire(<profile>/package.json).resolve.paths()`（会上溯到
+  `profiles/node_modules`），**别只看 `profiles/<p>/node_modules`** —— 那会把 in-box bundle 全部误报成坏的。
+  `ERR_MODULE_NOT_FOUND` 对「没装」和「软链断掉」是**同一句话**，光看报错分不出来，必须实际解析一次。
+
 ## 三、数据准确性红线（改代码前必读）
 
 以下平台余额解析有过「显示不准确」的历史问题。开源公布后会被用户/社区质疑，**务必如实处理，不许造假数字**。
