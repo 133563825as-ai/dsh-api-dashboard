@@ -8,12 +8,19 @@
 > ⚠️ **安装或维护本插件之前，请先读 [`AGENTS.md`](AGENTS.md)** —— 数据准确性红线、踩过的坑、安装姿势对照都在那里。
 > 本插件深度绑定 DeepSeek Harness 的客户端与宿主 API，**只能在 DSH 里运行**（手机版 DSHA 与桌面版同框架）。
 
-> 🧪 **你现在看的是预发行分支 `preview/desktop`** —— 版本 `v1.5.0-desktop-preview.2`。
-> 相对正式版只多一件事：**桌面 / 平板适配**（设置与看板抽屉在 ≥768px 宽 **且** ≥600px 高时，
-> 收成居中的 560px 面板；原先会横铺整个窗口）。
-> 覆盖 **iPad mini 竖屏(768×1024)、所有平板横竖屏、笔记本与台式**；
-> **手机竖屏与手机横屏都不受影响**（手机横屏虽然宽度过 768，但高度不够，被 `min-height:600px` 挡住），
-> 行为与正式版 v1.4.2 完全一致，逻辑一行没动。
+> 🧪 **你现在看的是预发行分支 `preview/desktop`** —— 版本 `v1.5.0-desktop-preview.3`。
+> 相对正式版只多一件事：**桌面 / 平板适配**。抽屉按三档走（档位对齐宿主手机壳自己的
+> `MOBILE_QUERY = max-width:1023px`）：
+>
+> | 视口 | 形态 |
+> |---|---|
+> | < 768px 宽，或高 < 600px（手机竖屏 / **手机横屏**） | 原样全宽底部抽屉 —— 与 v1.4.2 **完全一致** |
+> | 768–1023px 宽且高 ≥ 600px（平板竖屏 / 窄窗口） | **居中 560px 面板** |
+> | ≥ 1024px 宽且高 ≥ 600px（桌面 / 平板横屏） | **居中对话框**：四角圆角 + 上下留边 + `max-height:min(720px,80vh)` |
+>
+> 逻辑一行没动。三个抽屉补了 `role="dialog"` + `aria-label`（无障碍），但**刻意不加
+> `aria-modal="true"`** —— 手机壳把带这个属性的元素当自家对话框，有 46 条以其为前缀的结构性 CSS
+> 会把我们的面板重排，见 [`AGENTS.md`](AGENTS.md)。
 > 预览版在设置面板顶部带黄色标识，并且**不参与一键更新**（不会被 main 上的正式版悄悄覆盖）。
 > 装它：`DSH_DASHBOARD_REF=preview/desktop sh install.sh`；正式版仍在 `main`。
 
@@ -140,7 +147,7 @@ dsh plugin --profile web add link:/root/dsha-api-dashboard
 
 ## 更新日志
 
-最近一版 **v1.4.2**（本分支为预发行 `v1.5.0-desktop-preview.2`）—— DeepSeek 多币种钱包读取修复 + 桌面/平板适配预览。一版一行的完整历史见 [`CHANGELOG.md`](CHANGELOG.md)。
+最近一版 **v1.4.2**（本分支为预发行 `v1.5.0-desktop-preview.3`）—— DeepSeek 多币种钱包读取修复 + 桌面/平板适配预览。一版一行的完整历史见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## License
 

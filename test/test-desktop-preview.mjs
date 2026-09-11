@@ -40,53 +40,97 @@ a('依赖仍然为空 (零依赖是硬约束)',
   JSON.stringify(pkg.dependencies))
 
 // ==========================================================================
-// ② 桌面/平板断点: 只改宽度/居中、不能用 transform, 且必须真的覆盖平板
+// ② 桌面/平板断点: 三档形态, 且必须真的覆盖平板、不误伤手机横屏
 // ==========================================================================
-// 从源码里把作用于 .dshadb_drawer 的那条媒体查询**解出来**, 再拿它去跑设备矩阵
-// —— 断言的是「这个断点在 768×1024 上生效、在 844×390 上不生效」这种**行为**,
-// 而不是「源码里有某个字符串」。改断点数值时, 下面矩阵会立刻告诉你谁的观感被改了。
-const mq = cli.match(/@media\s+([^{]+)\{\s*\.dshadb_drawer\s*\{([^}]*)\}/)
-a('存在作用于 .dshadb_drawer 的尺寸断点', !!mq)
-const mqCond = mq ? mq[1].trim() : ''
-const mqBody = mq ? mq[2] : ''
-const minW = Number((mqCond.match(/min-width:\s*(\d+)px/) || [])[1] || 0)
-const minH = Number((mqCond.match(/min-height:\s*(\d+)px/) || [])[1] || 0)
-const hitsBreakpoint = (w, h) => (!minW || w >= minW) && (!minH || h >= minH)
-a('断点里限了抽屉宽度 (.dshadb_drawer + width:min(...))',
-  /width\s*:\s*min\(/.test(mqBody), mqBody.slice(0, 120))
-a('断点里用 margin auto 居中', /margin\s*:\s*0\s+auto/.test(mqBody))
-a('断点里不许用 transform 居中 (会被 slideup 动画覆盖 → 开面板横向跳动)',
-  !/transform/.test(mqBody))
+// 从源码里把**每一条**作用于 .dshadb_drawer 的媒体查询解出来, 再拿它们去跑设备矩阵
+// —— 断言的是「768×1024 得到居中面板、1024×768 得到居中对话框、844×390 还是手机全宽」
+// 这种**行为**, 而不是「源码里有某个字符串」。改断点数值时, 矩阵会立刻指出谁的观感被改了。
+const TIERS = [...cli.matchAll(/@media\s+([^{]+)\{\s*\.dshadb_drawer\s*\{([^}]*)\}/g)]
+  .map((m) => {
+    const cond = m[1].trim(), body = m[2]
+    return {
+      cond, body,
+      minW: Number((cond.match(/min-width:\s*(\d+)px/) || [])[1] || 0),
+      minH: Number((cond.match(/min-height:\s*(\d+)px/) || [])[1] || 0),
+    }
+  })
+  .sort((x, y) => x.minW - y.minW)
+a('抽屉上挂着多条尺寸断点 (手机 / 平板 / 桌面三档)', TIERS.length >= 2, `tiers=${TIERS.length}`)
+const sheet = TIERS.find((t) => t.minW === 768)
+const dialog = TIERS.find((t) => t.minW === 1024)
+a('有 768 档(平板: 居中面板)', !!sheet)
+a('有 1024 档(桌面: 居中对话框)', !!dialog)
+a('最窄的那一档限宽 (.dshadb_drawer + width:min(...); 更宽的档继承它)',
+  sheet ? /width\s*:\s*min\(/.test(sheet.body) : false)
+a('最窄的那一档用 margin auto 横向居中 (更宽的档继承它)',
+  sheet ? /margin\s*:\s*0\s+auto/.test(sheet.body) : false)
+a('这两档断点里不许留冗余的 calc() (min() 里可以直接写 100vw - 48px)',
+  TIERS.every((t) => !/calc\(/.test(t.body)))
+a('min() 里的算式确实没写 calc 也照样是合法写法 (lightningcss 规范化后的形态)',
+  /width\s*:\s*min\(560px,\s*100vw\s*-\s*48px\)/.test(sheet ? sheet.body : ''))
+a('平板档不许用 transform 居中 (会被 slideup 动画覆盖 → 开面板横向跳动)',
+  sheet ? !/transform/.test(sheet.body) : false)
 a('slideup 动画确实还在用 transform (上面那条禁令的前提)',
-  /@keyframes dshadb-slideup\{from\{transform:translateY\(100%\)\}/.test(cli.replace(/\s+/g, '')) ||
   /@keyframes dshadb-slideup\s*\{\s*from\s*\{\s*transform:\s*translateY\(100%\)/.test(cli))
+a('桌面档用 transform 竖着居中', dialog ? /translateY\(-50%\)/.test(dialog.body) : false)
+a('桌面档因此必须换掉带 transform 的入场动画, 改用纯淡入',
+  dialog ? /animation\s*:\s*dshadb-fadein/.test(dialog.body) : false)
+a('fadein 关键帧里确实没有 transform (换动画才安全)',
+  /@keyframes dshadb-fadein\s*\{\s*from\s*\{\s*opacity:0\s*\}\s*to\s*\{\s*opacity:1\s*\}\s*\}/.test(cli))
+a('桌面档给了高度上限 min(720px,80vh)', dialog ? /max-height\s*:\s*min\(720px,\s*80vh\)/.test(dialog.body) : false)
+a('桌面档的 max-height 带 !important (否则被内联 style 的 70vh/86vh 盖掉)',
+  dialog ? /max-height\s*:\s*min\(720px,\s*80vh\)\s*!important/.test(dialog.body) : false)
+a('两个抽屉的内联 max-height 确实还在 (所以 !important 是必需的, 不是随手加的)',
+  (cli.match(/style: \{ maxHeight: "\d+vh" \}/g) || []).length === 2)
 a('抽屉本体仍带 dshadb_drawer 类名 (断点才有东西可作用)',
   cli.includes('className: "dshadb_drawer"'))
 a('手机端不受影响: 断点条件是 min-width/min-height, 没有 max-width 反写',
   !/@media\s*\(max-width/.test(cli))
-a('断点同时约束高度 (挡手机横屏的唯一办法)',
-  minH >= 500, `min-height=${minH || '(缺)'}`)
+a('每一档都同时约束高度 (挡手机横屏的唯一办法)',
+  TIERS.every((t) => t.minH >= 500), TIERS.map((t) => t.minH).join('/'))
 
-// 真实设备矩阵: [设备, 宽, 高, 是否应该走桌面/平板布局]
-const DEVICES = [
-  ['iPhone 14 竖屏', 390, 844, false],
-  ['iPhone 14 横屏', 844, 390, false],   // 宽过 768 但很矮 —— 必须仍走手机全宽
-  ['Pixel 7 横屏', 915, 412, false],
-  ['iPad mini 竖屏', 768, 1024, true],   // 768 正好卡在门槛上, 必须命中
-  ['iPad mini 横屏', 1024, 768, true],
-  ['iPad 10.9 竖屏', 820, 1180, true],
-  ['iPad 10.9 横屏', 1180, 820, true],
-  ['iPad Pro 12.9 竖屏', 1024, 1366, true],
-  ['iPad Pro 12.9 横屏', 1366, 1024, true],
-  ['安卓平板 竖屏', 800, 1280, true],
-  ['安卓平板 横屏', 1280, 800, true],
-  ['笔记本 1366×768', 1366, 768, true],
-  ['台式 1920×1080', 1920, 1080, true],
-]
-for (const [name, w, h, want] of DEVICES) {
-  a(`${name} (${w}×${h}) → ${want ? '居中抽屉' : '手机全宽'}`,
-    hitsBreakpoint(w, h) === want)
+// 真实设备矩阵: [设备, 宽, 高, 期望形态]
+const layoutFor = (w, h) => {
+  const hit = TIERS.filter((t) => (!t.minW || w >= t.minW) && (!t.minH || h >= t.minH)).pop()
+  if (!hit) return 'phone'
+  return /translateY\(-50%\)/.test(hit.body) ? 'dialog' : 'sheet'
 }
+const DEVICES = [
+  ['iPhone 14 竖屏', 390, 844, 'phone'],
+  ['iPhone 14 横屏', 844, 390, 'phone'],   // 宽过 768 但很矮 —— 必须仍走手机全宽
+  ['Pixel 7 横屏', 915, 412, 'phone'],
+  ['小安卓平板 竖屏', 600, 960, 'phone'],   // 没到 768, 手机形态
+  ['iPad mini 竖屏', 768, 1024, 'sheet'],  // 768 正好卡在门槛上
+  ['iPad 10.9 竖屏', 820, 1180, 'sheet'],
+  ['安卓平板 竖屏', 800, 1280, 'sheet'],
+  ['1023×700 窄窗口', 1023, 700, 'sheet'], // 宿主手机壳 MOBILE_QUERY 的上界, 差 1px
+  ['iPad mini 横屏', 1024, 768, 'dialog'],
+  ['iPad 10.9 横屏', 1180, 820, 'dialog'],
+  ['iPad Pro 12.9 竖屏', 1024, 1366, 'dialog'],
+  ['iPad Pro 12.9 横屏', 1366, 1024, 'dialog'],
+  ['安卓平板 横屏', 1280, 800, 'dialog'],
+  ['笔记本 1366×768', 1366, 768, 'dialog'],
+  ['台式 1920×1080', 1920, 1080, 'dialog'],
+]
+const LAYOUT_LABEL = { phone: '手机全宽', sheet: '居中 560px 面板', dialog: '居中对话框' }
+for (const [name, w, h, want] of DEVICES) {
+  const got = layoutFor(w, h)
+  a(`${name} (${w}×${h}) → ${LAYOUT_LABEL[want]}`, got === want, `实际=${LAYOUT_LABEL[got] || got}`)
+}
+
+// ==========================================================================
+// ②b 无障碍: 只加 role="dialog", 绝不加 aria-modal (手机壳红线)
+// ==========================================================================
+a('三个抽屉都标了 role="dialog"',
+  (cli.match(/className: "dshadb_drawer", role: "dialog"/g) || []).length === 3,
+  String((cli.match(/className: "dshadb_drawer", role: "dialog"/g) || []).length))
+a('每个 dialog 都带 aria-label (否则无障碍只多了个空壳)',
+  (cli.match(/className: "dshadb_drawer", role: "dialog", "aria-label":/g) || []).length === 3,
+  String((cli.match(/className: "dshadb_drawer", role: "dialog", "aria-label":/g) || []).length))
+a('绝不设置 aria-modal 属性 (手机壳有 46 条以它为前缀的结构性 CSS 会重排我们面板)',
+  !/["\[]aria-modal["\]:]/.test(cli))
+a('源码里留了「为什么不用 aria-modal」的说明 (免得后人"顺手补上")',
+  /绝不加 aria-modal/.test(cli))
 
 // ==========================================================================
 // ③ 预览标识: 服务端下发 + 客户端只在 preview 为真时渲染

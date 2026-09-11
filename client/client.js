@@ -249,16 +249,23 @@ window.__ModuleLoader__.load({
 .dshadb_card{display:flex;align-items:center;gap:10px;padding:13px 14px;margin-bottom:9px;border-radius:18px;background:#ffffff;border:1px solid #e7e8ec;box-shadow:0 6px 20px rgba(0,0,0,0.03);cursor:pointer;position:relative;transition:transform .12s ease,box-shadow .2s ease,border-color .2s ease;-webkit-tap-highlight-color:transparent;animation:dshadb-fadein .2s ease-out}
 .dshadb_card:active{transform:scale(0.985);box-shadow:0 6px 20px rgba(0,0,0,0.05)}
 @media(hover:hover){.dshadb_card:hover{box-shadow:0 8px 25px rgba(0,0,0,0.06);border-color:#d0d2d8}}
-/* v1.5.0-desktop-preview: 桌面 / **平板**断点 —— 抽屉不再横铺整个窗口, 收成居中的底部面板。
-   为什么是「宽 + 高」两个条件, 而不是只看宽度:
-     · min-width:768px  —— 覆盖 iPad mini 竖屏(768×1024)、所有平板横竖屏、笔记本与台式。
-     · min-height:600px —— 挡住**手机横屏**(844×390 / 915×412 这类宽度轻松过 768)。
-       只按宽度判的话, 手机一横过来就被当成桌面, 在 390px 高的屏上摆一个 560px 宽的居中面板。
-   只改宽度与居中, 不动结构; 手机竖屏(<768px)这段规则根本不生效, 行为与 v1.4.2 一致。
-   居中用 margin:auto 而不是 transform —— .dshadb_drawer 带 slideup 动画
+/* v1.5.0-desktop-preview: 桌面 / **平板**两档断点 —— 抽屉不再横铺整个窗口。
+   档位是照着宿主自己的手机壳划的 (dsh-web-mobile 的 MOBILE_QUERY = max-width:1023px)：
+     · <768px 或矮屏(高<600)  → 原样手机全宽抽屉, 与 v1.4.2 完全一致
+     · 768–1023px             → 居中 560px 的底部面板（平板竖屏 / 窄窗口）
+     · ≥1024px                → 居中对话框：四角圆角 + 上下留边 + 高度上限（桌面）
+   为什么第二个条件是 min-height 而不是只看宽度: 手机横屏(844×390 / 915×412)宽度也过 768,
+   一屏才 390px 高, 只按宽度判会在上面摆一个 560px 宽的居中面板 → 那一档必须再要高度。
+   为什么 768 档不用 transform 居中: .dshadb_drawer 带 slideup 动画
    (@keyframes dshadb-slideup: from{transform:translateY(100%)}), 动画会盖掉 transform,
-   用 transform 居中会在开面板那一瞬间横向跳一下。 */
-@media (min-width:768px) and (min-height:600px){.dshadb_drawer{width:min(560px,calc(100vw - 48px));margin:0 auto;border-radius:22px 22px 0 0}}
+   那一瞬间会横向跳; 所以 768 档只用 margin:auto。
+   1024 档要竖着居中就必须用 transform, 所以那一档把动画换成**纯淡入**(dshadb-fadein, 关键帧里没有 transform)。
+   ⚠️ min() 里不用再套 calc() —— min(560px, 100vw - 48px) 就是合法写法(lightningcss 规范化后正是这个形态),
+      写成 calc(...) 只是冗余, 不是"不生效"。 */
+@media (min-width:768px) and (min-height:600px){.dshadb_drawer{width:min(560px,100vw - 48px);margin:0 auto;border-radius:22px 22px 0 0}}
+/* 桌面档：居中对话框。max-height 必须带 !important —— 两个抽屉各自用**内联 style** 写死了 70vh / 86vh，
+   而内联样式优先级高于样式表，不加 !important 这条规则根本轮不到生效。 */
+@media (min-width:1024px) and (min-height:600px){.dshadb_drawer{top:50%;bottom:auto;transform:translateY(-50%);max-height:min(720px,80vh) !important;border-radius:22px;box-shadow:0 24px 64px rgba(0,0,0,0.22);animation:dshadb-fadein .16s ease-out}}
 .dshadb_preview_banner{display:flex;flex-direction:column;gap:2px;margin:0 0 10px;padding:9px 11px;border-radius:12px;background:#fff8e6;border:1px solid #f0d9a0;color:#7a5b12;font-size:11px;font-weight:600;line-height:1.5}
 .dshadb_preview_banner b{font-size:12px;font-weight:800;color:#6b4d06}
 @media (prefers-color-scheme:dark){.dshadb_preview_banner{background:#3a3016;border-color:#6b5a24;color:#f2dfae}.dshadb_preview_banner b{color:#ffe9b0}}
@@ -548,7 +555,7 @@ window.__ModuleLoader__.load({
       "update.done": "已更新, 重启 Web GUI 生效", "update.fail": "更新失败, 已保持原版本",
       "update.checkfail": "检查失败 (网络异常)",
       "preview.title": "桌面 / 平板适配预览版 · 预发行",
-      "preview.body": "供电脑与平板试用：设置面板收成居中的 560px 抽屉（视口 ≥768px 宽且 ≥600px 高时生效），手机行为与正式版完全一致。预览版不参与一键更新。",
+      "preview.body": "供电脑与平板试用：≥1024px 宽时面板变成居中对话框，768~1023px 收成居中 560px 面板；手机与手机横屏保持原样。预览版不参与一键更新。",
       "update.previewHint": "预览版不参与一键更新（避免被 main 上的正式版覆盖）",
       "settings.section.basic": "基础设置", "settings.section.relays": "中转站", "settings.section.models": "自定义模型",
       "settings.section.whale": "大肥鱼",
@@ -609,7 +616,7 @@ window.__ModuleLoader__.load({
       "update.done": "Updated. Restart Web GUI to apply", "update.fail": "Update failed, version unchanged",
       "update.checkfail": "Check failed (network)",
       "preview.title": "Desktop / tablet preview — pre-release",
-      "preview.body": "For desktop and tablet: the settings panel becomes a centred 560px sheet (viewport at least 768px wide and 600px tall). Phone layout is unchanged. Preview builds do not take part in one-click updates.",
+      "preview.body": "For desktop and tablet: at 1024px and wider the panel becomes a centred dialog, at 768-1023px a centred 560px sheet. Phones and phone-landscape keep the original layout. Preview builds do not take part in one-click updates.",
       "update.previewHint": "Preview build: one-click update is off, so the stable line on main cannot overwrite it.",
       "settings.section.basic": "Basic", "settings.section.relays": "Relays", "settings.section.models": "Custom Models",
       "settings.section.whale": "Whale",
@@ -1267,7 +1274,7 @@ window.__ModuleLoader__.load({
       return react.createElement("div", { className: "dshadb_scrim", onClick: (e) => { if (e.target === e.currentTarget) onClose(); } }, [
         // v1.4.0: 侧滑守卫 —— 让手机壳的「左边缘开侧边栏」手势层放弃识别 (CSS 与 AGENTS.md ① 有详解)
         react.createElement("div", { className: "dshadb_swipeguard", "aria-hidden": "true", key: "swipeguard" }),
-        react.createElement("div", { className: "dshadb_drawer", onClick: (e) => e.stopPropagation(), key: "drawer" }, [
+        react.createElement("div", { className: "dshadb_drawer", role: "dialog", "aria-label": t("title"), onClick: (e) => e.stopPropagation(), key: "drawer" }, [
           react.createElement(SwipeHandle, { onClose, key: "handle" }),
           react.createElement("div", { className: "dshadb_header", key: "header" }, [
             react.createElement("div", { className: "dshadb_header_left", key: "left" }, [
@@ -1388,7 +1395,7 @@ window.__ModuleLoader__.load({
       // v0.5.3: 回退为底部抽屉样式 (全屏卡片观感不佳, 复用看板同款 scrim+drawer)
       return react.createElement("div", { className: "dshadb_scrim", onClick: (e) => { if (e.target === e.currentTarget) onClose(); } }, [
         react.createElement("div", { className: "dshadb_swipeguard", "aria-hidden": "true", key: "swipeguard" }),
-        react.createElement("div", { className: "dshadb_drawer", style: { maxHeight: "70vh" }, onClick: (e) => e.stopPropagation(), key: "drawer" }, [
+        react.createElement("div", { className: "dshadb_drawer", role: "dialog", "aria-label": meta.name, style: { maxHeight: "70vh" }, onClick: (e) => e.stopPropagation(), key: "drawer" }, [
           react.createElement(SwipeHandle, { onClose, key: "handle" }),
           react.createElement("div", { className: "dshadb_header", key: "header" }, [
             react.createElement("div", { className: "dshadb_header_left", key: "left" }, [
@@ -1923,7 +1930,14 @@ window.__ModuleLoader__.load({
         ]),
       ]);
 
-      const output = react.createElement("div", { className: "dshadb_drawer", style: { maxHeight: "86vh" }, onClick: (e) => e.stopPropagation(), key: "drawer" }, [
+      // ⚠️ 无障碍只加 role="dialog" + aria-label, **绝不加 aria-modal="true"**：
+      //    手机壳 dsh-web-mobile 把 [aria-modal="true"] 当自家对话框, 有 **46 条**以它为前缀的
+      //    结构性 CSS（[class*="_header"] / _row / _card … 子串选择器）会把我们的
+      //    dshadb_header / dshadb_settings_row / dshadb_card 一起重排; 它的 settings-toolbar-reparent
+      //    任务还会把 [aria-modal="true"] 里的 [class*="_header"] 搬进 _nav。
+      //    （只加 role="dialog" 是安全的：全仓只有 3 处提到 role="dialog"，且唯一条结构规则
+      //      `[role="dialog"]:has([data-dsh-market-root]) > nav` 只对插件市场自己的根生效。）
+      const output = react.createElement("div", { className: "dshadb_drawer", role: "dialog", "aria-label": t("settings.title"), style: { maxHeight: "86vh" }, onClick: (e) => e.stopPropagation(), key: "drawer" }, [
         react.createElement(SwipeHandle, { onClose: onBack || onClose, key: "handle" }),
         react.createElement("div", { className: "dshadb_header", key: "header" }, [
           react.createElement("div", { style: { display: "flex", alignItems: "center", gap: "10px", flex: "1", minWidth: 0 }, key: "leftwrap" }, [
