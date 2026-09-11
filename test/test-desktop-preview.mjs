@@ -106,8 +106,14 @@ a('平台详情与设置各自的高度值没被改动 (70vh / 86vh, 与 v1.4.2 
   /"--dshadb-max-h":\s*"70vh"/.test(cli) && /"--dshadb-max-h":\s*"86vh"/.test(cli))
 a('基础 .dshadb_drawer 用 var(--dshadb-max-h, 85vh) 兜底 (看板面板没设变量 → 仍是 85vh)',
   /max-height\s*:\s*min\(var\(--dshadb-max-h,\s*85vh\)/.test(cli))
-a('桌面档不再需要 !important (没有任何声明还带它 —— 注释里提到不算)',
-  !/!important\s*[;}]/.test(cli))
+// 断言要对准「我们自己的面板」——preview.7 起给宿主侧栏竖线补了一条 scoped !important，
+// 那是**抑制宿主样式**的必要手段，与这里禁止的「用 !important 压自己内联高度」是两回事。
+// 先剥掉 CSS 注释，免得注释里的示例文本被当成真声明。
+const cssClean = cli.replace(/\/\*[\s\S]*?\*\//g, '')
+const bangLines = cssClean.split('\n').filter((l) => /!important\s*[;}]/.test(l))
+a('我们自己的面板声明里不再有 !important (只剩宿主侧栏竖线那一条 scoped 抑制)',
+  bangLines.length === 1 && bangLines[0].includes('sidebarCol'),
+  `${bangLines.length} 处: ` + bangLines.map((l) => l.slice(0, 60)).join(' | '))
 a('说明里写清了「!important 会挡住键盘动态收窄」这个理由',
   cli.includes('--dshadb-max-h') && /!important 又会挡住/.test(cli))
 
@@ -139,8 +145,8 @@ a('注释里写死了「故意不进网格」+ 为什么报告的修法无效 (�
   /置顶卡\*\*故意\*\*不进 \.dshadb_cards 网格/.test(cli) && /grid-column:1\/-1/.test(cli) && /现象一条都没消掉/.test(cli))
 a('抽屉本体仍带 dshadb_drawer 类名 (断点才有东西可作用)',
   cli.includes('className: "dshadb_drawer"'))
-a('手机端不受影响: 断点条件是 min-width/min-height, 没有 max-width 反写',
-  !/@media\s*\(max-width/.test(cli))
+a('手机端不受影响: 我们的断点条件只有 min-width/min-height, 没有 max-width 反写',
+  !/@media\s*\(max-width/.test(cssClean))
 // preview.5 起「挡手机横屏」有两条路: 要么限高度(min-height:600px), 要么要精确指针(pointer:fine)。
 // 两者都没有 = 无条件的手机档 —— 那是不允许的(会把手机也套进居中面板)。
 a('每一档都同时约束高度, 或者要求精确指针 (挡手机横屏的两条路至少走一条)',

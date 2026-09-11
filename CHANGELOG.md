@@ -4,7 +4,13 @@
 
 ## v1.x
 
-- **v1.5.0-desktop-preview.6**（🧪 试验修复，根因未确认）— 仅大屏设置内容层增加绘制隔离，尝试消除面板内部局部灰竖线；不隐藏宿主侧栏边框，不改滚动条、阴影、键盘或锁逻辑。未获平板视觉验收；若浮层裁剪或竖线不变，请回退 preview.5。详见 `docs/preview6-experiment.md`。
+- **v1.5.0-desktop-preview.7**（🧪 预发行，非正式版）— 平板横屏那条**贯穿竖线**改到正确的层，并撤掉 `.6` 的无效试验。
+  现象：平板横屏（1238px）打开看板/设置时，面板内部偏左多出一条贯穿灰竖线。**成因不在本插件**：宿主侧栏 `.pI_x6G_sidebarCol` 带 `border-right:.5px solid var(--dsw-alias-border-l3)`，dpr 2.5 下正好占满 1 个物理像素；`dsh-web-mobile` 已经把它杀掉（`border-right:none !important`），但那条规则整段位于 `@media (max-width:1023px) and (pointer:coarse)` —— **手机档杀了、宽屏触屏档漏了**（已在本机 `dsh-web-mobile/lib/client.js:1613` 核对）。
+  本版补上缺口：`@media (min-width:1024px) and (pointer:coarse){ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right:none !important} }` ——
+  ① 媒体条件正好是那条 1023px 规则的补集；② `:has(.dshadb_scrim)` 保证**只在我们面板打开时**抑制，平时完全不动宿主界面；③ 桌面鼠标档（`pointer:fine`）保持宿主官方分隔线。
+  ⚠️ 同时**撤销 `.6` 的 `contain:paint` 试验**（改的是我们自己的面板内容层，改错了层，无效；且 `contain:paint` 有裁剪浮层的风险）。
+  真机视觉效果仍待平板验收：请确认竖线消失、且面板关闭后宿主侧栏分隔线恢复。
+- **v1.5.0-desktop-preview.6**（🧪 试验修复，根因未确认）— 仅大屏设置内容层增加绘制隔离，尝试消除面板内部局部灰竖线；不隐藏宿主侧栏边框，不改滚动条、阴影、键盘或锁逻辑。**已被 `.7` 撤销**（改错层，实测无效）。详见 `docs/preview6-experiment.md`。
 
 - **v1.5.0-desktop-preview.5**（🧪 预发行，非正式版）— 响应第三方真机验证报告（对 `preview.4` 逐条复核后：6 条属实、1 条修法无效、1 条在 Node 里做不到真修）：
   **① 软键盘避让**（§2.2，实测键盘 242px、盖住面板 26%）—— 宿主 viewport meta 没有 `interactive-widget=resizes-content`，键盘只收缩 visual viewport、`vh` 与 `position:fixed` 纹丝不动，所以插件自己算：`keyboardInset()` 把键盘高度写进 `:root` 的 `--dshadb-kb`，抽屉档按它抬底、对话框档在**可视区**里重新居中、两处 `max-height` 同步收窄（三个守卫：缩放中不算、差值 < 80px 当噪声、offsetTop 参与计算）。报告只建议改 `max-height` —— 那不够，面板还是贴底边；
