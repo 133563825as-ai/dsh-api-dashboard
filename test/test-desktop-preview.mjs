@@ -1,4 +1,4 @@
-// v1.5.0-desktop-preview.1 回归钉子 —— 预发行(桌面适配)分支专用。
+// v1.5.0-desktop-preview 系列回归钉子 —— 预发行(桌面/平板适配)分支专用。
 //
 // 这一批钉的是「预览版必须能被认出来、必须不污染正式版」这件事本身:
 //   ① 版本号是 semver 预发布形态, 且 package-lock 与 package.json 一致
@@ -40,14 +40,21 @@ a('依赖仍然为空 (零依赖是硬约束)',
   JSON.stringify(pkg.dependencies))
 
 // ==========================================================================
-// ② 桌面断点: 只改宽度/居中, 且不能用 transform
+// ② 桌面/平板断点: 只改宽度/居中、不能用 transform, 且必须真的覆盖平板
 // ==========================================================================
-const mq = cli.match(/@media\s*\(min-width:\s*768px\)\s*\{([^\n]*)/)
-a('存在 min-width:768px 的桌面断点', !!mq)
-const mqBody = mq ? mq[1] : ''
+// 从源码里把作用于 .dshadb_drawer 的那条媒体查询**解出来**, 再拿它去跑设备矩阵
+// —— 断言的是「这个断点在 768×1024 上生效、在 844×390 上不生效」这种**行为**,
+// 而不是「源码里有某个字符串」。改断点数值时, 下面矩阵会立刻告诉你谁的观感被改了。
+const mq = cli.match(/@media\s+([^{]+)\{\s*\.dshadb_drawer\s*\{([^}]*)\}/)
+a('存在作用于 .dshadb_drawer 的尺寸断点', !!mq)
+const mqCond = mq ? mq[1].trim() : ''
+const mqBody = mq ? mq[2] : ''
+const minW = Number((mqCond.match(/min-width:\s*(\d+)px/) || [])[1] || 0)
+const minH = Number((mqCond.match(/min-height:\s*(\d+)px/) || [])[1] || 0)
+const hitsBreakpoint = (w, h) => (!minW || w >= minW) && (!minH || h >= minH)
 a('断点里限了抽屉宽度 (.dshadb_drawer + width:min(...))',
-  /\.dshadb_drawer\s*\{[^}]*width\s*:\s*min\(/.test(mqBody), mqBody.slice(0, 120))
-a('断点里用 margin auto 居中', /\.dshadb_drawer\s*\{[^}]*margin\s*:\s*0\s+auto/.test(mqBody))
+  /width\s*:\s*min\(/.test(mqBody), mqBody.slice(0, 120))
+a('断点里用 margin auto 居中', /margin\s*:\s*0\s+auto/.test(mqBody))
 a('断点里不许用 transform 居中 (会被 slideup 动画覆盖 → 开面板横向跳动)',
   !/transform/.test(mqBody))
 a('slideup 动画确实还在用 transform (上面那条禁令的前提)',
@@ -55,8 +62,31 @@ a('slideup 动画确实还在用 transform (上面那条禁令的前提)',
   /@keyframes dshadb-slideup\s*\{\s*from\s*\{\s*transform:\s*translateY\(100%\)/.test(cli))
 a('抽屉本体仍带 dshadb_drawer 类名 (断点才有东西可作用)',
   cli.includes('className: "dshadb_drawer"'))
-a('手机端不受影响: 断点条件是 min-width, 没有 max-width 反写',
+a('手机端不受影响: 断点条件是 min-width/min-height, 没有 max-width 反写',
   !/@media\s*\(max-width/.test(cli))
+a('断点同时约束高度 (挡手机横屏的唯一办法)',
+  minH >= 500, `min-height=${minH || '(缺)'}`)
+
+// 真实设备矩阵: [设备, 宽, 高, 是否应该走桌面/平板布局]
+const DEVICES = [
+  ['iPhone 14 竖屏', 390, 844, false],
+  ['iPhone 14 横屏', 844, 390, false],   // 宽过 768 但很矮 —— 必须仍走手机全宽
+  ['Pixel 7 横屏', 915, 412, false],
+  ['iPad mini 竖屏', 768, 1024, true],   // 768 正好卡在门槛上, 必须命中
+  ['iPad mini 横屏', 1024, 768, true],
+  ['iPad 10.9 竖屏', 820, 1180, true],
+  ['iPad 10.9 横屏', 1180, 820, true],
+  ['iPad Pro 12.9 竖屏', 1024, 1366, true],
+  ['iPad Pro 12.9 横屏', 1366, 1024, true],
+  ['安卓平板 竖屏', 800, 1280, true],
+  ['安卓平板 横屏', 1280, 800, true],
+  ['笔记本 1366×768', 1366, 768, true],
+  ['台式 1920×1080', 1920, 1080, true],
+]
+for (const [name, w, h, want] of DEVICES) {
+  a(`${name} (${w}×${h}) → ${want ? '居中抽屉' : '手机全宽'}`,
+    hitsBreakpoint(w, h) === want)
+}
 
 // ==========================================================================
 // ③ 预览标识: 服务端下发 + 客户端只在 preview 为真时渲染

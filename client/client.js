@@ -249,12 +249,16 @@ window.__ModuleLoader__.load({
 .dshadb_card{display:flex;align-items:center;gap:10px;padding:13px 14px;margin-bottom:9px;border-radius:18px;background:#ffffff;border:1px solid #e7e8ec;box-shadow:0 6px 20px rgba(0,0,0,0.03);cursor:pointer;position:relative;transition:transform .12s ease,box-shadow .2s ease,border-color .2s ease;-webkit-tap-highlight-color:transparent;animation:dshadb-fadein .2s ease-out}
 .dshadb_card:active{transform:scale(0.985);box-shadow:0 6px 20px rgba(0,0,0,0.05)}
 @media(hover:hover){.dshadb_card:hover{box-shadow:0 8px 25px rgba(0,0,0,0.06);border-color:#d0d2d8}}
-/* v1.5.0-desktop-preview: 桌面宽屏断点 —— 抽屉不再横铺整个窗口, 收成居中的底部面板。
-   只改宽度与居中, 不动结构: <768px(手机/竖屏)这段规则根本不生效, 行为与 v1.4.2 完全一致。
+/* v1.5.0-desktop-preview: 桌面 / **平板**断点 —— 抽屉不再横铺整个窗口, 收成居中的底部面板。
+   为什么是「宽 + 高」两个条件, 而不是只看宽度:
+     · min-width:768px  —— 覆盖 iPad mini 竖屏(768×1024)、所有平板横竖屏、笔记本与台式。
+     · min-height:600px —— 挡住**手机横屏**(844×390 / 915×412 这类宽度轻松过 768)。
+       只按宽度判的话, 手机一横过来就被当成桌面, 在 390px 高的屏上摆一个 560px 宽的居中面板。
+   只改宽度与居中, 不动结构; 手机竖屏(<768px)这段规则根本不生效, 行为与 v1.4.2 一致。
    居中用 margin:auto 而不是 transform —— .dshadb_drawer 带 slideup 动画
    (@keyframes dshadb-slideup: from{transform:translateY(100%)}), 动画会盖掉 transform,
    用 transform 居中会在开面板那一瞬间横向跳一下。 */
-@media (min-width:768px){.dshadb_drawer{width:min(560px,calc(100vw - 48px));margin:0 auto;border-radius:22px 22px 0 0}}
+@media (min-width:768px) and (min-height:600px){.dshadb_drawer{width:min(560px,calc(100vw - 48px));margin:0 auto;border-radius:22px 22px 0 0}}
 .dshadb_preview_banner{display:flex;flex-direction:column;gap:2px;margin:0 0 10px;padding:9px 11px;border-radius:12px;background:#fff8e6;border:1px solid #f0d9a0;color:#7a5b12;font-size:11px;font-weight:600;line-height:1.5}
 .dshadb_preview_banner b{font-size:12px;font-weight:800;color:#6b4d06}
 @media (prefers-color-scheme:dark){.dshadb_preview_banner{background:#3a3016;border-color:#6b5a24;color:#f2dfae}.dshadb_preview_banner b{color:#ffe9b0}}
@@ -543,8 +547,8 @@ window.__ModuleLoader__.load({
       "update.install": "一键更新", "update.installing": "下载安装中…",
       "update.done": "已更新, 重启 Web GUI 生效", "update.fail": "更新失败, 已保持原版本",
       "update.checkfail": "检查失败 (网络异常)",
-      "preview.title": "桌面适配预览版 · 预发行",
-      "preview.body": "供电脑 / 宽屏试用：设置面板收成居中的 560px 抽屉，手机端行为与正式版完全一致。预览版不参与一键更新。",
+      "preview.title": "桌面 / 平板适配预览版 · 预发行",
+      "preview.body": "供电脑与平板试用：设置面板收成居中的 560px 抽屉（视口 ≥768px 宽且 ≥600px 高时生效），手机行为与正式版完全一致。预览版不参与一键更新。",
       "update.previewHint": "预览版不参与一键更新（避免被 main 上的正式版覆盖）",
       "settings.section.basic": "基础设置", "settings.section.relays": "中转站", "settings.section.models": "自定义模型",
       "settings.section.whale": "大肥鱼",
@@ -604,8 +608,8 @@ window.__ModuleLoader__.load({
       "update.install": "Update now", "update.installing": "Installing…",
       "update.done": "Updated. Restart Web GUI to apply", "update.fail": "Update failed, version unchanged",
       "update.checkfail": "Check failed (network)",
-      "preview.title": "Desktop preview — pre-release",
-      "preview.body": "For desktop / wide screens: the settings panel becomes a centred 560px sheet. Phone layout is unchanged. Preview builds do not take part in one-click updates.",
+      "preview.title": "Desktop / tablet preview — pre-release",
+      "preview.body": "For desktop and tablet: the settings panel becomes a centred 560px sheet (viewport at least 768px wide and 600px tall). Phone layout is unchanged. Preview builds do not take part in one-click updates.",
       "update.previewHint": "Preview build: one-click update is off, so the stable line on main cannot overwrite it.",
       "settings.section.basic": "Basic", "settings.section.relays": "Relays", "settings.section.models": "Custom Models",
       "settings.section.whale": "Whale",

@@ -1,5 +1,5 @@
 #!/bin/sh
-# dsh-api-dashboard 安装脚本（v1.5.0-desktop-preview.1）
+# dsh-api-dashboard 安装脚本（v1.5.0-desktop-preview.2）
 #
 # 为什么不是 `dsh plugin --profile web add dsh-api-dashboard`：
 #   手机版 DSHA 跑在 proot 容器里（启动参数带 --link2symlink），pnpm 的硬链接会被降级成
