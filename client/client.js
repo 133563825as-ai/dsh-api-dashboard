@@ -858,13 +858,15 @@ window.__ModuleLoader__.load({
         ref: (n) => { if (n) requestAnimationFrame(() => syncSubsOverflow(n)); },
         onScroll: (e) => syncSubsOverflow(e.currentTarget) },
         list.map((s, i) => {
-          const f = formatSessionCost({ cost: s.cost, currency: mainCur, costByCurrency: s.costByCurrency, waiting: false });
+          const f = formatSessionCost({ cost: s.cost, currency: mainCur, costByCurrency: s.costByCurrency, waiting: s.waiting === true });
+          // waiting(等自身数据) 时 formatSessionCost 直接返回 null → "~—";
+          // 真实零消耗时 f 非 null 但 hasValue=false, 也必须回落 "~—"(与 v1.4.x 一致), 不能显示 ~¥0.00
           const amt = f !== null && f.hasValue ? "~" + f.text : "~—";
           const kind = s.mode === "continuable" ? "可续聊子代理" : "一次性子代理";
           const models = (s.models || []).join(", ");
           const tip = [
             kind + " " + (s.label || "子代理"),
-            "消耗 " + (f !== null ? f.title : "—"),
+            "自身消耗 " + (f !== null ? f.title : "等待自身用量数据"),
             models ? "模型 " + models : "",
             s.id ? "ID " + String(s.id).slice(0, 8) : "",
           ].filter(Boolean).join("\n");
@@ -2645,7 +2647,7 @@ window.__ModuleLoader__.load({
 
           // v1.4.0: 子代理消耗行 —— 有子代理时在状态条**下面换行**追加一行,
           // 按父会话里的创建顺序从左到右排列 (顺序由服务端 subagentCatalog 决定, 这里不排序)。
-          // 金额是「该子代理及其后代」的汇总, 与主板数字同一套计价口径。
+          // 只计该子代理自身新用量，不含继承历史、兄弟或后代。
           const subRow = buildSubagentRow(cost);
 
           return react.createElement("span", { className: "dshadb_barwrap" }, [

@@ -15,11 +15,12 @@ const mkHost = ({ catalogs = {}, states = {} } = {}) => ({
   },
 })
 // 一份「某模型跑了 N 个未缓存输入 token」的投影状态
-const st = (model, inputTokens) => ({
+const raw = (model, inputTokens) => ({
   currentModel: model, currentProvider: null, last: null, modelOrder: [model],
   byModel: { [model]: { uncachedInputTokens: inputTokens, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0 } },
   sessionId: 'x',
 })
+const st = (model, inputTokens) => ({ ...raw(model,inputTokens), ownBoundaryKnown:true, own:raw(model,inputTokens), ownChildIds:[] })
 const child = (id, label, createdAt, mode = 'continuable') => ({ id, label, createdAt, mode })
 
 const run = (state, host) => {
@@ -31,6 +32,7 @@ const parentState = (host) => {
   let s = proj.init({ id: 'parent' })
   s = proj.apply(s, { type: 'request/header', data: { header: { config: { model: 'glm-5.3' } } } })
   s = proj.apply(s, { type: 'assistant/message', data: { turn: 1, step: 1, message: {}, stream: [], usage: { inputTokens: 1_000_000, outputTokens: 0 } } })
+  try { for (const c of host?.projections?.snapshot?.({id:"parent"})?.values?.subagentCatalog ?? []) s=proj.apply(s,{type:"subagent/catalog",data:{childId:c.id}}) } catch {}
   return proj.wire.view(s)
 }
 
@@ -66,8 +68,8 @@ const parentState = (host) => {
   })
   const v = parentState(host)
   a('S3 只有 1 条直接子代理', v.subagents.length === 1)
-  a('S3 金额 = 自身 ¥8 + 孙代理 ¥1 = ¥9', Math.abs(v.subagents[0].cost - 9) < 1e-9)
-  a('S3 token 也汇总', v.subagents[0].tokens.uncachedInput === 2_000_000)
+  a('S3 只计自身¥8，不计孙代理', Math.abs(v.subagents[0].cost - 8) < 1e-9)
+  a('S3 token也只计自身', v.subagents[0].tokens.uncachedInput === 1_000_000)
 }
 // ---- 4. 子代理用了海外模型 → 各自币种, 不按汇率合并 ----
 {
@@ -88,7 +90,7 @@ const parentState = (host) => {
   a('S5 无服务 → 空数组且不抛', v2.subagents.length === 0)
   const host = mkHost({ catalogs: { parent: [child('ghost', 'missing', 1)] }, states: { parent: st('glm-5.3', 0) } })
   const v3 = parentState(host)
-  a('S5 子会话取不到 → 仍列出该条, 金额 0', v3.subagents.length === 1 && v3.subagents[0].cost === 0)
+  a('S5 子会话缺失为waiting非0', v3.subagents.length === 1 && v3.subagents[0].cost === -1 && v3.subagents[0].waiting)
   const bad = { sessions: { get: () => { throw new Error('boom') } }, projections: { snapshot: () => { throw new Error('boom') }, stateOf: () => { throw new Error('boom') } } }
   let threw = false
   try { parentState(bad) } catch { threw = true }
@@ -165,17 +167,13 @@ process.env.DSH_HOME = home
 const cacheFile = (id, rows) => writeFileSync(
   pjoin(home, 'storages', 'session_projcache', 'sessions', `${id}.json`),
   JSON.stringify({ version: 3, record: { identity: { formatVersion: 3 }, rows } }))
-const costRow = (model, inputTokens) => ({
-  ver: 2, seq: 10,
-  val: { currentModel: model, currentProvider: null, last: null, modelOrder: [model],
-    byModel: { [model]: { uncachedInputTokens: inputTokens, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0 } },
-    sessionId: 'x' },
-})
+const costRow = (model, inputTokens) => ({ ver:3, seq:10, val: st(model,inputTokens) })
 const catRow = (kids) => ({ ver: 2, seq: 5, val: { inheritedEventCount: 0, head: { values: kids.map((c) => ({
   version: 0, childId: c.id, childCreatedAt: c.createdAt, mode: c.mode, label: c.label })) } } })
 // 全冷的宿主: sessions.get 一律 undefined, 投影也拿不到东西
 const coldHost = () => ({ sessions: { get: () => undefined }, projections: { snapshot: () => ({ values: {} }), stateOf: () => undefined } })
-const viewOf = (id, host) => { const p = m.makeCostProjection(() => CFG, () => host); return p.wire.view(p.init({ id })) }
+const viewOf = (id, host) => { const p = m.makeCostProjection(() => CFG, () => host); const s=p.init({id});
+const known={'parent-cold':['kid-1'],'parent-cold2':['kid-2'],'live-p':['kid-live']};s.ownChildIds=known[id]??[];return p.wire.view(s) }
 
 {
   cacheFile('parent-cold', { subagentCatalog: catRow([child('kid-1', '冷子代理', 1)]) })
@@ -189,7 +187,7 @@ const viewOf = (id, host) => { const p = m.makeCostProjection(() => CFG, () => h
   cacheFile('grand-2', { queryBalanceCost: costRow('mimo-v2.5', 1_000_000) })
   cacheFile('parent-cold2', { subagentCatalog: catRow([child('kid-2', '中间', 1)]) })
   const v = viewOf('parent-cold2', coldHost())
-  a('C2 冷路径同样向上汇总 (¥8+¥1=¥9)', v.subagents.length === 1 && Math.abs(v.subagents[0].cost - 9) < 1e-9)
+  a('C2 冷路径只计自身¥8', v.subagents.length === 1 && Math.abs(v.subagents[0].cost - 8) < 1e-9)
 }
 {
   // 热路径有数据时不读文件: 文件里故意写 9M token 来区分

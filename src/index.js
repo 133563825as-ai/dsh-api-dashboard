@@ -1726,7 +1726,8 @@ const readSessionCacheRecord = (sessionId) => {
 
 /** 冷路径: 从缓存文件里取该会话的 queryBalanceCost **状态**(不是 wire 视图)。 */
 const cachedCostState = (sessionId) => {
-  const val = readSessionCacheRecord(sessionId)?.queryBalanceCost?.val
+  const row = readSessionCacheRecord(sessionId)?.queryBalanceCost
+  const val = row?.ver === 3 ? row.val : null
   return (val !== null && typeof val === 'object' && Array.isArray(val.modelOrder) && val.byModel !== null && typeof val.byModel === 'object') ? val : null
 }
 
@@ -1745,7 +1746,7 @@ const cachedCatalog = (sessionId) => {
     }))
 }
 
-export function collectSubagentCosts(services, rootSessionId, summarize) {
+export function collectSubagentCosts(services, rootSessionId, summarize, ownChildIds) {
   const out = []
   if (typeof rootSessionId !== 'string' || rootSessionId === '') return out
   let sessions = null, projections = null
@@ -1779,32 +1780,26 @@ export function collectSubagentCosts(services, rootSessionId, summarize) {
     if (s !== null && projections !== null) {
       try {
         const st = projections.stateOf(s, 'queryBalanceCost')
-        if (st !== null && st !== undefined && Array.isArray(st.modelOrder) && st.modelOrder.length > 0) return st
+        if (st !== null && st !== undefined) return st
       } catch { /* 落到冷路径 */ }
     }
     return cachedCostState(sessionId)
   }
 
-  /** 递归汇总: 自身 + 后代, 返回与 summarize 同形的汇总。 */
-  const rollup = (sessionId, depth) => {
-    const st = costStateOf(sessionId)
-    let acc = (st !== null && subagentCostSummarize !== null) ? subagentCostSummarize(st) : null
-    if (depth >= SUBAGENT_MAX_DEPTH) return acc
-    for (const entry of childrenOf(sessionId)) {
-      acc = mergeSummary(acc, rollup(entry.id, depth + 1))
-    }
-    return acc
-  }
-
   for (const entry of childrenOf(rootSessionId)) {
     if (out.length >= SUBAGENT_MAX_ROWS) break
-    const s = rollup(entry.id, 1) ?? emptySummary()
+    if (Array.isArray(ownChildIds) && !ownChildIds.includes(entry.id)) continue
+    const st = costStateOf(entry.id)
+    const ready = st?.ownBoundaryKnown === true && st?.own && Array.isArray(st.own.modelOrder)
+    const waiting = !ready || st.own.modelOrder.length === 0
+    const s = ready ? summarize(st.own) : emptySummary()
     out.push({
       id: String(entry.id),
       label: typeof entry.label === 'string' && entry.label !== '' ? entry.label : String(entry.id).slice(0, 12),
       mode: entry.mode === 'continuable' ? 'continuable' : 'one-shot',
       createdAt: typeof entry.createdAt === 'number' ? entry.createdAt : 0,
-      cost: s.cost,
+      cost: waiting ? -1 : s.cost,
+      waiting,
       costByCurrency: s.costByCurrency,
       currencyByModel: s.currencyByModel,
       mixedCurrency: s.mixedCurrency,
@@ -1952,39 +1947,7 @@ export function makeCostProjection(configOrGetter, services) {
     }
   }
 
-  return {
-    key: 'queryBalanceCost',
-    // 框架要求的投影定义 API: stateSchema(内部状态) + wire.{viewSchema,view}(客户端可见视图)。
-    // 旧版误用顶层 schema+view, 导致 wire 缺失, 服务端 drive 永不通知、客户端永远拿不到值。
-    stateSchema: z.object({
-      currentModel: z.string().nullable(),
-      currentProvider: z.string().nullable(),
-      last: z.object({
-        turn: z.number(),
-        step: z.number(),
-        model: z.string(),
-        buckets: z.object({
-          uncachedInputTokens: z.number(),
-          cacheReadTokens: z.number(),
-          cacheWriteTokens: z.number(),
-          outputTokens: z.number(),
-        }),
-      }).nullable(),
-      byModel: z.record(z.string(), z.object({
-        uncachedInputTokens: z.number(),
-        cacheReadTokens: z.number(),
-        cacheWriteTokens: z.number(),
-        outputTokens: z.number(),
-      })),
-      modelOrder: z.array(z.string()),
-      /** v1.4.0: 本投影所属会话 id —— 子代理汇总要拿它去查 `subagentCatalog`。空串表示未知。 */
-      sessionId: z.string(),
-    }),
-    init: (header) => ({
-      currentModel: null, currentProvider: null, last: null, byModel: {}, modelOrder: [],
-      sessionId: typeof header?.id === 'string' ? header.id : '',
-    }),
-    apply: (state, event) => {
+  const foldUsage = (state, event) => {
       // v1.4.0: `llm/retry-started` 关闭「替换槽位」—— 被重试的那次 attempt 的用量要**留在总量里**,
       // 下一次 attempt 是**新增**而不是替换。与 dsh-token-meter 的 usage-projection 对齐。
       if (event.type === 'llm/retry-started') {
@@ -2027,6 +1990,56 @@ export function makeCostProjection(configOrGetter, services) {
       if (prev !== null) byModel = { ...byModel, [prev.model]: subBuckets(byModel[prev.model] ?? zero(), prev.buckets) }
       byModel = { ...byModel, [model]: addBuckets(byModel[model] ?? zero(), buckets) }
       return { ...state, currentModel: nextModel, currentProvider: nextProvider, last: { turn, step, model, buckets }, byModel, modelOrder: isNewModel ? [...state.modelOrder, model] : state.modelOrder }
+  }
+
+  return {
+    key: 'queryBalanceCost',
+    // 框架要求的投影定义 API: stateSchema(内部状态) + wire.{viewSchema,view}(客户端可见视图)。
+    // 旧版误用顶层 schema+view, 导致 wire 缺失, 服务端 drive 永不通知、客户端永远拿不到值。
+    stateSchema: z.object({
+      currentModel: z.string().nullable(),
+      currentProvider: z.string().nullable(),
+      last: z.object({
+        turn: z.number(),
+        step: z.number(),
+        model: z.string(),
+        buckets: z.object({
+          uncachedInputTokens: z.number(),
+          cacheReadTokens: z.number(),
+          cacheWriteTokens: z.number(),
+          outputTokens: z.number(),
+        }),
+      }).nullable(),
+      byModel: z.record(z.string(), z.object({
+        uncachedInputTokens: z.number(),
+        cacheReadTokens: z.number(),
+        cacheWriteTokens: z.number(),
+        outputTokens: z.number(),
+      })),
+      modelOrder: z.array(z.string()),
+      /** v1.4.0: 本投影所属会话 id —— 子代理汇总要拿它去查 `subagentCatalog`。空串表示未知。 */
+      sessionId: z.string(),
+      inheritedEventCount: z.number().int().nonnegative(),
+      ownBoundaryKnown: z.boolean(),
+      ownChildIds: z.array(z.string()),
+      own: z.object({ currentModel: z.string().nullable(), currentProvider: z.string().nullable(), last: z.any().nullable(), byModel: z.record(z.string(), z.object({ uncachedInputTokens: z.number().nonnegative(), cacheReadTokens: z.number().nonnegative(), cacheWriteTokens: z.number().nonnegative(), outputTokens: z.number().nonnegative() })), modelOrder: z.array(z.string()) }),
+    }),
+    init: (header, inheritedEventCount) => ({
+      currentModel: null, currentProvider: null, last: null, byModel: {}, modelOrder: [],
+      sessionId: typeof header?.id === 'string' ? header.id : '',
+      inheritedEventCount: Number.isSafeInteger(inheritedEventCount) && inheritedEventCount >= 0 ? inheritedEventCount : 0,
+      ownBoundaryKnown: (Number.isSafeInteger(inheritedEventCount) && inheritedEventCount >= 0) || !header?.isSeeded,
+      ownChildIds: [],
+      own: { currentModel: null, currentProvider: null, last: null, byModel: {}, modelOrder: [] },
+    }),
+    apply: (state, event) => {
+      const full = foldUsage(state, event)
+      const isOwn = state.ownBoundaryKnown && (state.inheritedEventCount === 0 || (Number.isSafeInteger(event.seq) && event.seq >= state.inheritedEventCount))
+      // Inherited model context is useful; inherited usage and retry slots are not.
+      const own = isOwn ? foldUsage(state.own, event) : { ...state.own, currentModel: full.currentModel, currentProvider: full.currentProvider }
+      const childId = isOwn && event.type === 'subagent/catalog' ? event.data?.childId : null
+      const ownChildIds = typeof childId === 'string' && !state.ownChildIds.includes(childId) ? [...state.ownChildIds, childId] : state.ownChildIds
+      return { ...full, own, ownChildIds }
     },
     wire: {
       viewSchema: z.object({
@@ -2055,6 +2068,7 @@ export function makeCostProjection(configOrGetter, services) {
           mode: z.enum(['one-shot', 'continuable']),
           createdAt: z.number(),
           cost: z.number(),
+          waiting: z.boolean().optional(),
           costByCurrency: z.record(z.string(), z.number().nonnegative()),
           currencyByModel: z.record(z.string(), z.string()),
           mixedCurrency: z.boolean(),
@@ -2071,7 +2085,7 @@ export function makeCostProjection(configOrGetter, services) {
       const cfg = getConfig()
       const mainCurrency = (cfg.currency ?? 'CNY').toUpperCase()
       // v1.4.0: 子代理消耗 (换行单独展示)。取不到服务/没有子代理 → 空数组。
-      const subagents = collectSubagentCosts(services, state.sessionId, summarize)
+      const subagents = collectSubagentCosts(services, state.sessionId, summarize, state.ownChildIds)
       // 无事件时返回 waiting 标记, 客户端据此显示 "~—" 而非 "~¥0"
       if (state.modelOrder.length === 0) {
         return { models: [], currentModel: state.currentModel ?? null, currentProvider: state.currentProvider ?? null, cost: -1, costByModel: {}, costByCurrency: {}, currencyByModel: {}, mixedCurrency: false, tokens: { uncachedInput: 0, cacheRead: 0, cacheWrite: 0, output: 0 }, tokensByModel: {}, currency: mainCurrency, isPeak: isPeakTime(), waiting: true, subagents }
@@ -2085,7 +2099,7 @@ export function makeCostProjection(configOrGetter, services) {
       }
       },
     },
-    stateVersion: 2,
+    stateVersion: 3,
   }
 }
 

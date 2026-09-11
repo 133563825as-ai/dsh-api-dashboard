@@ -392,7 +392,8 @@ horizontally scrollable container never reach this state at all*）：起手元�
 框架的 `SubagentListEntry.activity` 只有 `'running' | 'inactive'`，注释原文是「`inactive` that it **exists only in persistence**」。子代理跑完（或其 turn 结束）后就不在 `ctx.sessions` 的常驻表里了 —— 这时 `sessions.get()` 返回 undefined，只走热路径会**读不到钱、面板显示 `~—`**（第一版就是这样翻车的，实测踩到）。
 
 **热路径（首选，数据更新鲜）**
-1. `init(header)` 把 `header.id` 存进投影状态的 `sessionId`（**所以 `stateVersion` 是 2**；再改状态字段记得继续 bump）。
+1. `init(header, inheritedEventCount)` 把 `header.id` 存进投影状态的 `sessionId`（子代理汇总要拿它去查 `subagentCatalog`），
+   同时记下 fork 继承边界（见下方第 8 条）。**状态字段一改就要继续 bump `stateVersion`**（现为 **3**）。
 2. `ctx.sessions.get(id)` → `sessionProjections.snapshot(session, ['subagentCatalog'])` 拿**直接子会话列表** —— 顺序就是父会话的 catalog 事件顺序（= 创建顺序），客户端**不重排**。
 3. 每个子会话用 `stateOf(childSession, 'queryBalanceCost')` 取**同一个 unit 的状态**，喂给**同一个 `summarize()`** —— 保证与主板数字口径一致（峰谷 / 原生币种 / 缓存分桶）。
 
@@ -401,13 +402,30 @@ horizontally scrollable container never reach this state at all*）：起手元�
 5. 带 **3 秒 TTL 内存缓存**（`view()` 会随每次投影变化被调用，不能每次读盘）；sessionId 过 `^[A-Za-z0-9._-]{1,128}$` 白名单防路径穿越；坏 JSON / 缺文件 / 形状不符一律**静默返回 null**。
 6. ❌ **别改用框架的 `listChildren()` / `listDescendants()`**：它们确实能处理冷会话（走投影缓存读），但**是 async**，而投影的 `view()` 契约要求**同步**（`ProjectionDefinition` 原文：「All functions MUST be synchronous」）。
 
-**汇总规则**
-7. 孙代理通过子会话自己的 `subagentCatalog` **递归向上汇总**（深度封顶 `SUBAGENT_MAX_DEPTH=4`，行数封顶 `SUBAGENT_MAX_ROWS=12`）。
-8. 全部调用包在 try/catch 里：**取不到服务 / 会话不存在 / 宿主抛异常 → 静默降级**，绝不让子代理汇总拖垮主投影。
+**汇总规则（2026-09-11 维护者反馈后改写，改前必读）**
+7. 子代理那一行**只显示「它自己新产生的消耗」**，两条硬规则：
+   - ❌ **不含继承的父会话历史**。子代理若是 fork 出来的，子会话的日志/投影里带着父会话的全部事件，
+     直接 `summarize(state)` 会把父会话的历史算进这一行 —— 用户实测看到「只用 DeepSeek 的子代理也挂着一笔
+     USD」。所以投影里把状态拆成两份：`byModel`（full，原算法不变，主会话口径）与 `own`（只用
+     `seq >= inheritedEventCount` 的事件折叠）。
+   - ❌ **不含兄弟/后代**。原来的「自身 + 后代递归向上汇总」已**删除**；`subagentCatalog` 里继承来的条目
+     也要按同一把尺子过滤（`ownChildIds`），否则 fork 出来的子会话会把它的兄弟列成自己的子代理。
+8. 边界值来自框架，**不要自己猜**：`ProjectionDefinition.init(header, inheritedEventCount)`
+   （`dsh-session-projection` 的 `buildCell`/`restore` 都传第二个参数）。框架自己的
+   `subagentCatalog` 投影用的就是同一套判据：`if (event.type !== 'subagent/catalog' || event.seq < state.inheritedEventCount) return state`。
+   ⚠️ 拿不到边界（`ownBoundaryKnown` 为假）时**宁可显示等待，也不要退回 full** —— 显示错的数字比不显示更糟。
+9. `stateVersion` 已 bump 到 **3**：v2 的缓存行里没有 `own` 字段，冷路径按版本号识别并当作「等待自身用量」，
+   不做「旧缓存凑合显示」。改状态字段记得继续 bump，并同步 `cachedCostState` 里的版本判断。
+10. 行数封顶 `SUBAGENT_MAX_ROWS=12`。全部调用包在 try/catch 里：**取不到服务 / 会话不存在 / 宿主抛异常 → 静默降级**，
+   绝不让子代理汇总拖垮主投影。`SUBAGENT_MAX_DEPTH` / `mergeSummary` 已随递归汇总一起退役（`mergeSummary` 仍导出、有单测）。
 
 **展示**
-9. 客户端 `buildSubagentRow()`：**固定单行 + 横向滑动**（`flex-wrap:nowrap` + `overflow-x:auto` + 名字截断 72px）。子代理一多就往右滑，**绝不换行** —— 否则会把输入框往上顶。
-10. 完整详情走**自定义长按浮层**（`.dshadb_subtip`，见下条铁律），**不要改回 `title`**。
+11. 客户端 `buildSubagentRow()`：**固定单行 + 横向滑动**（`flex-wrap:nowrap` + `overflow-x:auto` + 名字截断 72px）。子代理一多就往右滑，**绝不换行** —— 否则会把输入框往上顶。
+12. 完整详情走**自定义长按浮层**（`.dshadb_subtip`，见下条铁律），**不要改回 `title`**。
+    ⚠️ 「等待自身用量」（`waiting: true`，wire 里 `cost: -1`）与「真实零消耗」（`cost: 0`）**必须分开**：
+    文案上都是 `~—`，但 tooltip 不同；`buildSubagentRow` 里判断用的是 `f.hasValue`（真实零）与
+    `formatSessionCost` 收到 `waiting` 时返回 `null`（等待）—— **别把 `hasValue` 去掉**，
+    否则零消耗会显示成 `~¥0.00`（`test-bar.mjs` 的「零消耗 → ~—」会挂）。
 
 ⚠️ **主板 `cost` 仍然只含本会话**，子代理在 `view.subagents[]` 里单独给。**别把两者相加成一个数字** —— 会把两种口径混在一起，也违背 v1.3.2「不做汇率折算合并」的既定原则。
 
