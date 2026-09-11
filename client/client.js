@@ -171,6 +171,77 @@ window.__ModuleLoader__.load({
     }
     //#endregion
 
+    //#region 软键盘避让 (v1.5.0-desktop-preview.5)
+    /**
+     * 键盘占掉的高度(px) —— 纯函数, 可单测。
+     *
+     * 背景(第三方验证报告 §2.2 真机实测): 宿主 viewport meta 是
+     * `width=device-width, initial-scale=1, viewport-fit=cover`, **没有** interactive-widget=resizes-content,
+     * 所以键盘弹出时收缩的是 **visual viewport**, layout viewport(100vh / position:fixed) 纹丝不动 ——
+     * 面板原地不动, 底部 26%(242px 键盘 / 630px 面板)被盖住。这一半只能插件自己算。
+     *
+     * 三个守卫, 少一个都会误伤:
+     *   ① scale ≠ 1 → 那是双指缩放, visualViewport 同样会变小, 但不是键盘, 返回 0;
+     *   ② 差值 < 80px → 地址栏/工具条收缩、亚像素抖动, 不动布局(免得面板无端上下跳);
+     *   ③ innerHeight 取布局视口高度, 再减 offsetTop(visual viewport 相对布局视口的偏移)。
+     * @param {{innerHeight:number, vvHeight:number, vvOffsetTop?:number, vvScale?:number}} m
+     * @returns {number} 0 = 没有键盘
+     */
+    function keyboardInset(m) {
+      const innerHeight = m && Number(m.innerHeight);
+      const vvHeight = m && Number(m.vvHeight);
+      if (!Number.isFinite(innerHeight) || !Number.isFinite(vvHeight)) return 0;
+      const scale = Number(m.vvScale);
+      if (Number.isFinite(scale) && Math.abs(scale - 1) > 0.01) return 0;
+      const offsetTop = Number(m.vvOffsetTop);
+      const kb = innerHeight - vvHeight - (Number.isFinite(offsetTop) ? offsetTop : 0);
+      if (!Number.isFinite(kb) || kb < 80) return 0;
+      return Math.min(Math.round(kb), Math.max(0, Math.round(innerHeight)));
+    }
+
+    /**
+     * 把 keyboardInset() 写进 :root 的 --dshadb-kb, CSS 那边据此收窄 + 让位。
+     * 用 rAF 合并高频 resize(键盘动画期间 resize 每帧都来)。
+     * 失败一律静默 —— 没有 visualViewport 的环境(旧内核 / 测试夹具)就当没有键盘, 回到 v1.4.2 行为。
+     * @returns {() => void} dispose
+     */
+    function installKeyboardInsetVar() {
+      if (typeof window === "undefined" || !window.visualViewport || typeof document === "undefined") {
+        return () => {};
+      }
+      const vv = window.visualViewport;
+      const root = document.documentElement;
+      let raf = 0;
+      // 用独立的 pending 标记, 而不是靠 raf 的真假 —— requestAnimationFrame 在测试夹具里可能是
+      // **同步**执行的(调完就已经跑过 apply 了), 那时 `raf = rAF(apply)` 会把 apply 里清掉的 0
+      // 又写回成非 0, 标记就永久卡住、后续 resize 全被吞掉。pending 与 rAF 的同步/异步无关。
+      let pending = false;
+      const apply = () => {
+        pending = false;
+        raf = 0;
+        const kb = keyboardInset({ innerHeight: window.innerHeight, vvHeight: vv.height, vvOffsetTop: vv.offsetTop, vvScale: vv.scale });
+        try {
+          if (kb > 0) root.style.setProperty("--dshadb-kb", kb + "px");
+          else root.style.removeProperty("--dshadb-kb");
+        } catch (e) { /* 属性设置失败不影响功能, 只是退回旧行为 */ }
+      };
+      const schedule = () => {
+        if (pending) return;
+        pending = true;
+        raf = requestAnimationFrame(apply);
+      };
+      apply();
+      vv.addEventListener("resize", schedule);
+      vv.addEventListener("scroll", schedule);
+      return () => {
+        if (raf) cancelAnimationFrame(raf);
+        vv.removeEventListener("resize", schedule);
+        vv.removeEventListener("scroll", schedule);
+        try { root.style.removeProperty("--dshadb-kb"); } catch (e) { /* 忽略 */ }
+      };
+    }
+    //#endregion
+
     //#region styles (A 风格)
     const CSS_ID = "dsh-api-dashboard/styles.css";
     if (typeof document !== "undefined" && document.querySelector('style[data-plugin-css="' + CSS_ID + '"]') === null) {
@@ -219,7 +290,13 @@ window.__ModuleLoader__.load({
 .dshadb_swipeguard{display:block;width:calc(100% + 2px);height:0;pointer-events:none}
 
 /* ===== 抽屉 ===== */
-.dshadb_drawer{position:fixed;left:0;right:0;bottom:0;z-index:99999;max-height:85vh;background:#f5f6f8;border-radius:20px 20px 0 0;box-shadow:0 -8px 32px rgba(0,0,0,0.12);display:flex;flex-direction:column;animation:dshadb-slideup .22s cubic-bezier(.16,1,.3,1);overflow:hidden}
+/* 高度与位置都用 CSS 变量表达, 不再写内联 style:
+     --dshadb-max-h  各面板自己的高度上限(平台详情 70vh / 设置 86vh / 看板 85vh)
+     --dshadb-kb     软键盘占掉的高度(px), 由 client.js 的 keyboardInset() 写到 :root
+   为什么要变量化: 内联 style 优先级高于样式表, 桌面档想改 max-height 就得挂 !important,
+   而 !important 又会挡住「键盘弹出时动态收窄」—— 三个问题一起解决。
+   --dshadb-kb 未定义时回退 0px, 所以手机端(没有键盘事件、JS 也没跑)与 v1.4.2 完全一致。 */
+.dshadb_drawer{position:fixed;left:0;right:0;bottom:var(--dshadb-kb,0px);z-index:99999;max-height:min(var(--dshadb-max-h,85vh),calc(100vh - var(--dshadb-kb,0px) - 12px));background:#f5f6f8;border-radius:20px 20px 0 0;box-shadow:0 -8px 32px rgba(0,0,0,0.12);display:flex;flex-direction:column;animation:dshadb-slideup .22s cubic-bezier(.16,1,.3,1);overflow:hidden;transition:bottom .18s ease-out}
 .dshadb_handle{display:flex;align-items:center;justify-content:center;padding:10px 0 6px;flex:none}
 .dshadb_handle_bar{width:38px;height:4px;border-radius:9px;background:#c9cad0}
 
@@ -256,19 +333,34 @@ window.__ModuleLoader__.load({
      · ≥1024px                → 居中对话框：四角圆角 + 上下留边 + 高度上限（桌面）
    为什么第二个条件是 min-height 而不是只看宽度: 手机横屏(844×390 / 915×412)宽度也过 768,
    一屏才 390px 高, 只按宽度判会在上面摆一个 560px 宽的居中面板 → 那一档必须再要高度。
+   ⚠️ v1.5.0-desktop-preview.5: min-height 后面补了 (pointer:fine) 的**并列分支** ——
+      只按高度会让「宽而矮的鼠标窗口」(1600×599、分屏、台前调度、拉矮的浏览器) 在 599→600 这一像素上
+      从 100vw 通栏直接跳成对话框, 是一道硬悬崖。有精确指针 = 一定不是手机横屏, 可以无条件放行。
+      安全性来自宿主自己的判据: dsh-web-mobile 用 (max-width:1023px) and (pointer: coarse) 认手机
+      (lib/client.js:853), coarse 与 fine 互斥 —— 真机 coarse 命中就说明 fine 不命中, 手机布局碰不到。
    为什么 768 档不用 transform 居中: .dshadb_drawer 带 slideup 动画
    (@keyframes dshadb-slideup: from{transform:translateY(100%)}), 动画会盖掉 transform,
    那一瞬间会横向跳; 所以 768 档只用 margin:auto。
    1024 档要竖着居中就必须用 transform, 所以那一档把动画换成**纯淡入**(dshadb-fadein, 关键帧里没有 transform)。
    ⚠️ min() 里不用再套 calc() —— min(560px, 100vw - 48px) 就是合法写法(lightningcss 规范化后正是这个形态),
-      写成 calc(...) 只是冗余, 不是"不生效"。 */
-@media (min-width:768px) and (min-height:600px){.dshadb_drawer{width:min(560px,100vw - 48px);margin:0 auto;border-radius:22px 22px 0 0}}
-/* 桌面档：居中对话框。max-height 必须带 !important —— 两个抽屉各自用**内联 style** 写死了 70vh / 86vh，
-   而内联样式优先级高于样式表，不加 !important 这条规则根本轮不到生效。 */
+      写成 calc(...) 只是冗余, 不是"不生效"。(键盘那条**必须**用 calc: 它要跟 var 相减。) */
+@media (min-width:768px) and (min-height:600px),(min-width:768px) and (pointer:fine){.dshadb_drawer{width:min(560px,100vw - 48px);margin:0 auto;border-radius:22px 22px 0 0}}
 /* 桌面档：居中对话框 + 卡片两列。
    面板 560 → 720px，平台卡片在 ≥1024px 排成两列 —— 560px 单列在 10 寸以上的屏上左右全是空的。
-   卡片本体自带 margin-bottom:9px（手机上是纵向列表的间距），进网格后必须归零，否则行距翻倍。 */
-@media (min-width:1024px) and (min-height:600px){.dshadb_drawer{top:50%;bottom:auto;transform:translateY(-50%);width:min(720px,100vw - 64px);max-height:min(720px,80vh) !important;border-radius:22px;box-shadow:0 24px 64px rgba(0,0,0,0.22);animation:dshadb-fadein .16s ease-out}.dshadb_cards{display:grid;grid-template-columns:1fr 1fr;gap:9px;align-items:start}.dshadb_cards .dshadb_card{margin-bottom:0}}
+   卡片本体自带 margin-bottom:9px（手机上是纵向列表的间距），进网格后必须归零，否则行距翻倍。
+   ⚠️ v1.5.0-desktop-preview.5 三处修正（第三方验证报告 §2.4/§2.5）：
+     ① margin:0 auto 这一档自己写一份, 不再靠 768 档**跨规则承重** —— 两条同时命中时居中确实是对的,
+        但只要有人按文案给 768 档补个 max-width:1023px(看起来完全合理), 这里就只剩
+        left:0/right:0/width:720px 的过约束, right 被忽略 → 对话框贴左边缘。
+     ② 去掉 !important: 两个抽屉的内联 max-height 已改成 --dshadb-max-h 变量, 没有内联样式要压了。
+        留着它反而会挡住「键盘弹出时按 --dshadb-kb 动态收窄」。
+     ③ 高度/位置都按 --dshadb-kb 让位: 对话框原本在**布局视口**里居中, 键盘弹出后布局视口不变,
+        底部 26%(真机实测 242px 键盘 / 630px 面板)会被盖住。改成在「可视区」里重新居中。 */
+@media (min-width:1024px) and (min-height:600px),(min-width:1024px) and (pointer:fine){.dshadb_drawer{top:calc((100vh - var(--dshadb-kb,0px)) / 2);bottom:auto;transform:translateY(-50%);width:min(720px,100vw - 64px);margin:0 auto;max-height:min(720px,80vh,calc(100vh - var(--dshadb-kb,0px) - 12px));border-radius:22px;box-shadow:0 24px 64px rgba(0,0,0,0.22);animation:dshadb-fadein .16s ease-out}.dshadb_cards{display:grid;grid-template-columns:1fr 1fr;gap:9px;align-items:start}.dshadb_cards .dshadb_card{margin-bottom:0}}
+/* v1.5.0-desktop-preview.5 (报告 §2.8): 下滑把手是**底部抽屉的语汇**, 居中对话框里多余。
+   只在有精确指针时隐藏 —— iPad Pro 横屏(1366×1024)也落进对话框档, 而看板抽屉没有关闭按钮
+   (只有 Esc / 点遮罩), 触摸设备上把手是唯一看得见的关闭抓手, 不能一起收掉。 */
+@media (min-width:1024px) and (pointer:fine){.dshadb_handle{display:none}}
 .dshadb_preview_banner{display:flex;flex-direction:column;gap:2px;margin:0 0 10px;padding:9px 11px;border-radius:12px;background:#fff8e6;border:1px solid #f0d9a0;color:#7a5b12;font-size:11px;font-weight:600;line-height:1.5}
 .dshadb_preview_banner b{font-size:12px;font-weight:800;color:#6b4d06}
 @media (prefers-color-scheme:dark){.dshadb_preview_banner{background:#3a3016;border-color:#6b5a24;color:#f2dfae}.dshadb_preview_banner b{color:#ffe9b0}}
@@ -1257,6 +1349,13 @@ window.__ModuleLoader__.load({
       } else {
         bodyContent = [
           // ⑤ 选中模型置顶 (原deepseek位置)
+          // ⚠️ v1.5.0-desktop-preview.5: 置顶卡**故意**不进 .dshadb_cards 网格 ——
+          //   桌面档下它是满宽 hero(≈692px), 下面分组里的卡是两列(≈336px)。
+          //   这是 2026-09-11 第三方验证报告 §2.1 提的"同一面板并存两种卡片宽度", 经复核判定为**设计**而非缺陷:
+          //     · 报告建议的修法(包进 .dshadb_cards + grid-column:1/-1)跨两列后宽度还是 692px,
+          //       现象一条都没消掉, 只是多了个 wrapper;
+          //     · 真要"一致"就得把它压成 336px 的普通格子, 720px 对话框里的余额卡反而更挤。
+          //   所以这里保持满宽, 并把结论写死: 后人别把它当 bug 反复"修"。
           selectedBalance ? card(selectedBalance) : null,
           selectedBalance ? react.createElement("div", { className: "dshadb_group_divider", key: "div" }) : null,
           // 国内平台 (含deepseek)
@@ -1400,7 +1499,7 @@ window.__ModuleLoader__.load({
       // v0.5.3: 回退为底部抽屉样式 (全屏卡片观感不佳, 复用看板同款 scrim+drawer)
       return react.createElement("div", { className: "dshadb_scrim", onClick: (e) => { if (e.target === e.currentTarget) onClose(); } }, [
         react.createElement("div", { className: "dshadb_swipeguard", "aria-hidden": "true", key: "swipeguard" }),
-        react.createElement("div", { className: "dshadb_drawer", role: "dialog", "aria-label": meta.name, style: { maxHeight: "70vh" }, onClick: (e) => e.stopPropagation(), key: "drawer" }, [
+        react.createElement("div", { className: "dshadb_drawer", role: "dialog", "aria-label": meta.name, style: { "--dshadb-max-h": "70vh" }, onClick: (e) => e.stopPropagation(), key: "drawer" }, [
           react.createElement(SwipeHandle, { onClose, key: "handle" }),
           react.createElement("div", { className: "dshadb_header", key: "header" }, [
             react.createElement("div", { className: "dshadb_header_left", key: "left" }, [
@@ -1949,7 +2048,7 @@ window.__ModuleLoader__.load({
       //    任务还会把 [aria-modal="true"] 里的 [class*="_header"] 搬进 _nav。
       //    （只加 role="dialog" 是安全的：全仓只有 3 处提到 role="dialog"，且唯一条结构规则
       //      `[role="dialog"]:has([data-dsh-market-root]) > nav` 只对插件市场自己的根生效。）
-      const output = react.createElement("div", { className: "dshadb_drawer", role: "dialog", "aria-label": t("settings.title"), style: { maxHeight: "86vh" }, onClick: (e) => e.stopPropagation(), key: "drawer" }, [
+      const output = react.createElement("div", { className: "dshadb_drawer", role: "dialog", "aria-label": t("settings.title"), style: { "--dshadb-max-h": "86vh" }, onClick: (e) => e.stopPropagation(), key: "drawer" }, [
         react.createElement(SwipeHandle, { onClose: onBack || onClose, key: "handle" }),
         react.createElement("div", { className: "dshadb_header", key: "header" }, [
           react.createElement("div", { style: { display: "flex", alignItems: "center", gap: "10px", flex: "1", minWidth: 0 }, key: "leftwrap" }, [
@@ -2730,6 +2829,11 @@ window.__ModuleLoader__.load({
         document.addEventListener("visibilitychange", onVisibility);
         return () => document.removeEventListener("visibilitychange", onVisibility);
       }, "dsh-api-dashboard: visibility resume");
+
+      // v1.5.0-desktop-preview.5: 软键盘避让 —— 把键盘高度写进 :root 的 --dshadb-kb,
+      // 面板据此收窄并在可视区里重新居中/上移(报告 §2.2 真机实测: 键盘 242px, 盖住面板 26%)。
+      // 注册在插件级而不是某个抽屉里: 三个抽屉共用同一个变量, 也免得抽屉开关时反复装卸监听。
+      ctx.effect(() => installKeyboardInsetVar(), "dsh-api-dashboard: 软键盘避让");
     }
     //#endregion
 

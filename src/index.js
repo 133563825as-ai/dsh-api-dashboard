@@ -156,7 +156,12 @@ const TARBALL_URL = `https://codeload.github.com/${REPO_OWNER}/${REPO_NAME}/tar.
  */
 export function semverCompare(a, b) {
   const parse = (v) => {
-    const m = String(v ?? '').trim().match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?/)
+    // v1.5.0-desktop-preview.5 (报告 §2.7): 剥掉前导 `v`。
+    // semver.valid('v1.5.0') 为真, 而本函数原正则 /^(\d+)\.(\d+)\.(\d+)/ 会把 'v1.5.0' 当成 0.0.0 ——
+    // 当前不可达(远端版本取自 package.json.version, 不带 v), 但本仓库的 release tag 是带 v 的
+    // (App 侧更新器就专门做了 removeprefix('v'))。将来若有人把 tag 名喂进来, 会静默判成"没有更新"。
+    // 只认小写 v: 与 semver 包本身一致(它的正则就是 ^v?...), 大写 V 仍按非法处理。
+    const m = String(v ?? '').trim().replace(/^v/, '').match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?/)
     if (!m) return null
     return { main: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] ? m[4].split('.') : null }
   }
@@ -251,6 +256,8 @@ export async function applyUpdate({ targets = null, timeoutMs = 30000, remoteVer
       throw new Error(`refusing to update a symbolic-link target: ${dir} (use its real path instead)`)
     }
   }
+  // 报告 §2.6: 与宿主插件管理器抢同一个目录时的互斥 —— **尽力而为**, 见 assertHostLockFree 的说明。
+  assertHostLockFree()
 
   // 1) 下载 tarball 到临时文件
   const tmpBase = join(tmpdir(), `dshadb-update-${Date.now()}`)
@@ -318,6 +325,47 @@ export async function applyUpdate({ targets = null, timeoutMs = 30000, remoteVer
 /** 安全取真实路径: 不存在返回 null */
 function realPathSafe(p) {
   try { return realpathSync(p) } catch { return null }
+}
+
+/**
+ * 宿主插件管理器的互斥锁文件路径。
+ * 宿主(DSHA 的 plugin-manager / startup-recovery / register-builtin)所有「插件清单写入」都走
+ * register-builtin-plugins.py 的 operation_lock() —— 那把锁是 Python 的
+ * `fcntl.flock(<数据根>/.dsha-data.lock)`, 而数据根是 DSH_HOME 的**父目录**
+ * (源码注释: "锁放在 .dsh 外, 恢复整个 .dsh 时不会换掉正在使用的锁 inode")。
+ * @returns {string}
+ */
+function hostLockPath() {
+  const dshHome = process.env.DSH_HOME || join(homedir(), '.dsh')
+  return join(dirname(dshHome), '.dsha-data.lock')
+}
+
+/**
+ * 交换前探一次宿主锁, 探测到被占就中止 —— 报告 §2.6「两套更新器没有互斥」。
+ *
+ * ⚠️ 这是**尽力而为**, 不是真互斥, 别把它当锁用:
+ *   · Node 没有 flock API(只有 fs 的句柄, 没有 flock), 插件**无法持有**宿主那把 fcntl 锁 ——
+ *     报告建议的"复用宿主锁"在纯 Node 里做不到, 除非 spawn 一个长期持有锁的子进程。
+ *   · 所以只能"探一次": 把窗口从**整个交换过程**(下载 + 解压 + 备份 + 删旧 + 拷新, 数秒)
+ *     缩到"探测到动手"之间的毫秒级。真撞上了仍然可能互相踩。
+ *   · 反向的误报也存在: 宿主保存"版本检查结果"时也会短暂持锁, 那一刻点更新会被拒。
+ *     这种误报是可接受的(提示用户稍后重试), 比目录被写坏好。
+ * 探测用 flock(1): `flock -n <file> true` → exit 0 = 空闲, exit 1 = 被占。
+ * flock 不存在 / 锁文件不存在(非 DSHA 环境) → 直接放行, 绝不因为探测失败挡住更新。
+ * @param {string} [lockPath] 测试注入口
+ */
+export function assertHostLockFree(lockPath = null) {
+  if (process.platform === 'win32') return
+  const file = lockPath || hostLockPath()
+  if (!existsSync(file)) return
+  try {
+    execFileSync('flock', ['-n', file, 'true'], { timeout: 3000, stdio: 'ignore' })
+  } catch (err) {
+    // 只有"锁被别人占着"(exit 1)才拦截; ENOENT(没有 flock 命令)/超时/其它一律放行
+    if (err && err.status === 1) {
+      throw new Error('宿主的插件管理器正在操作(清单锁被占用), 请稍后重试')
+    }
+  }
 }
 
 /** 安全列目录: 不存在/不可读返回空数组 */

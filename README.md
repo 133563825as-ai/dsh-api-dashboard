@@ -17,6 +17,15 @@
 > | < 768px 宽，或高 < 600px（手机竖屏 / **手机横屏**） | 原样全宽底部抽屉 —— 与 v1.4.2 **完全一致** |
 > | 768–1023px 宽且高 ≥ 600px（平板竖屏 / 窄窗口） | **居中 560px 面板** |
 > | ≥ 1024px 宽且高 ≥ 600px（桌面 / 平板横屏） | **居中对话框**：四角圆角 + 上下留边 + `max-height:min(720px,80vh)`，**面板 720px 宽、平台卡片两列** |
+> | 任意尺寸 + `pointer:fine`（接了鼠标的窗口） | 同上第二条宽度档 —— 宽而矮的窗口不再掉回全宽通栏 |
+>
+> ⚠️ 上面三档的「高 ≥ 600px」只在**触摸设备**上是硬门槛（挡手机横屏）。带精确指针的窗口
+> （分屏、台前调度、拉矮的浏览器）按宽度分档：1600×599 与 1600×600 得到同一种形态，
+> 不会在 1 像素上从通栏跳成对话框。安全性依据：宿主自己用 `(pointer: coarse)` 认手机
+> （`dsh-web-mobile` 的 `MOBILE_QUERY`），coarse 与 fine 互斥，所以这条分支碰不到手机。
+>
+> 键盘弹出时面板会按 `visualViewport` 收窄并在可视区里重新居中/上移（宿主 viewport meta 没有
+> `interactive-widget=resizes-content`，`vh` 不随键盘收缩，这一半只能插件自己算）。
 >
 > 逻辑一行没动。三个抽屉补了 `role="dialog"` + `aria-label`（无障碍），但**刻意不加
 > `aria-modal="true"`** —— 手机壳把带这个属性的元素当自家对话框，有 46 条以其为前缀的结构性 CSS
@@ -149,7 +158,7 @@ dsh plugin --profile web add link:/root/dsha-api-dashboard
 
 ## 更新日志
 
-最近一版 **v1.4.2**（本分支为预发行 `v1.5.0-desktop-preview.4`）—— DeepSeek 多币种钱包读取修复 + 桌面/平板适配预览。一版一行的完整历史见 [`CHANGELOG.md`](CHANGELOG.md)。
+最近一版 **v1.4.2**（本分支为预发行 `v1.5.0-desktop-preview.5`）—— DeepSeek 多币种钱包读取修复 + 桌面/平板适配预览。一版一行的完整历史见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## License
 

@@ -46,18 +46,29 @@ a('依赖仍然为空 (零依赖是硬约束)',
 // —— 断言的是「768×1024 得到居中面板、1024×768 得到居中对话框、844×390 还是手机全宽」
 // 这种**行为**, 而不是「源码里有某个字符串」。改断点数值时, 矩阵会立刻指出谁的观感被改了。
 // 每一档写成一行 `@media (min-width:...){...}`，所以按行切最稳（块里有嵌套花括号，正则贪心到行尾才完整）
+// ⚠️ preview.5 起每条断点可以有**多个并列条件**(逗号分隔的 OR)，因为补了 `(pointer:fine)` 分支：
+//    `(min-width:768px) and (min-height:600px),(min-width:768px) and (pointer:fine)`
+//    所以这里解出 conds[] 而不是单个 minW/minH —— 矩阵求值时任一条件命中即算命中。
+//    同时只收「body 里真的出现 .dshadb_drawer」的媒体查询，免得把纯 .dshadb_handle 那条也算成一档。
+const parseCond = (c) => ({
+  minW: Number((c.match(/min-width:\s*(\d+)px/) || [])[1] || 0),
+  minH: Number((c.match(/min-height:\s*(\d+)px/) || [])[1] || 0),
+  fine: /pointer:\s*fine/.test(c),
+})
 const TIERS = cli.split('\n')
   .map((l) => l.trim())
   .filter((l) => l.startsWith('@media (min-width:'))
   .map((line) => {
     const m = line.match(/^@media\s+([^{]+)\{([\s\S]*)\}\s*$/)
     const cond = m ? m[1].trim() : '', body = m ? m[2] : ''
+    const conds = cond ? cond.split(',').map((c) => parseCond(c)) : []
     return {
-      cond, body,
-      minW: Number((cond.match(/min-width:\s*(\d+)px/) || [])[1] || 0),
-      minH: Number((cond.match(/min-height:\s*(\d+)px/) || [])[1] || 0),
+      cond, body, conds,
+      minW: conds.length ? conds[0].minW : 0,
+      minH: conds.length ? conds[0].minH : 0,
     }
   })
+  .filter((t) => t.body.includes('.dshadb_drawer'))
   .sort((x, y) => x.minW - y.minW)
 a('抽屉上挂着多条尺寸断点 (手机 / 平板 / 桌面三档)', TIERS.length >= 2, `tiers=${TIERS.length}`)
 const sheet = TIERS.find((t) => t.minW === 768)
@@ -68,8 +79,8 @@ a('最窄的那一档限宽 (.dshadb_drawer + width:min(...); 更宽的档继承
   sheet ? /width\s*:\s*min\(/.test(sheet.body) : false)
 a('最窄的那一档用 margin auto 横向居中 (更宽的档继承它)',
   sheet ? /margin\s*:\s*0\s+auto/.test(sheet.body) : false)
-a('这两档断点里不许留冗余的 calc() (min() 里可以直接写 100vw - 48px)',
-  TIERS.every((t) => !/calc\(/.test(t.body)))
+a('这两档断点里 width:min() 不许套冗余的 calc() (min() 里可以直接写 100vw - 48px)',
+  TIERS.every((t) => !/width\s*:\s*min\([^)]*calc\(/.test(t.body)))
 a('min() 里的算式确实没写 calc 也照样是合法写法 (lightningcss 规范化后的形态)',
   /width\s*:\s*min\(560px,\s*100vw\s*-\s*48px\)/.test(sheet ? sheet.body : ''))
 a('平板档不许用 transform 居中 (会被 slideup 动画覆盖 → 开面板横向跳动)',
@@ -81,11 +92,30 @@ a('桌面档因此必须换掉带 transform 的入场动画, 改用纯淡入',
   dialog ? /animation\s*:\s*dshadb-fadein/.test(dialog.body) : false)
 a('fadein 关键帧里确实没有 transform (换动画才安全)',
   /@keyframes dshadb-fadein\s*\{\s*from\s*\{\s*opacity:0\s*\}\s*to\s*\{\s*opacity:1\s*\}\s*\}/.test(cli))
-a('桌面档给了高度上限 min(720px,80vh)', dialog ? /max-height\s*:\s*min\(720px,\s*80vh\)/.test(dialog.body) : false)
-a('桌面档的 max-height 带 !important (否则被内联 style 的 70vh/86vh 盖掉)',
-  dialog ? /max-height\s*:\s*min\(720px,\s*80vh\)\s*!important/.test(dialog.body) : false)
-a('两个抽屉的内联 max-height 确实还在 (所以 !important 是必需的, 不是随手加的)',
-  (cli.match(/style: \{ maxHeight: "\d+vh" \}/g) || []).length === 2)
+a('桌面档给了高度上限 min(720px,80vh,...)', dialog ? /max-height\s*:\s*min\(720px,\s*80vh/.test(dialog.body) : false)
+
+// --- v1.5.0-desktop-preview.5 (报告 §2.5): 内联 max-height → CSS 变量, !important 退场 ---
+// 旧形态是「两个抽屉内联 style 写死 70vh/86vh → 桌面档必须挂 !important 才压得住」。
+// 三个后果: ① 各档行为不一致且没写进变更记录; ② 键盘动态 max-height 会先撞上自己的 !important。
+// 现在高度走 --dshadb-max-h, 内联样式没了, !important 也就不需要了。
+a('两个抽屉都改用 --dshadb-max-h 变量表达高度 (内联 maxHeight 必须为 0 处)',
+  (cli.match(/style: \{ maxHeight: "\d+vh" \}/g) || []).length === 0 &&
+  (cli.match(/"--dshadb-max-h":\s*"\d+vh"/g) || []).length === 2,
+  `内联=${(cli.match(/style: \{ maxHeight: "\d+vh" \}/g) || []).length} 变量=${(cli.match(/"--dshadb-max-h":\s*"\d+vh"/g) || []).length}`)
+a('平台详情与设置各自的高度值没被改动 (70vh / 86vh, 与 v1.4.2 一致)',
+  /"--dshadb-max-h":\s*"70vh"/.test(cli) && /"--dshadb-max-h":\s*"86vh"/.test(cli))
+a('基础 .dshadb_drawer 用 var(--dshadb-max-h, 85vh) 兜底 (看板面板没设变量 → 仍是 85vh)',
+  /max-height\s*:\s*min\(var\(--dshadb-max-h,\s*85vh\)/.test(cli))
+a('桌面档不再需要 !important (没有任何声明还带它 —— 注释里提到不算)',
+  !/!important\s*[;}]/.test(cli))
+a('说明里写清了「!important 会挡住键盘动态收窄」这个理由',
+  cli.includes('--dshadb-max-h') && /!important 又会挡住/.test(cli))
+
+// --- v1.5.0-desktop-preview.5 (报告 §2.4): 居中不许跨规则承重 ---
+a('桌面档自己写了一份 margin:0 auto (不再靠 768 档跨规则承重)',
+  dialog ? /margin\s*:\s*0\s+auto/.test(dialog.body) : false)
+a('说明里写清了「哪天给 768 档补 max-width 就会贴左边缘」这个风险',
+  /对话框贴左边缘/.test(cli))
 
 // --- 评审第 ② 条「平板空间利用率」的中间档: 桌面档加宽面板 + 卡片两列 ---
 a('桌面档把面板加宽到 720px (560px 单列在 10 寸以上左右全是空的)',
@@ -99,41 +129,115 @@ a('平板/手机档不许动卡片布局 (两列只在桌面档出现)',
   sheet ? !/dshadb_cards/.test(sheet.body) : false)
 a('网格容器用 align-items:start (卡片高度不一时不被拉平)',
   dialog ? /\.dshadb_cards\s*\{[^}]*align-items:start/.test(dialog.body) : false)
+// --- v1.5.0-desktop-preview.5 (报告 §2.1): 置顶卡满宽是**设计**, 不是待修的缺陷 ---
+// 报告说「同一面板并存两种卡片宽度」并给出修法「包进 .dshadb_cards + grid-column:1/-1」——
+// 跨两列后宽度还是 692px, 现象一条都没消掉。真"一致"就得把它压成 336px 的普通格子, 720px 对话框里反而更挤。
+// 所以结论写进注释, 免得后人反复"修"。
+a('置顶卡仍然是满宽 hero (没被改成普通网格格子)',
+  /selectedBalance \? card\(selectedBalance\) : null,/.test(cli))
+a('注释里写死了「故意不进网格」+ 为什么报告的修法无效 (免得后人反复修)',
+  /置顶卡\*\*故意\*\*不进 \.dshadb_cards 网格/.test(cli) && /grid-column:1\/-1/.test(cli) && /现象一条都没消掉/.test(cli))
 a('抽屉本体仍带 dshadb_drawer 类名 (断点才有东西可作用)',
   cli.includes('className: "dshadb_drawer"'))
 a('手机端不受影响: 断点条件是 min-width/min-height, 没有 max-width 反写',
   !/@media\s*\(max-width/.test(cli))
-a('每一档都同时约束高度 (挡手机横屏的唯一办法)',
-  TIERS.every((t) => t.minH >= 500), TIERS.map((t) => t.minH).join('/'))
+// preview.5 起「挡手机横屏」有两条路: 要么限高度(min-height:600px), 要么要精确指针(pointer:fine)。
+// 两者都没有 = 无条件的手机档 —— 那是不允许的(会把手机也套进居中面板)。
+a('每一档都同时约束高度, 或者要求精确指针 (挡手机横屏的两条路至少走一条)',
+  TIERS.every((t) => t.conds.every((c) => c.minH >= 500 || c.fine)),
+  TIERS.map((t) => t.cond).join(' | '))
 
-// 真实设备矩阵: [设备, 宽, 高, 期望形态]
-const layoutFor = (w, h) => {
-  const hit = TIERS.filter((t) => (!t.minW || w >= t.minW) && (!t.minH || h >= t.minH)).pop()
+// --- v1.5.0-desktop-preview.5 (报告 §2.3): 宽而矮的鼠标窗口不再掉回通栏 ---
+a('两档都补了 (pointer:fine) 并列分支 (报告 §2.3 的 600px 硬悬崖)',
+  !!(sheet && sheet.conds.some((c) => c.fine)) && !!(dialog && dialog.conds.some((c) => c.fine)))
+a('(pointer:fine) 分支不带 min-height (有精确指针就一定是窗口, 不是手机横屏)',
+  [...sheet.conds, ...dialog.conds].filter((c) => c.fine).every((c) => c.minH === 0))
+a('安全性依据写在注释里: 宿主自己用 (pointer: coarse) 认手机 (coarse/fine 互斥, 不会误伤手机)',
+  /coarse 与 fine 互斥/.test(cli) && /pointer: coarse\) 认手机/.test(cli))
+
+// 真实设备矩阵: [设备, 宽, 高, 期望形态, 是否精确指针(默认 false = 触摸)]
+// 求值: 任一并列条件命中即算命中该档; 都没命中 → 手机全宽。
+const layoutFor = (w, h, fine = false) => {
+  const hit = TIERS.filter((t) => t.conds.some((c) =>
+    (!c.minW || w >= c.minW) && (!c.minH || h >= c.minH) && (!c.fine || fine))).pop()
   if (!hit) return 'phone'
   return /translateY\(-50%\)/.test(hit.body) ? 'dialog' : 'sheet'
 }
 const DEVICES = [
-  ['iPhone 14 竖屏', 390, 844, 'phone'],
-  ['iPhone 14 横屏', 844, 390, 'phone'],   // 宽过 768 但很矮 —— 必须仍走手机全宽
-  ['Pixel 7 横屏', 915, 412, 'phone'],
-  ['小安卓平板 竖屏', 600, 960, 'phone'],   // 没到 768, 手机形态
-  ['iPad mini 竖屏', 768, 1024, 'sheet'],  // 768 正好卡在门槛上
-  ['iPad 10.9 竖屏', 820, 1180, 'sheet'],
-  ['安卓平板 竖屏', 800, 1280, 'sheet'],
-  ['1023×700 窄窗口', 1023, 700, 'sheet'], // 宿主手机壳 MOBILE_QUERY 的上界, 差 1px
-  ['iPad mini 横屏', 1024, 768, 'dialog'],
-  ['iPad 10.9 横屏', 1180, 820, 'dialog'],
-  ['iPad Pro 12.9 竖屏', 1024, 1366, 'dialog'],
-  ['iPad Pro 12.9 横屏', 1366, 1024, 'dialog'],
-  ['安卓平板 横屏', 1280, 800, 'dialog'],
-  ['笔记本 1366×768', 1366, 768, 'dialog'],
-  ['台式 1920×1080', 1920, 1080, 'dialog'],
+  ['iPhone 14 竖屏', 390, 844, 'phone', false],
+  ['iPhone 14 横屏', 844, 390, 'phone', false],   // 宽过 768 但很矮 —— 必须仍走手机全宽
+  ['Pixel 7 横屏', 915, 412, 'phone', false],
+  ['小安卓平板 竖屏', 600, 960, 'phone', false],   // 没到 768, 手机形态
+  ['iPad mini 竖屏', 768, 1024, 'sheet', false],  // 768 正好卡在门槛上
+  ['iPad 10.9 竖屏', 820, 1180, 'sheet', false],
+  ['安卓平板 竖屏', 800, 1280, 'sheet', false],
+  ['1023×700 窄窗口', 1023, 700, 'sheet', false], // 宿主手机壳 MOBILE_QUERY 的上界, 差 1px
+  ['iPad mini 横屏', 1024, 768, 'dialog', false],
+  ['iPad 10.9 横屏', 1180, 820, 'dialog', false],
+  ['iPad Pro 12.9 竖屏', 1024, 1366, 'dialog', false],
+  ['iPad Pro 12.9 横屏', 1366, 1024, 'dialog', false],
+  ['安卓平板 横屏', 1280, 800, 'dialog', false],
+  ['笔记本 1366×768', 1366, 768, 'dialog', false],
+  ['台式 1920×1080', 1920, 1080, 'dialog', false],
+  // ↓ 报告 §2.3 的悬崖: 同宽同设备, 只差 1px 高度
+  ['鼠标窗口 1600×600', 1600, 600, 'dialog', true],
+  ['鼠标窗口 1600×599', 1600, 599, 'dialog', true],  // 旧代码这里是 100vw 通栏
+  ['鼠标窗口 1200×560', 1200, 560, 'dialog', true],
+  ['鼠标窗口 1100×520', 1100, 520, 'dialog', true],
+  ['窄而矮的鼠标窗口 700×500', 700, 500, 'phone', true], // 没过 768, 仍然是手机形态
+  ['触摸平板竖屏 800×1280 (无鼠标)', 800, 1280, 'sheet', false],
 ]
 const LAYOUT_LABEL = { phone: '手机全宽', sheet: '居中 560px 面板', dialog: '居中对话框' }
-for (const [name, w, h, want] of DEVICES) {
-  const got = layoutFor(w, h)
-  a(`${name} (${w}×${h}) → ${LAYOUT_LABEL[want]}`, got === want, `实际=${LAYOUT_LABEL[got] || got}`)
+for (const [name, w, h, want, fine] of DEVICES) {
+  const got = layoutFor(w, h, fine)
+  a(`${name} (${w}×${h}${fine ? ', 精确指针' : ''}) → ${LAYOUT_LABEL[want]}`, got === want, `实际=${LAYOUT_LABEL[got] || got}`)
 }
+// 悬崖本身: 599 → 600 必须同形, 不能一个通栏一个对话框
+a('悬崖已消除: 1600×599 与 1600×600 得到同一种形态 (旧代码 599 掉回通栏)',
+  layoutFor(1600, 599, true) === layoutFor(1600, 600, true))
+a('悬崖只在「有精确指针」时被抹平 —— 触摸的 844×390 仍然必须是手机全宽',
+  layoutFor(844, 390, false) === 'phone' && layoutFor(844, 390, true) === 'sheet')
+
+// ==========================================================================
+// ②c v1.5.0-desktop-preview.5 (报告 §2.2): 软键盘避让
+//   宿主 viewport meta 没有 interactive-widget=resizes-content → 键盘只收缩 visual viewport,
+//   layout viewport(100vh / position:fixed) 不动 → 面板原地不动, 底部被盖住(真机实测 242px / 630px = 26%)。
+//   ⚠️ 报告建议的 "只加 max-height: min(720px, calc(var(--vvh) - 24px))" **不够** —— 面板还是贴底边,
+//      必须连锚点一起改, 所以这里把三处(抽屉 bottom / 对话框 top / 两处 max-height)都钉住。
+// ==========================================================================
+const nos = cli.replace(/\s+/g, '')
+a('基础抽屉按 --dshadb-kb 抬底 (抽屉档: 面板整体升到键盘上方)',
+  /\.dshadb_drawer\{[^}]*bottom:var\(--dshadb-kb,0px\)/.test(nos))
+a('基础抽屉的 max-height 也跟着键盘收窄 (否则抬上去的仍是超高面板)',
+  /max-height:min\(var\(--dshadb-max-h,85vh\),calc\(100vh-var\(--dshadb-kb,0px\)-12px\)\)/.test(nos))
+a('桌面档改在「可视区」里重新居中, 而不是布局视口的 50%',
+  dialog ? /top:calc\(\(100vh-var\(--dshadb-kb,0px\)\)\/2\)/.test(dialog.body.replace(/\s+/g, '')) : false)
+a('桌面档 max-height 是三项 min(), 第三项按键盘收窄',
+  dialog ? /max-height:min\(720px,80vh,calc\(100vh-var\(--dshadb-kb,0px\)-12px\)\)/.test(dialog.body.replace(/\s+/g, '')) : false)
+a('抬底带过渡 (键盘弹出时不硬跳)',
+  /transition:bottom\.18sease-out/.test(nos))
+a('客户端把键盘高度写进 --dshadb-kb (纯函数 + 安装器)',
+  /function keyboardInset\(m\)/.test(cli) && /function installKeyboardInsetVar\(\)/.test(cli) &&
+  /setProperty\("--dshadb-kb"/.test(cli) && /removeProperty\("--dshadb-kb"\)/.test(cli))
+a('监听 visualViewport 的 resize + scroll (键盘弹出/收起/偏移都覆盖)',
+  /vv\.addEventListener\("resize", schedule\)/.test(cli) && /vv\.addEventListener\("scroll", schedule\)/.test(cli))
+a('用 rAF 合并高频 resize (键盘动画期间每帧都来), 且 pending 标记不依赖 rAF 的同步/异步',
+  /if \(pending\) return;/.test(cli) && /raf = requestAnimationFrame\(apply\)/.test(cli) &&
+  /pending 与 rAF 的同步\/异步无关/.test(cli))
+a('插件级注册一次 (三个抽屉共用, 不随抽屉开关反复装卸)',
+  /ctx\.effect\(\(\) => installKeyboardInsetVar\(\), "dsh-api-dashboard: 软键盘避让"\)/.test(cli))
+a('没有 visualViewport 的环境静默退回 v1.4.2 行为 (不报错、不改变布局)',
+  /!window\.visualViewport/.test(cli) && /return \(\) => \{\};/.test(cli))
+a('说明了为什么必须自己算 (宿主 viewport meta 没有 interactive-widget)',
+  /interactive-widget=resizes-content/.test(cli))
+
+// --- v1.5.0-desktop-preview.5 (报告 §2.8): 居中对话框里的下滑把手 ---
+const ptrTier = cli.split('\n').map((l) => l.trim())
+  .filter((l) => l.startsWith('@media (min-width:1024px) and (pointer:fine)'))[0] || ''
+a('桌面档(精确指针)隐藏下滑把手 (抽屉语汇在对话框里多余)',
+  /\.dshadb_handle\{display:none\}/.test(ptrTier))
+a('隐藏把手**只**对精确指针生效 —— 触摸的 iPad 横屏(1366×1024)也在这档里, 而看板抽屉没有关闭按钮, 把手是唯一看得见的抓手',
+  !/min-height:600px\)[^\n]*dshadb_handle\{display:none\}/.test(cli) && /pointer:fine\)\{\.dshadb_handle\{display:none\}/.test(cli))
 
 // ==========================================================================
 // ②b 无障碍: 只加 role="dialog", 绝不加 aria-modal (手机壳红线)
@@ -152,7 +256,7 @@ a('源码里留了「为什么不用 aria-modal」的说明 (免得后人"顺手
 // ==========================================================================
 // ③ 预览标识: 服务端下发 + 客户端只在 preview 为真时渲染
 // ==========================================================================
-const { semverCompare, UPDATE_REF, PREVIEW_CHANNEL } = await import(new URL('../src/index.js', import.meta.url).pathname + '?v=' + Date.now())
+const { semverCompare, UPDATE_REF, PREVIEW_CHANNEL, assertHostLockFree } = await import(new URL('../src/index.js', import.meta.url).pathname + '?v=' + Date.now())
 a('semverCompare: 预发行版本号仍能比较 (1.5.0-… > 1.4.2)',
   semverCompare('1.5.0-desktop-preview.1', '1.4.2') === 1)
 a('semverCompare: 预发行 < 同版本号的正式版 (semver §11, 否则预览版会被当成"已是最新")',
@@ -176,6 +280,23 @@ a('semverCompare: 标识符少的那串更小 (1.5.0-a < 1.5.0-a.1)',
 a('semverCompare: 相同版本仍相等 (不误报更新)', semverCompare('1.5.0-preview.4', '1.5.0-preview.4') === 0)
 a('semverCompare: 主版本号优先于预发布 (1.6.0-a > 1.5.9)',
   semverCompare('1.6.0-a', '1.5.9') === 1)
+
+// --- v1.5.0-desktop-preview.5 (报告 §2.7): 前导 v ---
+// semver.valid('v1.5.0') 为真, 而旧正则 ^(\d+)\.(\d+)\.(\d+) 会把 'v1.5.0' 当成 0.0.0。
+// 当前不可达(远端版本取自 package.json.version, 不带 v), 但本仓库 release tag 是带 v 的 ——
+// 将来若有人把 tag 名喂进来, 会静默判成"没有更新"。
+a('semverCompare: 认前导 v (v1.5.0 == 1.5.0)',
+  semverCompare('v1.5.0', '1.5.0') === 0)
+a('semverCompare: v1.5.0 > v1.4.2 (带 v 不再退化成 0.0.0)',
+  semverCompare('v1.5.0', 'v1.4.2') === 1)
+a('semverCompare: 带 v 的预发布也正确 (v1.5.0-preview.5 > v1.5.0-preview.4)',
+  semverCompare('v1.5.0-desktop-preview.5', 'v1.5.0-desktop-preview.4') === 1)
+a('semverCompare: 带 v 与不带 v 混比一致 (v1.5.0-preview.5 > 1.5.0-preview.4)',
+  semverCompare('v1.5.0-desktop-preview.5', '1.5.0-desktop-preview.4') === 1)
+a('semverCompare: 前后空白也认 (v 与 trim 一起处理)',
+  semverCompare('  v1.5.0  ', '1.5.0') === 0)
+a('semverCompare: 大写 V 仍按非法处理 (与 semver 包本身一致, 它的正则只认小写 v)',
+  semverCompare('V1.5.0', '0.0.0') === 0 && semverCompare('V1.5.0', '1.5.0') === -1)
 
 a('package.json 声明了更新频道 dsh.updateRef',
   pkg.dsh && pkg.dsh.updateRef === 'preview/desktop', JSON.stringify(pkg.dsh && pkg.dsh.updateRef))
@@ -258,6 +379,48 @@ a('publish.yml 的发布步骤挂了守卫条件',
 a('守卫用「版本号里有没有 -」判定预发行',
   /case "\$PKG" in\s*\n\s*\*-\*\)/.test(wf))
 a('守卫对正式版本仍放行 (skip=false 分支存在)', /skip=false/.test(wf))
+
+// ==========================================================================
+// ⑦ v1.5.0-desktop-preview.5 (报告 §2.6): 与宿主插件管理器的互斥 —— **尽力而为**
+//   宿主那把锁是 Python 的 fcntl.flock(<DSH_HOME 的父目录>/.dsha-data.lock)
+//   (register-builtin-plugins.py 的 operation_lock)。Node 没有 flock API, 插件**无法持有**它,
+//   所以只能"交换前探一次"。这里钉的是「探测本身可靠 + 探测失败绝不挡住更新」这两件事。
+// ==========================================================================
+const os = await import('node:os')
+const { spawn, execFileSync } = await import('node:child_process')
+a('applyUpdate 在交换前真的调用了预检 (不是只在测试里存在)',
+  /^  assertHostLockFree\(\)$/m.test(src))
+a('预检从 DSH_HOME 的父目录取锁 (与宿主 operation_lock 的 data_root 一致)',
+  /function hostLockPath\(\)/.test(src) && /process\.env\.DSH_HOME \|\| join\(homedir\(\), '\.dsh'\)/.test(src) &&
+  /join\(dirname\(dshHome\), '\.dsha-data\.lock'\)/.test(src))
+a('说明里写清了这不是真互斥 (Node 没有 flock, 无法持有宿主锁)',
+  /Node 没有 flock API/.test(src) && /尽力而为/.test(src) && /毫秒级/.test(src))
+
+const lockDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dshadb-lock-'))
+const lockFile = path.join(lockDir, '.dsha-data.lock')
+fs.writeFileSync(lockFile, '')
+const tryLock = (p) => { try { assertHostLockFree(p); return '' } catch (e) { return e.message } }
+a('锁空闲时放行', tryLock(lockFile) === '')
+a('锁文件不存在时放行 (非 DSHA 环境不因为探测失败挡住更新)',
+  tryLock(path.join(lockDir, 'nope.lock')) === '')
+
+let hasFlock = true
+try { execFileSync('flock', ['--version'], { stdio: 'ignore' }) } catch { hasFlock = false }
+if (hasFlock) {
+  const holder = spawn('flock', [lockFile, 'sleep', '10'], { stdio: 'ignore' })
+  let held = false
+  for (let i = 0; i < 100 && !held; i++) {
+    try { execFileSync('flock', ['-n', lockFile, 'true'], { stdio: 'ignore' }); await new Promise((r) => setTimeout(r, 20)) }
+    catch (e) { if (e && e.status === 1) held = true }
+  }
+  a('测试前置: 宿主锁确实被另一个进程占住了', held)
+  const msg = tryLock(lockFile)
+  a('锁被占时抛错拦截 (提示稍后重试, 而不是硬写坏目录)', /宿主/.test(msg) && /稍后重试/.test(msg), msg)
+  holder.kill('SIGKILL')
+} else {
+  console.log('注意: 本机没有 flock(1), 跳过"锁被占"两条 (探测失败时插件按放行处理, 这是设计)')
+}
+fs.rmSync(lockDir, { recursive: true, force: true })
 
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`)
 if (fail > 0) process.exitCode = 1

@@ -4,6 +4,15 @@
 
 ## v1.x
 
+- **v1.5.0-desktop-preview.5**（🧪 预发行，非正式版）— 响应第三方真机验证报告（对 `preview.4` 逐条复核后：6 条属实、1 条修法无效、1 条在 Node 里做不到真修）：
+  **① 软键盘避让**（§2.2，实测键盘 242px、盖住面板 26%）—— 宿主 viewport meta 没有 `interactive-widget=resizes-content`，键盘只收缩 visual viewport、`vh` 与 `position:fixed` 纹丝不动，所以插件自己算：`keyboardInset()` 把键盘高度写进 `:root` 的 `--dshadb-kb`，抽屉档按它抬底、对话框档在**可视区**里重新居中、两处 `max-height` 同步收窄（三个守卫：缩放中不算、差值 < 80px 当噪声、offsetTop 参与计算）。报告只建议改 `max-height` —— 那不够，面板还是贴底边；
+  **② 宽而矮的鼠标窗口**（§2.3）两档断点补 `(pointer:fine)` 并列分支：1600×599 原先在 1 像素上从通栏跳成对话框，现在 599/600 同形。安全性来自宿主自己用 `(pointer: coarse)` 认手机（coarse/fine 互斥），触摸设备一律不受影响；
+  **③ 内联高度退场**（§2.5）—— 两个抽屉的内联 `maxHeight`（70vh/86vh）改成 `--dshadb-max-h`，桌面档的 `!important` 随之删除（它本来就是为了压内联样式，留着反而挡住 ① 的动态收窄）；
+  **④ 居中不再跨规则承重**（§2.4）—— 桌面档自己写一份 `margin:0 auto`，避免哪天有人给 768 档补 `max-width:1023px` 后对话框贴左边缘；
+  **⑤ `semverCompare` 认前导 `v`**（§2.7）—— 当前不可达但便宜（仓库 release tag 是带 `v` 的），只认小写以与 semver 包一致；
+  **⑥ 对话框档隐藏下滑把手**（§2.8）—— 但**限定 `(pointer:fine)`**：iPad Pro 横屏也落在对话框档，而看板抽屉没有关闭按钮，触摸设备上把手是唯一看得见的抓手；
+  **⑦ 与宿主插件管理器互斥（尽力而为）**（§2.6）—— 宿主那把锁是 Python 的 `fcntl.flock`，Node 没有 flock API、无法持有，所以只在交换前探一次，把窗口从整个交换过程缩到毫秒级；探测失败一律放行；
+  **⑧ 置顶卡满宽判为设计**（§2.1）—— 报告建议的「包进网格 + `grid-column:1/-1`」跨两列后宽度仍是 692px，现象一条都没消掉，故保持满宽 hero 并把结论写进注释与测试
 - **v1.5.0-desktop-preview.4**（🧪 预发行，非正式版）— **预览版可以在预览频道内自更新了**（此前 .1~.3 是一刀切禁用一键更新，于是每发一版都得让用户重跑 `install.sh`）。做法是把「这份代码从哪个 ref 装来的」写进 `package.json` 的 `dsh.updateRef`（本分支 = `preview/desktop`），更新检查与 tarball 下载都跟着它走 —— 于是「能被同频道的新预览更新」与「绝不被 main 的正式版覆盖」同时成立，不靠禁用按钮。同时 **`semverCompare` 补上预发布优先级**（semver §11：`…preview.2 < …preview.3 < …preview.10 < 1.5.0`）—— 旧实现 `split('-')[0]` 把 `preview.3` 和 `preview.2` 比成相等，是「预览版更新不到新预览版」的另一半原因
 - **v1.5.0-desktop-preview.3**（🧪 预发行，非正式版）— 响应外部评审四条：① **≥1024px 桌面档**改成**居中对话框**（四角圆角 + 上下留边 + `max-height:min(720px,80vh)`，动画换成纯淡入以避开 transform 与 slideup 冲突；`max-height` 必须 `!important`，因为两个抽屉用内联 `style` 写死了 70vh/86vh）；② 桌面档**面板加宽到 720px、平台卡片排成两列**（560px 单列在 10 寸以上两侧全空；卡片自带的 `margin-bottom:9px` 在网格里归零，否则行距翻倍）；③ 三个抽屉补 **`role="dialog"` + `aria-label`** —— 但**明确不加 `aria-modal="true"`**（手机壳有 46 条以它为前缀的结构性 CSS 会把面板改烂，见 `AGENTS.md`）；④ 去掉 `min()` 里冗余的 `calc()`（lightningcss 规范化后正是 `min(560px, 100vw - 48px)`）。档位对齐宿主手机壳的 `MOBILE_QUERY = max-width:1023px`
 - **v1.5.0-desktop-preview.2**（🧪 预发行，非正式版）— 平板覆盖：断点从「只看宽度」改成 **`min-width:768px` + `min-height:600px`**。iPad mini 竖屏(768×1024)、所有平板横竖屏、笔记本与台式都拿到居中 560px 面板；**手机横屏**(844×390 这类宽度过 768 但很矮的视口)被 min-height 挡住，仍走原来的全宽抽屉。正式版仍是 **v1.4.2**

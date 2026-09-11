@@ -167,6 +167,42 @@ DSH 启动时会把 profile 的 `dsh.profile.bundles` **逐个 import**，只要
 - `GET /api-dashboard/update`：对比 GitHub main 的 package.json version，5 分钟缓存。
 - `POST /api-dashboard/update/install`：下载→校验→备份→原子替换→失败回滚，重启生效。
 - 改代码时别破坏这两个端点；`applyUpdate` 有 `remoteVersion`/`localTarball` 测试注入口。
+- ⚠️ **预览分支的更新频道**：`package.json` 的 `dsh.updateRef`（本分支 = `preview/desktop`）决定
+  「从哪个 ref 检查更新、下载哪个 tarball」。**main 上没有这个字段** = 正式频道。改它等于改用户的更新源。
+- ⚠️ **与宿主插件管理器的互斥是"尽力而为"**（v1.5.0-desktop-preview.5）：宿主所有插件清单写入都走
+  `register-builtin-plugins.py` 的 `operation_lock()`，那是 Python 的 `fcntl.flock(<DSH_HOME 的父目录>/.dsha-data.lock)`。
+  **Node 没有 flock API，插件无法持有它** —— 所以 `assertHostLockFree()` 只在交换前用 `flock -n <file> true`
+  探一次（exit 1 = 被占 → 中止），把窗口从整个交换过程缩到毫秒级。
+  ❌ **别改成"自己建一个锁文件"**：那挡不住 App 侧，只会给人"已经互斥"的错觉。
+  ❌ 也别在探测失败时拦截更新（`flock` 不存在 / 锁文件不存在一律放行），否则非 DSHA 环境永远更新不了。
+
+---
+
+## 五之二、桌面 / 平板档的四个结构性坑（v1.5.0-desktop-preview 系列）
+
+预览分支只加断点与键盘避让，**逻辑一行没动**。但下面四个坑都是"改一行就悄悄坏"的类型：
+
+1. **`!important` 不许回来**（preview.5 已删除）：以前两个抽屉用**内联** `style={{maxHeight:"70vh"/"86vh"}}`
+   写死高度，内联优先级高于样式表 → 桌面档只能挂 `!important` 才压得住。代价是键盘的动态 `max-height`
+   会先撞上自己的 `!important`。现在高度走 `--dshadb-max-h` 变量（`.dshadb_drawer` 的
+   `max-height: min(var(--dshadb-max-h,85vh), calc(100vh - var(--dshadb-kb,0px) - 12px))`），
+   `!important` 不需要了 —— **别为了"保险"再加回来**。测试断言用的是 `/!important\s*[;}]/`（注释里提到不算）。
+2. **键盘避让必须连锚点一起改**：宿主 viewport meta 是 `width=device-width, initial-scale=1, viewport-fit=cover`，
+   **没有** `interactive-widget=resizes-content` → 键盘只收缩 **visual viewport**，`100vh` / `position:fixed`
+   纹丝不动。只加 `max-height` 面板照样贴底边被盖住。必须：抽屉档 `bottom: var(--dshadb-kb,0px)`、
+   对话框档 `top: calc((100vh - var(--dshadb-kb,0px))/2)`（在可视区里重新居中）。
+   `keyboardInset()` 的三个守卫（scale≠1 不算 / 差值 <80px 当噪声 / 减掉 offsetTop）缺一个都会误伤。
+   ⚠️ 合并 rAF 用独立的 `pending` 标记，**别用 `if (!raf)`** —— rAF 在测试夹具里是同步的，
+   `raf = requestAnimationFrame(...)` 会把 apply 里清掉的 0 又写回去，标记永久卡死。
+3. **断点里的 `(pointer:fine)` 分支**：`min-height:600px` 是硬门槛时，1600×599 会掉回 100vw 通栏，
+   599→600 是一道悬崖。并列分支 `(min-width:768px) and (pointer:fine)` 用来放行"有鼠标的窗口"。
+   安全性来自宿主自己用 `(max-width:1023px) and (pointer: coarse)` 认手机（`dsh-web-mobile` 2.4.0 的
+   `MOBILE_QUERY`）—— **coarse 与 fine 互斥**，所以手机一定拿到 coarse、一定不命中这条分支。
+   改这里前先确认宿主 MOBILE_QUERY 还是 coarse 版（2.3.0 是无指针判据的 `(max-width:1023px)`）。
+4. **隐藏下滑把手要限定 `(pointer:fine)`**：iPad Pro 横屏(1366×1024)也落在 ≥1024 对话框档，
+   而**看板抽屉没有关闭按钮**（只有 Esc 与点遮罩），触摸设备上把手是唯一看得见的抓手。
+   另外**置顶卡满宽是故意的**（hero + 下方两列网格）—— 第三方报告建议的
+   "包进 `.dshadb_cards` + `grid-column:1/-1`"跨两列后宽度仍是 692px，**现象一条都没消掉**，别再照着改一遍。
 
 ---
 
@@ -209,7 +245,7 @@ DSH 启动时会把 profile 的 `dsh.profile.bundles` **逐个 import**，只要
 - [x] provider 官方/中转三层判定（原唯一开源阻断项）；v1.4.0 又**删掉了 `computeProviderKinds` 里「按 provider 名字猜官方」的兜底**（与铁律 9 冲突）
 - [x] ~~价格表币种统一 USD 基准~~ → **v1.4.0 已改为「原生币种」存储**（见第三节；旧的 USD 基准口径是 MiMo / glm-4-plus / 整个历史段 ×7 错价的共同成因）
 - [x] 安全审计（无高危）+ 4 项加固：状态文件强制 0600、请求体 256KB 上限、输入清洗、officialProviders 上限
-- [x] 测试脚本入仓 `test/` 并改相对路径（clone 即可跑，**v1.4.0: 15 文件 456 断言**）
+- [x] 测试脚本入仓 `test/` 并改相对路径（clone 即可跑，**v1.4.0: 15 文件 456 断言；v1.5.0-desktop-preview.5: 18 文件 698 断言**）
 - [x] v1.4.0 又一并修掉三处交互问题（详见 ① 与 ⑤ 小节）：**拖大肥鱼会被手机壳判成开侧边栏**（`.dshadb-whale-grab` 让路层）、
       **台词气泡压在头顶**（`bottom:calc(100% + 6px)`）、**冷启动挂件硬跳 + 状态条随内容高 2px**
       （真机 LayoutShift 埋点定位：0.01193 / 0.00094+0.00053）
