@@ -8,7 +8,7 @@
 > ⚠️ **安装或维护本插件之前，请先读 [`AGENTS.md`](AGENTS.md)** —— 数据准确性红线、踩过的坑、安装姿势对照都在那里。
 > 本插件深度绑定 DeepSeek Harness 的客户端与宿主 API，**只能在 DSH 里运行**（手机版 DSHA 与桌面版同框架）。
 
-> 🧪 **你现在看的是预发行分支 `preview/desktop`** —— 版本 `v1.5.0-desktop-preview.4`。
+> 🧪 **你现在看的是预发行分支 `preview/desktop`** —— 版本 `v1.5.0-desktop-preview.6`（局部灰线试验修复，待实测）。
 > 相对正式版只多一件事：**桌面 / 平板适配**。抽屉按三档走（档位对齐宿主手机壳自己的
 > `MOBILE_QUERY = max-width:1023px`）：
 >
@@ -158,7 +158,7 @@ dsh plugin --profile web add link:/root/dsha-api-dashboard
 
 ## 更新日志
 
-最近一版 **v1.4.2**（本分支为预发行 `v1.5.0-desktop-preview.5`）—— DeepSeek 多币种钱包读取修复 + 桌面/平板适配预览。一版一行的完整历史见 [`CHANGELOG.md`](CHANGELOG.md)。
+最近一版 **v1.4.2**（本分支为预发行 `v1.5.0-desktop-preview.6`，大屏设置局部灰线的绘制隔离**试验修复，待平板验证**）—— DeepSeek 多币种钱包读取修复 + 桌面/平板适配预览。一版一行的完整历史见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## License
 

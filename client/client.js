@@ -361,6 +361,9 @@ window.__ModuleLoader__.load({
    只在有精确指针时隐藏 —— iPad Pro 横屏(1366×1024)也落进对话框档, 而看板抽屉没有关闭按钮
    (只有 Esc / 点遮罩), 触摸设备上把手是唯一看得见的关闭抓手, 不能一起收掉。 */
 @media (min-width:1024px) and (pointer:fine){.dshadb_handle{display:none}}
+/* preview.6 试验：设置内容滚动层位于 transformed fixed 面板内，单独建立绘制边界。
+   仅隔离大屏设置内容，不改面板几何、阴影或宿主侧栏；局部灰线根因尚未证实。 */
+@media (min-width:1024px) and (min-height:600px),(min-width:1024px) and (pointer:fine){[data-dshadb-paint-isolation] > .dshadb_body{isolation:isolate;contain:paint}}
 .dshadb_preview_banner{display:flex;flex-direction:column;gap:2px;margin:0 0 10px;padding:9px 11px;border-radius:12px;background:#fff8e6;border:1px solid #f0d9a0;color:#7a5b12;font-size:11px;font-weight:600;line-height:1.5}
 .dshadb_preview_banner b{font-size:12px;font-weight:800;color:#6b4d06}
 @media (prefers-color-scheme:dark){.dshadb_preview_banner{background:#3a3016;border-color:#6b5a24;color:#f2dfae}.dshadb_preview_banner b{color:#ffe9b0}}
@@ -2048,7 +2051,7 @@ window.__ModuleLoader__.load({
       //    任务还会把 [aria-modal="true"] 里的 [class*="_header"] 搬进 _nav。
       //    （只加 role="dialog" 是安全的：全仓只有 3 处提到 role="dialog"，且唯一条结构规则
       //      `[role="dialog"]:has([data-dsh-market-root]) > nav` 只对插件市场自己的根生效。）
-      const output = react.createElement("div", { className: "dshadb_drawer", role: "dialog", "aria-label": t("settings.title"), style: { "--dshadb-max-h": "86vh" }, onClick: (e) => e.stopPropagation(), key: "drawer" }, [
+      const output = react.createElement("div", { className: "dshadb_drawer", role: "dialog", "aria-label": t("settings.title"), "data-dshadb-paint-isolation": "settings", style: { "--dshadb-max-h": "86vh" }, onClick: (e) => e.stopPropagation(), key: "drawer" }, [
         react.createElement(SwipeHandle, { onClose: onBack || onClose, key: "handle" }),
         react.createElement("div", { className: "dshadb_header", key: "header" }, [
           react.createElement("div", { style: { display: "flex", alignItems: "center", gap: "10px", flex: "1", minWidth: 0 }, key: "leftwrap" }, [

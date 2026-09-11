@@ -4,6 +4,8 @@
 
 ## v1.x
 
+- **v1.5.0-desktop-preview.6**（🧪 试验修复，根因未确认）— 仅大屏设置内容层增加绘制隔离，尝试消除面板内部局部灰竖线；不隐藏宿主侧栏边框，不改滚动条、阴影、键盘或锁逻辑。未获平板视觉验收；若浮层裁剪或竖线不变，请回退 preview.5。详见 `docs/preview6-experiment.md`。
+
 - **v1.5.0-desktop-preview.5**（🧪 预发行，非正式版）— 响应第三方真机验证报告（对 `preview.4` 逐条复核后：6 条属实、1 条修法无效、1 条在 Node 里做不到真修）：
   **① 软键盘避让**（§2.2，实测键盘 242px、盖住面板 26%）—— 宿主 viewport meta 没有 `interactive-widget=resizes-content`，键盘只收缩 visual viewport、`vh` 与 `position:fixed` 纹丝不动，所以插件自己算：`keyboardInset()` 把键盘高度写进 `:root` 的 `--dshadb-kb`，抽屉档按它抬底、对话框档在**可视区**里重新居中、两处 `max-height` 同步收窄（三个守卫：缩放中不算、差值 < 80px 当噪声、offsetTop 参与计算）。报告只建议改 `max-height` —— 那不够，面板还是贴底边；
   **② 宽而矮的鼠标窗口**（§2.3）两档断点补 `(pointer:fine)` 并列分支：1600×599 原先在 1 像素上从通栏跳成对话框，现在 599/600 同形。安全性来自宿主自己用 `(pointer: coarse)` 认手机（coarse/fine 互斥），触摸设备一律不受影响；
