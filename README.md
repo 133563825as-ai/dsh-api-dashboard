@@ -3,7 +3,7 @@
 [![npm](https://img.shields.io/npm/v/dsh-api-dashboard?color=4f7cff)](https://www.npmjs.com/package/dsh-api-dashboard)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-**DeepSeek Harness 专用**的多平台 API 余额 / 用量看板 —— 在 Web GUI 输入框下方实时显示各平台余额与**本会话估算消耗**。
+**开源**（MIT）的 **DeepSeek Harness 专用**插件：多平台 API 余额 / 用量看板 —— 在 Web GUI 输入框下方实时显示各平台余额与**本会话估算消耗**。
 
 > ⚠️ **安装或维护本插件之前，请先读 [`AGENTS.md`](AGENTS.md)** —— 数据准确性红线、踩过的坑、安装姿势对照都在那里。
 > 本插件深度绑定 DeepSeek Harness 的客户端与宿主 API，**只能在 DSH 里运行**（手机版 DSHA 与桌面版同框架）。
