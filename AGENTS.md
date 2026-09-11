@@ -18,34 +18,44 @@
 
 ## 二、安装须知（AI 代理注意！）
 
-### ✅ 正确的安装方式（推荐 - 一行命令）
-
-```sh
-dsh plugin --profile web add dsh-api-dashboard
-```
-
-### 备选（从 GitHub 手动安装）
+### ✅ 唯一实测可用的安装方式（v1.4.1 校准）
 
 ```sh
 # 1. 下载
 curl -L "https://codeload.github.com/133563825as-ai/dsh-api-dashboard/tar.gz/refs/heads/main" -o /tmp/dsh-api-dashboard.tar.gz
-# 2. 解压(必须带 --strip-components=1)
+# 2. 解压(必须带 --strip-components=1)。是 git 工作区就别这么干, 用 git pull。
 mkdir -p /root/dsha-api-dashboard
 tar xzf /tmp/dsh-api-dashboard.tar.gz -C /root/dsha-api-dashboard --strip-components=1
-# 3. 安装进 profile(自动装依赖+自动注册 bundle 层)
-dsh plugin --profile web add file:/root/dsha-api-dashboard
-# 4. 重启 dsh web
+# 3. ★ 关键一步: 建 node_modules 软链(插件的 peer 依赖由宿主 DSH 提供)
+ln -sfn /usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules /root/dsha-api-dashboard/node_modules
+# 4. 用 link: 装进 profile(文件保持真实路径)
+dsh plugin --profile web add link:/root/dsha-api-dashboard
+# 5. 重启 dsh web
 ```
 
-### 安装姿势对照（实测）
+仓库根目录 `install.sh` 把上面 5 步做完了（含旧目录改名回退、git 工作区保护）。
+
+### 安装姿势对照（2026-09-11 在 DSHA 上逐条实测）
+
 | 姿势 | 后果 |
 |------|------|
-| `dsh plugin --profile web add dsh-api-dashboard`（npm 裸包名） | ✅ 推荐，一行命令 |
-| `dsh plugin --profile web add file:/root/dsha-api-dashboard`（源码方式） | ✅ 备选 |
+| 源码 + `node_modules` 软链 + `dsh plugin add link:<dir>` | ✅ **可用**，唯一推荐 |
+| 包目录放在 `$DSH_HOME/profiles/` 之下再 `add file:` | ✅ 可用 |
+| `dsh plugin --profile web add dsh-api-dashboard`（npm 裸包名） | ❌ **手机版 DSHA 上客户端 UI 不会出现**；v1.4.1 之前更糟 —— **整个 `dsh web` 启动失败** |
+| `dsh plugin --profile web add file:/源码目录`（目录里没有 node_modules） | ❌ 同上 |
 | `pnpm add <远程 tarball URL>` | ❌ pnpm 不剥顶层目录 → 装出空壳 |
-| 手动软链 node_modules | ⚠️ 可用但极易错层级, 会被启动校准摘除, 不推荐 |
+| 手动软链整个插件目录进 `node_modules` | ⚠️ 会被启动校准摘除；**软链 `node_modules` 子目录则是必须的** |
 
----
+**为什么 npm 裸包名在 DSHA 上不行（改这块之前先读）**：DSHA 跑在 proot 里，启动参数带 `--link2symlink`
+（见 `ps` 里的 `libproroot.so ... --link2symlink`），pnpm 的硬链接被降级成**指向全局 store 的符号链接**；
+而 Node 的 ESM 会先把模块解析成 realpath，再从那开始向上找 `node_modules` ——
+从 `/root/.local/share/pnpm/store/v10/files/xx/hash` 往上永远走不到 `$DSH_HOME/profiles/node_modules`。
+后果有两个，**第二个 v1.4.1 也没法从插件侧修**：
+1. 宿主半身 `Cannot find package '@deepseek-ai/schemastery'` → **整个 `dsh web` 起不来**。
+   v1.4.1 加了 peer 解析回退（`resolvePeer()`）已解决。
+2. 客户端半身被框架**静默丢弃**：`@deepseek-ai/dsh-client-modules` 的 `locatePkgJson()` 按模块路径向上找
+   「名字等于包名的 package.json」，store 目录的祖先链里没有 → 直接当作非客户端插件，**没有任何日志**。
+   只有让插件文件保持真实路径（`link:` / 真拷贝）才能修。
 
 ## 三、数据准确性红线（改代码前必读）
 
@@ -254,8 +264,12 @@ horizontally scrollable container never reach this state at all*）：起手元�
 ⚠️ 这条是**按层叠规则推断**的（容器里看不到真机渲染，没有实测确认）—— ① 才是经源码证实的根因。
 两者不冲突，都留着：① 管「手势层」，② 管「挂件抢触摸」。
 
-**修法**：`overlayOpen`（看板 / 详情 / 设置任一开着）→ 挂件根节点加 `.dshadb-whale-locked`
-→ `.dshadb-whale-body{pointer-events:none}`。`onDown` 里再兜一道 `classList.contains(...)`，防别的代码覆盖 `pointer-events`。
+**修法**：~~`overlayOpen` → 挂件根节点加 `.dshadb-whale-locked` → `pointer-events:none`~~
+→ ⚠️ **v1.4.1 定稿：任何界面下都不再自动上锁**（维护者两次反馈「设置里打开大肥鱼后图片拖不动，得关掉才能动」，
+随后明确要求全部放开）。现在只留一句 `setWhaleLocked(false)`。
+**锁的机制保留着**（`setWhaleLocked` / `.dshadb-whale-locked` CSS / `onDown` 里那道 `classList.contains` 兜底）：
+万一以后又出现「面板开着时拖滑块被挂件吃掉」，把那一行换成 `setWhaleLocked(view !== "bar")` 即可恢复。
+❌ **不要**再写回 `const overlayOpen = isSettingsOpen || view !== "bar"`（`test-bar.mjs` 已钉住「不自动加锁」）。
 `whaleLocked` 记在**模块变量**里：用户在设置里刚打开大肥鱼时挂件才被挂上，创建时也要立刻套用锁定态。
 
 - ❌ **别改成 `display:none` / 直接卸载挂件** —— 调大小、露出比例时用户**要看实时预览**，隐藏等于把功能阉了。
@@ -277,7 +291,15 @@ horizontally scrollable container never reach this state at all*）：起手元�
 「切掉后台重新进来，插件加载有点慢，要等一段时间」。
 策略抽成了纯函数（`wait`/`background`/`none`）+ `test-fetch-policy.mjs` 29 条断言 —— **很容易被顺手改回阻塞式，所以钉死**。
 
-- ⚠️ 冷启动（服务端刚重启、`cache.balances` 为空）**只能等** —— 那时确实没有东西可显示，别为此加假数据。
+- ⚠️ **v1.4.1 起冷启动不再阻塞**：`planBalancesFetch` 在 `!hasData` 时返回 `background`（旧行为是 `wait`）——
+  服务端立刻回 `{balances:[], loading:true}` 并把刷新丢后台，客户端保持**骨架屏**、把轮询临时压到 1.5 秒，数据一到就上屏。
+  **这不是假数据**：界面显示的是"加载中"，不是 0 元。实测（维护者 5 个中转站，全量刷新 8~13.6s）：
+  冷启动前 5 发请求都是 2~3ms 返回 `loading:true`，第 6 发（约 7 秒）拿到 21 个平台。
+  只有 `force=1`（用户主动点刷新/保存）仍然阻塞等。
+- 📌 **A（端点记忆）**：`queryCustomRelay` 的 auto 探测是**串行**试 3 个候选端点、每个跑满 `timeoutMs`，
+  这是全量刷新慢的主因。现在把命中过的端点存进状态文件 `relayEndpoints`，下次**排到候选最前**，稳态每个中转站只打 1 个请求。
+  只改顺序、候选全表仍会试，所以中转站换端点也能自动跟上。实测：第三个候选才命中的假中转站，重启后只收到 1 个请求。
+  ⚠️ 对「三个端点全不支持余额接口」的中转站（维护者本机 5 个都是）**没有帮助** —— 它们没有可记忆的命中端点。
 - ⚠️ 首屏/恢复走 `stale=1` 后，**新数据靠下一次轮询带上来**（服务端已在后台刷）。别在客户端再补一次 `force`，那就白改了。
 - ℹ️ 「加载慢」还有一半是 **DSH 自己的行为**：应用切回前台时 webview 可能整页重载，所有插件重新 init，这段不归插件管 —— 回答用户时要如实说明，别全揽到自己头上。
 

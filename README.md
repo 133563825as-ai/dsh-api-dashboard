@@ -5,7 +5,7 @@
 > [!CAUTION]
 > **给安装/维护本插件的 AI 代理的一则警告 —— 动手前必读 [`AGENTS.md`](AGENTS.md)。**
 >
-> 1. **推荐安装方式**：`dsh plugin --profile web add dsh-api-dashboard`（已发布到 npm，一行命令搞定）。也可用「下载→解压→`dsh plugin add file:`」三步法。`pnpm add <远程tarball>` **装不上**。
+> 1. **安装方式（v1.4.1 实测重写）**：**手机版 DSHA 请用「下载 → 解压 → 建 node_modules 软链 → `dsh plugin add link:`」**（见下方「安装」一节，可复制命令；仓库根目录另有 `install.sh` 一键脚本）。`dsh plugin --profile web add dsh-api-dashboard`（npm 裸包名）在 DSHA 上**会失败**：pnpm 把包文件软链到全局 store（proot 的 `--link2symlink` 把硬链接降级成软链），Node 的 ESM 按 realpath 解析后找不到宿主的 peer 依赖。v1.4.1 已加解析回退让**宿主半身不再把整个 `dsh web` 拖死**，但**客户端 UI 仍不会出现**（框架按模块路径找不到 package.json）。`pnpm add <远程tarball>` 同样**装不上**。
 > 2. **数据准确性红线**：部分平台余额解析有待验证项（OpenRouter/SiliconFlow/Novita/one-api/xAI），且「限流窗口 ≠ 真实余额」——**不要伪造或硬塞一个数字**，查不到就如实显示「未开放」。
 > 3. **推送前先问用户**；改 `client/client.js` 后需**重启 dsh web GUI** 才生效。
 >
@@ -81,44 +81,54 @@ OpenRouter、Novita AI、xAI Grok
 
 ## 安装
 
-### ✅ 推荐方式：npm 一行命令
-
-```sh
-dsh plugin --profile web add dsh-api-dashboard
-```
-
-> 从 npm 拉取最新版本，自动安装依赖、注册 bundle 层，无需手动下载或建软链。
-
-### 备选：下载源码后安装（无 npm registry 环境时）
+### ✅ 手机版 DSHA（Android）—— 实测可用，照抄即可
 
 ```sh
 # 1. 下载源码（codeload 地址，github.com 主站不可达时也能用）
-curl -L "https://codeload.github.com/133563825as-ai/dsh-api-dashboard/tar.gz/refs/heads/main" -o /tmp/dsh-api-dashboard.tar.gz
+curl -L "https://codeload.github.com/133563825as-ai/dsh-api-dashboard/tar.gz/refs/heads/main" \
+     -o /tmp/dsh-api-dashboard.tar.gz
 
-# 2. 解压到固定位置（--strip-components=1 去掉顶层目录，必须带）
-mkdir -p /root/dsha-api-dashboard
+# 2. 解压到固定位置（--strip-components=1 必须带，否则会多一层目录）
+rm -rf /root/dsha-api-dashboard && mkdir -p /root/dsha-api-dashboard
 tar xzf /tmp/dsh-api-dashboard.tar.gz -C /root/dsha-api-dashboard --strip-components=1
 
-# 3. 安装进 web profile：自动装依赖 + 自动注册 bundle 层
-dsh plugin --profile web add file:/root/dsha-api-dashboard
+# 3. 建 node_modules 软链 —— 这一步不能省！
+#    插件的 peer 依赖（@deepseek-ai/schemastery / zod）由宿主 DSH 提供，
+#    软链让它从源码目录就能解析到它们。
+ln -sfn /usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules /root/dsha-api-dashboard/node_modules
 
-# 4. 重启 dsh web 生效
+# 4. 装进 web profile（link: 方式，文件保持真实路径，客户端 UI 才能被框架找到）
+dsh plugin --profile web add link:/root/dsha-api-dashboard
+
+# 5. 重启 dsh web
 ```
+
+> 仓库根目录的 `install.sh` 把上面 5 步做完了，也可以直接 `sh install.sh`。
+
+### 桌面版 DSH（Linux/macOS/Windows）
+
+同样推荐上面的「源码 + `link:`」方式（把路径换成你自己的）。
+npm 一行命令 `dsh plugin --profile web add dsh-api-dashboard` 在**桌面版**上通常可用
+（桌面文件系统支持硬链接，pnpm 不会把包文件软链到 store）；但 v1.4.1 起仍建议用 `link:`，
+因为自更新与资产路径都按真实路径工作。
 
 ### 升级到新版本
 
-1. **推荐**：插件设置面板 →「检查更新」→「一键自更新」（内置更新引擎，下载→校验→备份→原子替换→失败回滚，重启 web 生效）；
-2. 或：`dsh plugin --profile web remove dsh-api-dashboard` 后重新执行上面的推荐/备选安装；
-3. 兜底：重复「下载源码」步骤 1-2 覆盖目录，再执行第 3 步。
+1. **推荐**：重新执行上面第 1、2 步（覆盖源码目录）→ 重启 `dsh web`；
+2. 插件设置面板里的「一键自更新」也可用（下载→校验→备份→替换→失败回滚，重启生效）；
+   ⚠️ 它会**保留 `.git` 与 `node_modules`**（v1.4.1 修复：此前会把 `.git` 一起删掉，历史无法恢复）；
+3. 或 `dsh plugin --profile web remove dsh-api-dashboard` 后重新安装。
 
-### ⚠️ 安装姿势对照（实测）
+### ⚠️ 安装姿势对照（2026-09-11 在 DSHA 上逐条实测）
 
 | 方式 | 结果 |
 |------|------|
-| `dsh plugin --profile web add dsh-api-dashboard`（npm 裸包名） | ✅ 推荐，一行命令 |
-| `dsh plugin --profile web add file:/root/dsha-api-dashboard`（源码方式） | ✅ 备选 |
+| 源码 + `node_modules` 软链 + `dsh plugin add link:<dir>` | ✅ **可用**（推荐） |
+| 包目录放在 `$DSH_HOME/profiles/` 之下再 `add file:` | ✅ 可用 |
+| `dsh plugin --profile web add dsh-api-dashboard`（npm 裸包名，**手机版 DSHA**） | ❌ 客户端 UI 不会出现；v1.4.1 之前更糟 —— **整个 `dsh web` 启动失败** |
+| `dsh plugin --profile web add file:/源码目录`（目录里**没有** node_modules） | ❌ 同上 |
 | `pnpm add <远程 tarball URL>` | ❌ pnpm 不剥离 codeload 压缩包顶层目录，装出来是空壳 |
-| 手动软链 node_modules | ⚠️ 可用但繁琐，层级写错会被启动校准摘除，不推荐 |
+| 手动软链整个插件目录到 `node_modules` | ⚠️ 会被启动校准摘除，别用；软链 `node_modules` 子目录是**必须**的 |
 
 ## 配置
 
@@ -190,6 +200,26 @@ dsh-api-dashboard/
 
 ## 版本
 
+v1.4.1 — **审计修复版**（全部先在真机/隔离环境复现再修，新增 `test/test-v141-fixes.mjs` 62 条回归钉子）：
+  🔴 **状态文件形状损坏不再拖死整个 GUI** —— `{"customRelays": 5}` 这类「合法 JSON 但字段类型跑偏」以前会让 `apply()` 抛 `TypeError`，进而**整个 `dsh web` 启动失败**（不是插件不显示，是 GUI 打不开）。现在加载时统一消毒形状并夹取数值范围。
+  🔴 **一键自更新不再删 `.git`** —— codeload 的 tarball 里没有 `.git`，旧代码 `rmSync` 掉除 `node_modules` 外的一切再覆盖，点一次更新就抹掉 git 历史且无法恢复。现在保留 `.git`；`~/dsha-api-dashboard` 的自动同步**只对非 git 工作区生效**；target 是符号链接时直接拒绝（旧行为会删光软链指向的真实目录，且回滚不回来）。
+  🔴 **插件路由补鉴权** —— `/api-dashboard/*` 以前完全绕过 DSH 的浏览器鉴权：无 token、无 cookie 就能读配置/改配置/触发自更新；且 `Content-Type: text/plain` 属于浏览器**不预检的 simple request**，实测带 `Origin: https://evil.example` 的跨域 POST 返回 **200 且配置真的被改了**。现在复用 `connection.requestRejection`（与 `dsh-web-mobile` 同一闸门）：无 cookie → 401、跨域 → 403。
+  🔴 **peer 依赖解析回退** —— npm 安装后宿主半身不再 `Cannot find package '@deepseek-ai/schemastery'`；另修 `SELF_ROOT` 走 realpath 导致 npm 布局下图标/挂件资产 404、版本号读不到的问题。
+  🐛 **「刷新间隔 1 秒」真正生效** —— 输入框与服务端都允许 1 秒，只有 `save()` 悄悄夹成 5 秒；旧回归断言钉的是**旧变量名**，换个名字就绕过（假绿）。四处下限现已一致。
+  🐛 **冷启动打开设置面板不再覆盖用户配置** —— 面板以前只从 `/balances` 拿阈值/币种，冷启动要等 8~10s，那期间点「保存并生效」会把真实阈值写成默认 50/10、把 `overseasCurrency` 写回 `'follow'`。`/config` 现在返回阈值，客户端也补读。
+  🐛 **`openai` 分支不再伪造负数余额**（`total_granted` 为 null/非数字时 `0 - used` → 面板红色「-5」），与已修的 `openrouter` 同类。
+  🐛 **冷启动不再「等半天 + 报失败」** —— 实测维护者真实配置下一次全量刷新要 **8~13.6 秒**（5 个中转站的 auto 探测是串行试 3 个候选端点，每个跑满 8s）。
+      v1.4.1 第一版给 fetch 统一加了 15s 超时，正好卡在这中间 → **冷启动首屏必超时 → 面板显示「余额接口请求失败」**。现已：① 余额端点超时放宽到 90s（超时只用来兜底卡死的 socket，不是给正常慢启动设上限）；② 冷启动改成**后台刷新**——服务端立刻回 `loading:true` + 空列表，客户端保持骨架屏并把轮询压到 1.5 秒，数据一到就上屏（实测前 5 发 2~3ms 返回，第 6 发拿到数据）；③ 加载超 4 秒补一句「首次加载要逐个平台拉取余额…请稍候」；④ **记住每个中转站上次命中的余额端点**并优先试它（存状态文件 `relayEndpoints`，重启后仍生效），稳态下每个中转站只打 1 个请求。
+  🐛 **错误路径有了出口** —— fetch 全部加 15s 超时（以前一个 `AbortController` 都没有，请求挂住就永久骨架屏且从此不再轮询）；抽屉在请求失败时显示错误文案 + 「重试」按钮（以前只画空看板，`snapshot.message` 从不渲染）；保存与配置请求补 `catch`。
+  🐛 **状态条金额三色类名补上 CSS**（`.dshadb_bar_ok/warn/err` 以前只有使用处、没有规则 = 死类名，负余额金额从不标红）。
+  🐛 **子代理胶囊监听器不再累加**（内联 ref 使每次 render 都挂 7 个 `addEventListener`，5 秒轮询下每小时约 5000 个）。
+  🐛 **强刷加 2 秒节流 + 响应序列号**（连点刷新会并发，且旧响应会覆盖新响应造成数据倒退）。
+  🐛 **中文名不再被写坏**：请求体改为按字节收集后整体 `utf8` 解码（跨 chunk 切分多字节字符会产生 U+FFFD 并存进状态文件）。
+  🐛 持久化的 `refreshIntervalMs` 加载时夹取（曾经能是 -1 → 3 秒内 1794 次上游请求）；状态文件保存前建父目录，失败时如实上报。
+  🐛 **设置面板开着时大肥鱼可以拖动了** —— 旧逻辑把「设置面板」也算进 `overlayOpen`，一进设置挂件立刻被 `pointer-events:none` 锁死，必须关掉才能拖（维护者反馈）。而设置里的「大肥鱼」页恰恰是要边看实时预览边拖位置/调大小的地方。现在只对会盖住挂件的**看板 / 详情**两个整屏抽屉上锁。
+  🎨 **UI：余额条恢复成独立药丸，整块水平居中**（子代理行同样居中；不再塞进一个容器）。子代理行真正溢出时右侧渐隐，不再被屏幕齐口切一半。
+  ⚠️ **已知未修**：会话消耗按「查看时刻」的峰谷单价重算（同一会话在峰谷切换时会显示 1×/2× 两个数）。要修得在事件折叠时按 `isPeakTime(事件时刻)` 分桶存储并 bump `stateVersion`，属投影状态结构变更，留待下个版本。
+v1.4.0 — 价格表改原生币种 + 会话消耗漏计/前缀吞模型修复 + 子代理消耗可见 + DSH provider 自动入列 + 设置界面统一 + 三处交互修复
 v0.2.0 — 最初版本
 v0.2.1 — 修复图标映射，加入 DeepSeek 峰谷计费
 v0.3.0 — 完整三层 UI，国内外分组，三色阈值，趣味峰谷，设置面板

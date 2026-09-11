@@ -191,6 +191,11 @@ window.__ModuleLoader__.load({
 .dshadb_bar_logo{width:16px;height:16px;border-radius:5px;background:#eef2ff;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;color:#4f7cff}
 .dshadb_bar_name{font-weight:700;color:#17181c;font-size:11px}
 .dshadb_bar_amount{font-weight:800;font-variant-numeric:tabular-nums;color:#17181c}
+/* C-4a (v1.4.1): .dshadb_bar_ok/warn/err 以前只有使用处、没有 CSS 规则(死类名),
+   于是"负余额/低余额金额变红"从来没生效过, 只有小圆点变色。 */
+.dshadb_bar_ok{color:#2e9e5b}
+.dshadb_bar_warn{color:#c8891a}
+.dshadb_bar_err{color:#d8443f}
 .dshadb_bar_dot{width:6px;height:6px;border-radius:50%;flex:none}
 .dshadb_bar_dot_ok{background:#35b56b}
 .dshadb_bar_dot_warn{background:#e6a72f}
@@ -367,9 +372,15 @@ window.__ModuleLoader__.load({
    见 bindSubagentTip()。浮层必须挂在 document.body 上 —— 挂在胶囊里会被
    .dshadb_subs 的 overflow-x:auto 裁掉。
    ⚠️ 本段在 JS 模板字符串里, 注释里**不能出现反引号**(会提前结束模板串)。 */
-.dshadb_barwrap{display:inline-flex;flex-direction:column;align-items:flex-start;gap:0;max-width:100%;min-width:0}
-.dshadb_barrow{display:inline-flex;align-items:center;gap:2px;max-width:100%}
-.dshadb_subs{display:flex;flex-wrap:nowrap;align-items:center;gap:4px;margin:3px 0 0 2px;max-width:100%;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-ms-overflow-style:none;-webkit-overflow-scrolling:touch}
+/* UI v1.4.1（按维护者反馈改）：**不再把两行塞进一个容器** —— 余额条恢复成独立的药丸，
+   整块（余额条 + 子代理行）**水平居中**：wrap 用 fit-content + margin:auto，
+   子项 align-items:center，于是窄的时候两行都居中，宽的时候 wrap 撑到 100% 子代理行在内部横滑。 */
+.dshadb_barwrap{display:flex;flex-direction:column;align-items:center;gap:0;width:fit-content;max-width:100%;min-width:0;margin:0 auto}
+.dshadb_barrow{display:inline-flex;align-items:center;gap:2px;max-width:100%;min-width:0}
+.dshadb_subs{display:flex;flex-wrap:nowrap;align-items:center;gap:4px;margin:3px 0 0 0;max-width:100%;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-ms-overflow-style:none;-webkit-overflow-scrolling:touch}
+/* UI v1.4.1: 子代理行只在**真的溢出**时右侧渐隐(由 syncSubsOverflow 打类名),
+   这样"被切一半"看起来是有意的可滑动提示, 而不是被屏幕齐口截断。 */
+.dshadb_subs_overflow{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 20px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 20px),transparent)}
 .dshadb_subs::-webkit-scrollbar{display:none}
 .dshadb_sub{flex:none;display:inline-flex;align-items:center;gap:4px;font-size:10px;line-height:1.15;padding:2px 7px;border-radius:8px;background:#f5f6f8;border:1px solid #e7e8ec;color:#777b84;white-space:nowrap;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
 .dshadb_sub_dot{width:5px;height:5px;border-radius:50%;background:#8b93a7;flex:none}
@@ -625,6 +636,7 @@ window.__ModuleLoader__.load({
     let snapshot = { status: "loading", balances: [], config: { safeThreshold: 50, warnThreshold: 10 } };
     const listeners = new Set();
     let timer = null, pollMs = DEFAULT_POLL_MS, inflight = null, started = false;
+    let lastForceAt = 0, seq = 0, appliedSeq = 0;
     function notify() { for (const fn of [...listeners]) fn(); }
     /**
      * @param force 显式强刷 (手动刷新按钮 / 保存设置后) —— **阻塞**, 等服务端拉完最新数据
@@ -632,8 +644,36 @@ window.__ModuleLoader__.load({
      *              刷新丢后台。force 那条路要等服务端跑完一次全量轮询(最慢端点可到 8s),
      *              应用切回前台时用它就会「等一段时间」。
      */
+    /**
+     * C-3a (v1.4.1): fetch 必须带超时。
+     * 以前整份客户端一个 AbortController 都没有 —— 请求一旦既不 resolve 也不 reject
+     * (弱网黑洞、WebView 被冻结、服务端被最慢端点拖住), inflight 永远不为 null,
+     * schedule() 又只在 promise settle 后才续期 → 插件永久停在 4 条骨架屏, 手动刷新也救不回来。
+     */
+    const FETCH_TIMEOUT_MS = 15000;
+    /**
+     * ⚠️ 余额端点的超时**必须远大于**其他端点。
+     * 实测（维护者真实配置：5 个中转站 + 16 个预设平台）：服务端一次全量刷新要 **8~13.6 秒** ——
+     * `queryCustomRelay` 的 auto 探测是**串行**试 3 个候选端点（billing/subscription → api/user/self
+     * → credit_grants），每个都要跑到 `timeoutMs`(默认 8s) 才放弃；冷启动还要叠加 DNS/TLS 首次握手。
+     * v1.4.1 第一版把这里也写成 15s，结果**冷启动首屏必超时** → 面板直接显示「余额接口请求失败」。
+     * 超时的意义只是"别让一个彻底卡死的 socket 永远挂着"，不是给正常慢启动设上限。
+     */
+    const BALANCES_TIMEOUT_MS = 90000;
+    const fetchT = (url, opts, ms) => {
+      const timeout = typeof ms === "number" ? ms : FETCH_TIMEOUT_MS;
+      try { return fetch(url, { ...(opts || {}), signal: AbortSignal.timeout(timeout) }); }
+      catch (e) { return fetch(url, opts); }
+    };
     async function refresh(force = false, peek = false) {
       if (inflight !== null && !force && !peek) return inflight;
+      // C-4c (v1.4.1): 强刷节流 2s(AGENTS 里写了「强刷 2 秒节流」, 但代码里一直没有);
+      // 并且在飞时直接复用同一个请求, 避免连点刷新打出一串并发。
+      if (force) {
+        const now = Date.now();
+        if (inflight !== null && now - lastForceAt < 2000) return inflight;
+        lastForceAt = now;
+      }
       if ((force || peek) && snapshot.isRefreshing !== true) { snapshot = { ...snapshot, isRefreshing: true }; notify(); }
       inflight = (async () => {
         try {
@@ -641,16 +681,26 @@ window.__ModuleLoader__.load({
             : force ? "/api-dashboard/balances?force=1&_t=" + Date.now()
               : "/api-dashboard/balances";
           // v0.5.0: 走浏览器默认缓存 (配合服务端 ETag), 数据没变时 304 空响应; force 用独立 URL + no-store 强刷
-          const res = await fetch(url, { headers: { accept: "application/json" }, cache: force ? "no-store" : "default" });
+          const mySeq = ++seq;
+          const res = await fetchT(url, { headers: { accept: "application/json" }, cache: force ? "no-store" : "default" }, BALANCES_TIMEOUT_MS);
           if (!res.ok) throw new Error("HTTP " + res.status);
           const data = await res.json();
+          // C-4c: 只接受最新一次请求的结果 —— 否则「新请求先回、旧请求后回」会把界面数据倒退回去
+          if (mySeq <= appliedSeq) { inflight = null; return; }
+          appliedSeq = mySeq;
           if (data.config?.clientPollIntervalMs >= 1000) pollMs = Math.min(data.config.clientPollIntervalMs, 3600000);
           // v0.5.0 性能适配: 内容无变化就不重建快照引用, useSyncExternalStore 判定 Object.is 相同直接跳过整棵树重渲
           const newBalances = data.balances || [];
           const oldBalances = Array.isArray(snapshot.balances) ? snapshot.balances : [];
           const changed = JSON.stringify(newBalances) !== JSON.stringify(oldBalances) || snapshot.status !== "ok";
           const nextFetchedAt = data.fetchedAt || Date.now();
-          if (!changed) {
+          // v1.4.1: 服务端冷启动不再阻塞首屏 —— 立刻回 `loading:true` + 空列表, 刷新丢后台。
+          // 这里保持「加载中」状态(骨架屏), 并把轮询临时压到 1.5 秒, 数据一到就上屏。
+          // 注意这不是假数据: 显示的是"加载中", 不是 0 元。
+          if (data.loading === true) {
+            snapshot = { ...snapshot, status: "loading", balances: [], config: data.config || snapshot.config, fetchedAt: nextFetchedAt, isRefreshing: false };
+            pollMs = Math.min(pollMs, 1500);
+          } else if (!changed) {
             // v1.1.0: config 必须始终跟随最新响应 —— 旧写法在余额未变时保留旧 config,
             // 导致设置里改完开关(如 whaleEnabled)后前端永远读不到新值, 表现为"开了又变回关"
             snapshot = { ...snapshot, config: data.config || snapshot.config, fetchedAt: nextFetchedAt, isRefreshing: false };
@@ -757,6 +807,12 @@ window.__ModuleLoader__.load({
     }
     /** 给一个胶囊挂长按: 位移 > 8px(其实是在滑动这一行) 或抬手都取消; 长按抬手后的 click 吞掉。 */
     function bindSubagentTip(node, text) {
+      // C-4b (v1.4.1): ref 是内联箭头函数 → 每次 render 都重新调用本函数,
+      // 而这里挂 7 个 addEventListener 却从不 remove → 5 秒轮询下每小时约 5000 个监听器
+      // 堆在同一个胶囊节点上。改成"同一个节点只挂一次", tip 存在节点上按需读。
+      node.__dshadbTip = text;
+      if (node.__dshadbTipBound === true) return;
+      node.__dshadbTipBound = true;
       let timer = 0, sx = 0, sy = 0, fired = false;
       const cancel = () => { if (timer) { clearTimeout(timer); timer = 0; } };
       node.addEventListener("pointerdown", (e) => {
@@ -764,7 +820,7 @@ window.__ModuleLoader__.load({
         fired = false;
         sx = e.clientX; sy = e.clientY;
         cancel();
-        timer = setTimeout(() => { timer = 0; fired = true; showSubagentTip(node, text); }, SUBTIP_LONG_PRESS_MS);
+        timer = setTimeout(() => { timer = 0; fired = true; showSubagentTip(node, node.__dshadbTip || text); }, SUBTIP_LONG_PRESS_MS);
       });
       node.addEventListener("pointermove", (e) => {
         if (timer && (Math.abs(e.clientX - sx) > 8 || Math.abs(e.clientY - sy) > 8)) cancel();
@@ -789,7 +845,18 @@ window.__ModuleLoader__.load({
       const list = Array.isArray(cost && cost.subagents) ? cost.subagents : [];
       if (list.length === 0) return null;
       const mainCur = (cost && cost.currency) || "CNY";
-      return react.createElement("span", { className: "dshadb_subs", key: "subs" },
+      // UI v1.4.1: 只在真的横向溢出时才加渐隐类名, 避免内容没满也糊一条边
+      const syncSubsOverflow = (n) => {
+        if (!n) return;
+        try {
+          const over = n.scrollWidth > n.clientWidth + 1;
+          if (over) n.classList.add("dshadb_subs_overflow");
+          else n.classList.remove("dshadb_subs_overflow");
+        } catch (e) { /* 忽略 */ }
+      };
+      return react.createElement("span", { className: "dshadb_subs", key: "subs",
+        ref: (n) => { if (n) requestAnimationFrame(() => syncSubsOverflow(n)); },
+        onScroll: (e) => syncSubsOverflow(e.currentTarget) },
         list.map((s, i) => {
           const f = formatSessionCost({ cost: s.cost, currency: mainCur, costByCurrency: s.costByCurrency, waiting: false });
           const amt = f !== null && f.hasValue ? "~" + f.text : "~—";
@@ -1043,6 +1110,13 @@ window.__ModuleLoader__.load({
       const handleRefresh = () => { setRefreshing(true); store.forceRefresh().then(() => setTimeout(() => setRefreshing(false), 500)); };
       const balances = data.balances || [];
       const isLoading = data.status === "loading" && balances.length === 0;
+      // v1.4.1: 加载超过 4 秒就在骨架屏下面补一句「首次加载较慢」的解释（冷启动全量刷新实测 8~30s）
+      const [slowLoad, setSlowLoad] = react.useState(false);
+      react.useEffect(() => {
+        if (!isLoading) { setSlowLoad(false); return undefined; }
+        const timer = setTimeout(() => setSlowLoad(true), 4000);
+        return () => clearTimeout(timer);
+      }, [isLoading]);
       const okCount = balances.filter(b => b.status === "ok").length;
 
       const groups = { domestic: [], abroad: [], relay: [], custom: [] };
@@ -1119,19 +1193,35 @@ window.__ModuleLoader__.load({
         ]);
       };
 
+      const slowHint = isLoading && slowLoad;
       let bodyContent;
       if (isLoading) {
-        bodyContent = react.createElement("div", null, [0,1,2,3].map(i => react.createElement("div", { className: "dshadb_skeleton", key: i }, [
-          react.createElement("div", { className: "dshadb_skeleton_logo", key: "logo" }),
-          react.createElement("div", { className: "dshadb_skeleton_lines", key: "lines" }, [
-            react.createElement("div", { className: "dshadb_skeleton_line dshadb_skeleton_line_long", key: "l1" }),
-            react.createElement("div", { className: "dshadb_skeleton_line dshadb_skeleton_line_short", key: "l2" }),
-          ]),
-        ])));
+        // v1.4.1: 冷启动全量刷新实测要 8~30 秒（中转站 auto 探测是串行的），
+        // 光画骨架屏用户会以为卡死 → 超过 4 秒补一句解释。
+        bodyContent = react.createElement("div", null, [
+          ...([0,1,2,3].map(i => react.createElement("div", { className: "dshadb_skeleton", key: i }, [
+            react.createElement("div", { className: "dshadb_skeleton_logo", key: "logo" }),
+            react.createElement("div", { className: "dshadb_skeleton_lines", key: "lines" }, [
+              react.createElement("div", { className: "dshadb_skeleton_line dshadb_skeleton_line_long", key: "l1" }),
+              react.createElement("div", { className: "dshadb_skeleton_line dshadb_skeleton_line_short", key: "l2" }),
+            ]),
+          ]))),
+          slowHint ? react.createElement("div", { key: "slow", style: { fontSize: 11, color: "#8b91a0", textAlign: "center", lineHeight: 1.6, margin: "10px 4px 2px" } },
+            "首次加载要逐个平台拉取余额（含中转站探测），通常 10~30 秒，请稍候…") : null,
+        ]);
       } else if (balances.length === 0) {
+        // C-3c (v1.4.1): 请求失败时以前只画"空看板" —— 用户分不清「没有平台」和「请求失败」。
+        // 实测 snapshot.message 全文件只被赋值、从不渲染。
+        const isErr = snapshot.status === "error";
         bodyContent = react.createElement("div", { className: "dshadb_empty" }, [
-          react.createElement("span", { key: "icon", style: { fontSize: 30, opacity: 0.5 } }, "📊"),
-          react.createElement("span", { key: "title" }, t("title")),
+          react.createElement("span", { key: "icon", style: { fontSize: 30, opacity: 0.5 } }, isErr ? "⚠️" : "📊"),
+          react.createElement("span", { key: "title" }, isErr ? "余额接口请求失败" : t("title")),
+          isErr && snapshot.message ? react.createElement("span", { key: "msg", style: { fontSize: 11, color: "#e05252", wordBreak: "break-all" } }, String(snapshot.message)) : null,
+          isErr ? react.createElement("button", {
+            key: "retry", type: "button", className: "dshadb_add_btn",
+            style: { width: "auto", padding: "6px 18px", marginTop: "4px" },
+            onClick: () => { try { store.forceRefresh(); } catch (e) { /* 忽略 */ } },
+          }, "重试") : null,
         ]);
       } else {
         bodyContent = [
@@ -1214,7 +1304,7 @@ window.__ModuleLoader__.load({
       react.useEffect(() => {
         if (!isOpen || platformId !== "deepseek") return;
         let live = true;
-        fetch("/api-dashboard/prices", { headers: { accept: "application/json" } })
+        fetchT("/api-dashboard/prices", { headers: { accept: "application/json" } })
           .then((r) => (r.ok ? r.json() : null))
           .then((d) => { if (live && d && d.ok) setPriceData(d); })
           .catch(() => {});
@@ -1398,7 +1488,7 @@ window.__ModuleLoader__.load({
       });
       const checkUpdate = react.useCallback((force) => {
         setUpd(s => ({ ...s, phase: "checking" }));
-        fetch("/api-dashboard/update" + (force ? "?force=1" : ""), { headers: { accept: "application/json" } })
+        fetchT("/api-dashboard/update" + (force ? "?force=1" : ""), { headers: { accept: "application/json" } })
           .then(r => r.json())
           .then(d => {
             // v0.6.2: 检查完必有反馈 —— 已是最新也提示, 有新版提示版本号, 失败给固定文案
@@ -1411,7 +1501,7 @@ window.__ModuleLoader__.load({
       react.useEffect(() => { if (isOpen) checkUpdate(false); }, [isOpen]);  // 打开面板自动检查
       const installUpdate = () => {
         setUpd(s => ({ ...s, phase: "installing" }));
-        fetch("/api-dashboard/update/install", { method: "POST" })
+        fetchT("/api-dashboard/update/install", { method: "POST" }, 120000)
           .then(r => r.json().then(d => ({ code: r.status, body: d })))
           .then(({ code, body }) => {
             if (code === 200 && body.ok) {
@@ -1443,12 +1533,18 @@ window.__ModuleLoader__.load({
         setRefreshSec(Math.round((config?.clientPollIntervalMs || 5000) / 1000) || 5);
         setWhaleOn(!!(config && config.whaleEnabled));
         let cancelled = false;
-        fetch("/api-dashboard/config", { cache: "no-store" }).then(r => r.json()).then(d => {
+        fetchT("/api-dashboard/config", { cache: "no-store" }).then(r => r.json()).then(d => {
           if (cancelled) return;
           if (d.ok) {
             setRelays(d.customRelays || []);
             setModels(d.customModels || []);
             if (d.refreshIntervalSec) setRefreshSec(d.refreshIntervalSec);
+            // C-2 (v1.4.1): 阈值/主币种也必须从 /config 补一次。
+            // 以前只从 /balances 的 config 读, 而冷启动 /balances 要等 8~10s →
+            // 那期间打开面板看到的是默认 50/10/CNY, 一点"保存并生效"就把用户真实配置覆盖了。
+            if (typeof d.safeThreshold === "number") setSafe(d.safeThreshold);
+            if (typeof d.warnThreshold === "number") setWarn(d.warnThreshold);
+            if (typeof d.currency === "string") setCurrency(d.currency);
             if (typeof d.overseasCurrency === "string") setOverseasCurrency(d.overseasCurrency);
             if (typeof d.whaleEnabled === "boolean") setWhaleOn(d.whaleEnabled);
             if (Array.isArray(d.officialProviders)) setOfficialText(d.officialProviders.join(", "));
@@ -1458,7 +1554,7 @@ window.__ModuleLoader__.load({
           }
         }).finally(() => { if (!cancelled) setLoading(false); });
         // 大肥鱼细项与主配置并行拉取, 失败保持默认值
-        fetch("/api-dashboard/whale/settings", { cache: "no-store" }).then(r => r.json()).then(d => {
+        fetchT("/api-dashboard/whale/settings", { cache: "no-store" }).then(r => r.json()).then(d => {
           if (cancelled || !d || !d.ok || !d.settings) return;
           const s = d.settings;
           setWf(prev => ({
@@ -1476,11 +1572,13 @@ window.__ModuleLoader__.load({
       }, [isOpen]);
       if (!isOpen) return null;
       const save = async () => {
-        const nextRefreshSec = Math.min(Math.max(Number(refreshSec) || 5, 5), 60)
+        // C-1 (v1.4.1): 原来这里夹的是 5 —— 输入框允许 1 秒、服务端 clampRefreshSec 也吃 1 秒,
+        // 只有 save() 把它悄悄改回 5 秒(用户设 1 秒保存后变 5 秒)。四处下限现在一致。
+        const nextRefreshSec = Math.min(Math.max(Number(refreshSec) || 1, 1), 60)
         setRefreshSec(nextRefreshSec)
         setSaving(true);
         try {
-          await fetch("/api-dashboard/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+          await fetchT("/api-dashboard/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
             customRelays: relays, customModels: models,
             safeThreshold: Number(safe), warnThreshold: Number(warn), currency, overseasCurrency,
             refreshIntervalSec: nextRefreshSec,
@@ -1514,7 +1612,7 @@ window.__ModuleLoader__.load({
         setWhaleOn(next);
         if (next) ensureWhaleWidget(); else removeWhaleWidget();
         try {
-          await fetch("/api-dashboard/config", {
+          await fetchT("/api-dashboard/config", {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ whaleEnabled: !!next }),
           });
@@ -1525,7 +1623,7 @@ window.__ModuleLoader__.load({
       const toggleBrands = async (next) => {
         setShowBrands(next);
         try {
-          await fetch("/api-dashboard/config", {
+          await fetchT("/api-dashboard/config", {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ showNoBalanceBrands: !!next }),
           });
@@ -1539,7 +1637,7 @@ window.__ModuleLoader__.load({
         setWf(prev => ({ ...prev, ...patch }));
         patchWhaleWidget(patch);
         try {
-          fetch("/api-dashboard/whale/settings", {
+          fetchT("/api-dashboard/whale/settings", {
             method: "PUT", headers: { "Content-Type": "application/json" },
             body: JSON.stringify(patch),
           }).catch(() => {});
@@ -2052,7 +2150,7 @@ window.__ModuleLoader__.load({
             peekRatio: st.peekRatio, left: st.left, top: st.top, side: st.side,
           };
           try {
-            fetch("/api-dashboard/whale/settings", {
+            fetchT("/api-dashboard/whale/settings", {
               method: "PUT", headers: { "Content-Type": "application/json" },
               body: JSON.stringify(lastWhaleSettings),
             }).catch(function () {});
@@ -2362,7 +2460,7 @@ window.__ModuleLoader__.load({
       }
       revealTimer = setTimeout(reveal, 2000);   // 兜底: 请求挂住也不能让鱼永远不出现
       applyAll();
-      fetch("/api-dashboard/whale/settings", { cache: "no-store" })
+      fetchT("/api-dashboard/whale/settings", { cache: "no-store" })
         .then(function (r) { return r.json(); })
         .then(function (d) {
           if (disposed) return;
@@ -2451,11 +2549,23 @@ window.__ModuleLoader__.load({
           // v1.4.0: 看板/详情/设置任一开着 → 锁住大肥鱼挂件的触摸。
           // 不这么做的话, 挂件(在 body 上, z-index 9600)会盖在设置面板上面,
           // 拖「身体大小 / 露出比例」滑块时实际拖的是挂件。
-          const overlayOpen = isSettingsOpen || view !== "bar";
+          /**
+           * 大肥鱼挂件锁定（v1.4.1 定稿）：**任何界面下都不锁**。
+           *
+           * 演进过程（别再走回头路）：
+           *   v1.4.0   `overlayOpen = isSettingsOpen || view !== "bar"` —— 一开设置就锁死，
+           *            维护者反馈「在设置里开启大肥鱼，图片动不了，得关掉才能动」。
+           *   v1.4.1a  改成只锁「看板 / 详情」两个整屏抽屉 —— 维护者再次要求全部放开。
+           *   v1.4.1b  **本版：永不锁定**，挂件在任何界面下都能拖。
+           *
+           * 锁的机制本身（`setWhaleLocked` / `.dshadb-whale-locked` CSS / `onDown` 里那道兜底）
+           * **保留着**：万一以后又出现「面板开着时拖滑块被挂件吃掉」这类反馈，
+           * 把下面这行换成 `setWhaleLocked(view !== "bar")` 即可恢复按界面锁定。
+           */
           react.useEffect(() => {
-            setWhaleLocked(overlayOpen);
+            setWhaleLocked(false);
             return () => setWhaleLocked(false);
-          }, [overlayOpen]);
+          }, []);
           // 峰谷时段变化同步给挂件 (台词里的「当前时间段」用它, 不涉及任何金额)
           react.useEffect(() => {
             updateWhaleContext({ isPeak: !!(config && config.isPeak) });
@@ -2514,7 +2624,7 @@ window.__ModuleLoader__.load({
           react.useEffect(() => {
             const cachedAt = window.__dshadbUpdateCheckedAt || 0;
             if (Date.now() - cachedAt < 5 * 60 * 1000) return; // 会话内查过就不重复
-            fetch("/api-dashboard/update", { headers: { accept: "application/json" } })
+            fetchT("/api-dashboard/update", { headers: { accept: "application/json" } })
               .then((r) => r.json())
               .then((d) => { if (d && d.ok) { window.__dshadbUpdateInfo = d; window.__dshadbUpdateCheckedAt = Date.now(); } })
               .catch(() => { /* 网络异常静默, 打开设置时可见固定错误文案 */ });

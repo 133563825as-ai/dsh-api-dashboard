@@ -101,7 +101,11 @@ a('setLocked 用 class 切换', src.includes('"dshadb-whale-locked"'))
 a('有模块级 setWhaleLocked + 记住状态', src.includes('function setWhaleLocked(') && src.includes('var whaleLocked = false'))
 a('挂件挂载时立刻套用锁定态', src.includes('if (whaleLocked) root.classList.add("dshadb-whale-locked")'))
 a('onDown 再兜一道 (防 pointer-events 被覆盖)', src.includes('classList.contains("dshadb-whale-locked")'))
-a('面板/详情/看板开着时上锁', src.includes('const overlayOpen = isSettingsOpen || view !== "bar"') && src.includes('setWhaleLocked(overlayOpen)'))
+// v1.4.1 定稿: 维护者先反馈「设置里打开大肥鱼后拖不动」, 随后明确要求**全部放开** ——
+// 现在任何界面下都不自动上锁; 锁的机制保留着, 需要时可改回 setWhaleLocked(view !== "bar")。
+a('任何界面都不自动锁挂件(能随时拖鱼)', src.includes('setWhaleLocked(false)'))
+a('不再按界面自动加锁', !src.includes('setWhaleLocked(overlayOpen)') && !src.includes('setWhaleLocked(whaleLockOverlay)'))
+a('锁定机制仍保留(可随时恢复)', src.includes('function setWhaleLocked(') && src.includes('.dshadb-whale-locked'))
 // 滑块触摸区要够高(用户原话「高度要高于他」), 免得贴着卡片边缘起手
 a('大肥鱼滑块高度 ≥ 32px', /\.dshadb_wf_range\{[^}]*height:3[2-9]px/.test(src))
 a('滑块圆点同步放大', /\.dshadb_wf_range::-webkit-slider-thumb\{[^}]*width:24px/.test(src))

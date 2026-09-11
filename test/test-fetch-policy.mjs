@@ -12,10 +12,13 @@ const eq = (n, got, want) => a(n + ' (got ' + JSON.stringify(got) + ')', JSON.st
 const plan = m.planBalancesFetch
 a('planBalancesFetch / clampRefreshSec 已导出', typeof plan === 'function' && typeof m.clampRefreshSec === 'function')
 
-// ==== 冷启动: 没有数据可显示, 只能等 ====
-eq('无缓存 → wait', plan({ hasData: false, age: 0, intervalMs: 5000 }), 'wait')
-eq('无缓存 + force → wait', plan({ force: true, hasData: false, age: 0 }), 'wait')
-eq('无缓存 + peek → wait (peek 也变不出数据)', plan({ peek: true, hasData: false, age: 0 }), 'wait')
+// ==== 冷启动: v1.4.1 起**不再阻塞首屏** ====
+// 旧行为是 wait —— 服务端刚重启时缓存为空, 第一个请求要 await 一次全量刷新, 而实测
+// 全量刷新要 8~13.6 秒(中转站 auto 探测串行试 3 个端点), 用户看到「重启进来等半天」。
+// 现在: 立刻回 loading + 后台刷新, 客户端保持骨架屏并 1.5 秒后重问; 只有显式强刷才阻塞。
+eq('无缓存 → background (不再阻塞首屏)', plan({ hasData: false, age: 0, intervalMs: 5000 }), 'background')
+eq('无缓存 + peek → background', plan({ peek: true, hasData: false, age: 0 }), 'background')
+eq('无缓存 + force → wait (用户主动要新数据, 阻塞等)', plan({ force: true, hasData: false, age: 0 }), 'wait')
 
 // ==== 有缓存且够新: 直接用, 不打平台接口 ====
 eq('有缓存且新鲜 → none', plan({ hasData: true, age: 1000, intervalMs: 5000 }), 'none')
@@ -36,8 +39,9 @@ eq('force+peek: peek 优先, 不阻塞', plan({ force: true, peek: true, hasData
 eq('非 force 非 peek + 过期 → wait (老行为: 进页面自动拉)', plan({ hasData: true, age: 6000, intervalMs: 5000 }), 'wait')
 
 // ==== 畸形输入不炸 ====
-eq('空对象', plan(), 'wait')
-eq('undefined', plan(undefined), 'wait')
+// 默认参数(无数据) → background: 与上面「冷启动不阻塞首屏」同一条规则
+eq('空对象', plan(), 'background')
+eq('undefined', plan(undefined), 'background')
 eq('intervalMs 缺失 → 5 分钟兜底, 5 秒不算过期', plan({ hasData: true, age: 5000 }), 'none')
 eq('intervalMs = 0 → 5 分钟兜底', plan({ hasData: true, age: 60000, intervalMs: 0 }), 'none')
 eq('age 为负 (时钟回拨) 不误判过期', plan({ hasData: true, age: -1000, intervalMs: 5000 }), 'none')

@@ -13,13 +13,52 @@
  *   - sessionProjections 单元 queryBalanceCost 估算本会话消耗 (按模型单价)。
  */
 
-import Schema from '@deepseek-ai/schemastery'
-import { z } from 'zod'
-import { readFileSync, writeFileSync, renameSync, chmodSync, existsSync, mkdirSync, rmSync, cpSync, statSync, readdirSync, realpathSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
+import { readFileSync, writeFileSync, renameSync, chmodSync, existsSync, mkdirSync, rmSync, cpSync, statSync, lstatSync, readdirSync, realpathSync } from 'node:fs'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { execFileSync } from 'node:child_process'
 import { tmpdir, homedir } from 'node:os'
 import { join, dirname, basename } from 'node:path'
+
+/**
+ * peer 依赖加载器（v1.4.1）—— 这一条直接决定「别人下载后能不能用」。
+ *
+ * 病症（真机实测复现）：用户按 README 执行 `dsh plugin --profile web add dsh-api-dashboard`，
+ * 安装成功，但启动时 **整个 dsh web 起不来**：
+ *
+ *   Cannot find package '@deepseek-ai/schemastery' imported from
+ *   /root/.local/share/pnpm/store/v10/files/42/e96689...
+ *
+ * 链路：profile 用 hoisted linker + autoInstallPeers:false（插件把它声明成 optional peer），
+ * DSHA 的 proot 带 `--link2symlink`，于是 pnpm 的硬链接被降级成**指向全局 store 的软链**；
+ * Node 的 ESM 会先把模块解析成 realpath，再从那开始向上找 node_modules ——
+ * 从 store 目录往上永远也走不到 `$DSH_HOME/profiles/node_modules`（DSH 放宿主依赖的地方）。
+ *
+ * 修法：先按常规 import；失败时改用宿主自己的模块回退目录做 CJS 解析
+ * （`createRequire` 用的是**给定路径**而不是 realpath，因此能穿透这层软链）。
+ * 这样 npm 安装、源码安装、软链安装三种布局都能加载。
+ */
+const resolvePeer = async (spec) => {
+  let primary = null
+  try { return await import(spec) } catch (e) { primary = e }
+  const home = process.env.DSH_HOME || join(homedir(), '.dsh')
+  const bases = [
+    join(home, 'profiles', 'node_modules', '__dshadb_resolver__.cjs'),
+    join(home, 'profiles', process.env.DSHA_STARTUP_PROFILE || 'web', 'node_modules', '__dshadb_resolver__.cjs'),
+  ]
+  for (const base of bases) {
+    try {
+      const entry = createRequire(base).resolve(spec)
+      return await import(pathToFileURL(entry).href)
+    } catch { /* 试下一个基准目录 */ }
+  }
+  throw primary
+}
+
+const schemaMod = await resolvePeer('@deepseek-ai/schemastery')
+const Schema = schemaMod.default ?? schemaMod
+const zodMod = await resolvePeer('zod')
+const z = zodMod.z ?? zodMod.default?.z ?? zodMod
 
 export const name = 'dsh-api-dashboard'
 
@@ -36,7 +75,33 @@ const MANIFEST_API = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/co
 const TARBALL_URL = `https://codeload.github.com/${REPO_OWNER}/${REPO_NAME}/tar.gz/refs/heads/${REPO_BRANCH}`
 
 /** 插件运行实体的安装根目录 (src/index.js 上两级; ESM 默认按 realpath 加载) */
-const SELF_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
+/**
+ * 插件自身的安装根目录（v1.4.1）。
+ *
+ * 不能只用 `dirname(dirname(import.meta.url))`：ESM 会把符号链接解析成 realpath，
+ * 而 npm 装进 profile 后文件常常是**指向 pnpm store 的软链** → 算出来的根目录是
+ * `.../store/v10/files`，于是 assets（图标 / 大肥鱼贴图 / 音效）全部 404、
+ * 版本号也读不到（一键更新会误判）。
+ * 这里按候选顺序找第一个「package.json 里 name 就是本插件」的目录。
+ */
+const resolveSelfRoot = () => {
+  const fromUrl = dirname(dirname(fileURLToPath(import.meta.url)))
+  const home = process.env.DSH_HOME || join(homedir(), '.dsh')
+  const profile = process.env.DSHA_STARTUP_PROFILE || 'web'
+  const candidates = [
+    fromUrl,
+    join(home, 'profiles', profile, 'node_modules', 'dsh-api-dashboard'),
+    join(home, 'profiles', 'node_modules', 'dsh-api-dashboard'),
+  ]
+  for (const dir of candidates) {
+    try {
+      const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
+      if (pkg && pkg.name === 'dsh-api-dashboard') return dir
+    } catch { /* 试下一个 */ }
+  }
+  return fromUrl
+}
+const SELF_ROOT = resolveSelfRoot()
 
 /** 读取指定目录中 package.json 的 version, 异常返回 null */
 const readVersionAt = (dir) => {
@@ -96,13 +161,28 @@ export async function applyUpdate({ targets = null, timeoutMs = 30000, remoteVer
     try {
       const legacyReal = realPathSafe(join(homedir(), 'dsha-api-dashboard'))
       const selfReal = realPathSafe(SELF_ROOT)
-      if (legacyReal && selfReal && legacyReal !== selfReal && existsSync(join(legacyReal, 'package.json'))) {
+      // H-2 (v1.4.1): 自动同步 ~/dsha-api-dashboard 只对「非 git 工作区」生效。
+      // 以前不判断, 于是维护者/开发者的 git clone 会在一次"一键更新"后被 tarball 覆写 ——
+      // codeload 的 tarball 里**没有 .git**(已实测), 删掉就再也回不来。
+      if (legacyReal && selfReal && legacyReal !== selfReal
+          && existsSync(join(legacyReal, 'package.json'))
+          && !existsSync(join(legacyReal, '.git'))) {
         dirs.push(legacyReal)
       }
     } catch { /* 探测失败不影响主流程 */ }
   }
   for (const dir of dirs) {
     if (!existsSync(join(dir, 'package.json'))) throw new Error(`target missing: ${dir}`)
+  }
+  // H-2 (v1.4.1): target 是符号链接时, 下面的 rmSync 会**穿透软链删光真实目录的内容**,
+  // 而 cpSync 对软链会抛 ERR_FS_CP_DIR_TO_NON_DIR; 备份 tar 里存的又只是软链本身 →
+  // 真实目录永久损坏且回滚不回来。遇到软链直接拒绝, 让用户改用真实路径。
+  for (const dir of dirs) {
+    let st = null
+    try { st = lstatSync(dir) } catch { st = null }
+    if (st && st.isSymbolicLink()) {
+      throw new Error(`refusing to update a symbolic-link target: ${dir} (use its real path instead)`)
+    }
   }
 
   // 1) 下载 tarball 到临时文件
@@ -138,7 +218,9 @@ export async function applyUpdate({ targets = null, timeoutMs = 30000, remoteVer
     // 5) 交换: 删旧内容 → 拷新内容 (node_modules 保留, 避免重装依赖)
     for (const dir of dirs) {
       swapped = true
-      const keep = new Set(['node_modules'])
+      // H-2 (v1.4.1): 必须保留 .git —— codeload 的 tarball 里没有它(实测),
+      // 删掉就等于把用户的 git 历史抹了, 且没有任何恢复途径。
+      const keep = new Set(['node_modules', '.git'])
       for (const entry of readdirSafe(dir)) {
         if (!keep.has(entry)) rmSync(join(dir, entry), { recursive: true, force: true })
       }
@@ -203,6 +285,15 @@ async function getUpdateStatus(force = false) {
 const STATE_FILE = join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'dsh-api-dashboard.json')
 
 /**
+ * A（v1.4.1）: 每个中转站「上次探到的可用余额端点」的记忆表。
+ * `queryCustomRelay` 的 auto 探测是**串行**试 3 个候选端点, 每个都要跑满 timeoutMs ——
+ * 实测一次全量刷新因此要 8~13.6 秒。记住命中过的端点并优先试它, 稳态下每个中转站只打 1 个请求。
+ * 只做**排序提示**, 候选全表仍然会依次试, 所以某个中转站换了端点也能自动跟上。
+ * 持久化在状态文件 `relayEndpoints`（重启后依然生效）。
+ */
+const relayEndpointHints = new Map()
+
+/**
  * 状态文件结构版本。**改动已持久化字段的默认值时必须 +1 并补一段迁移**,
  * 否则老用户的状态文件会把字段钉死在旧值上 —— 新默认值对老用户永远不生效。
  *   1 → 2: v1.4.0 `overseasCurrency` 默认 'follow' → 'USD'。
@@ -211,8 +302,44 @@ const STATE_FILE = join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'dsh-ap
  */
 const CONFIG_VERSION = 2
 
+/**
+ * 形状消毒 (v1.4.1): 状态文件是**我们自己的代码**写的, 但写盘可能被打断
+ * (磁盘满/进程被杀/UTF-8 截断), 用户也可能手改。字段形状一旦跑偏,
+ * 后面的 `(persisted.customRelays ?? []).map(...)` 会抛 TypeError —— 而 apply() 抛出
+ * 会让 **整个 dsh web 启动失败**(不是插件不显示, 是 GUI 打不开), 用户完全无从下手。
+ * 所以这里把所有"本该是数组/对象/数字"的字段统一消毒, 消毒不了就丢弃, 绝不让 apply() 抛。
+ * ⚠️ 新增持久化字段时, 记得同步登记到这里。
+ */
+const ARRAY_FIELDS = ['customRelays', 'customModels', 'officialProviders', 'dshProviderOptOut', 'presets']
+const OBJECT_FIELDS = ['whaleSettings', 'prices', 'relayEndpoints']
+const NUMBER_FIELDS = [
+  ['refreshIntervalMs', 1000, 60000],   // H-4b: 曾经能持久化成 -1 → 3 秒内 1794 次上游请求
+  ['clientPollIntervalMs', 1000, 60000],
+  ['timeoutMs', 1000, 60000],
+  ['safeThreshold', 0, Number.MAX_SAFE_INTEGER],
+  ['warnThreshold', 0, Number.MAX_SAFE_INTEGER],
+  ['configVersion', 0, Number.MAX_SAFE_INTEGER],
+]
+
+const sanitizePersistedShape = (s) => {
+  const out = { ...s }
+  for (const k of ARRAY_FIELDS) {
+    if (k in out && !Array.isArray(out[k])) delete out[k]
+  }
+  for (const k of OBJECT_FIELDS) {
+    if (k in out && (out[k] === null || typeof out[k] !== 'object' || Array.isArray(out[k]))) delete out[k]
+  }
+  for (const [k, min, max] of NUMBER_FIELDS) {
+    if (!(k in out)) continue
+    const n = Number(out[k])
+    if (!Number.isFinite(n)) { delete out[k]; continue }
+    out[k] = Math.min(Math.max(Math.round(n), min), max)
+  }
+  return out
+}
+
 const migratePersistedState = (parsed) => {
-  const s = (parsed && typeof parsed === 'object') ? parsed : {}
+  const s = sanitizePersistedShape((parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {})
   const ver = Number.isFinite(s.configVersion) ? s.configVersion : 1
   let out = s
   if (ver < 2) {
@@ -234,6 +361,9 @@ const loadPersistedState = () => {
 const savePersistedState = (state) => {
   try {
     const merged = { ...loadPersistedState(), ...state }
+    // H-4c (v1.4.1): 以前这里从不建父目录, 且吞掉所有异常 → ~/.dsh 不存在时
+    // 接口照样回 ok:true, 用户配置"保存成功"却没落盘, 重启即丢。现在先建目录。
+    mkdirSync(dirname(STATE_FILE), { recursive: true })
     // mode 0o600: 状态文件含自定义中转站/模型的 API Key 明文, 必须限定本用户可读
     // (不能依赖 umask —— 默认 umask 0022 的桌面机会落成 0644); chmod 兜底修正旧文件
     writeFileSync(STATE_FILE + '.tmp', JSON.stringify(merged, null, 2), { encoding: 'utf8', mode: 0o600 })
@@ -471,7 +601,15 @@ export const selectDshProviders = (entries, kinds, optOut) => {
  */
 export const planBalancesFetch = ({ force = false, peek = false, hasData = false, age = 0, intervalMs = 5000 } = {}) => {
   const stale = age > (intervalMs || 300000)   // 兼容旧行为: intervalMs 缺失时用 5 分钟
-  if (!hasData) return 'wait'                  // 冷启动(服务端刚重启): 确实没东西可显示, 只能等
+  /**
+   * v1.4.1: 冷启动**不再阻塞首屏**。
+   * 旧行为是 `return 'wait'` —— 服务端刚重启时缓存为空, 第一个请求要 await 一次**全量**刷新,
+   * 而实测全量刷新要 8~13.6 秒(中转站 auto 探测是串行试 3 个端点), 用户看到的就是
+   * 「重启进来等半天」。现在改成: 立刻回「还在加载」+ 把刷新丢后台, 客户端保持骨架屏并**1.5 秒后重问**,
+   * 数据一到就上屏。注意这**不是假数据** —— 返回的是空列表 + loading 标记, 界面显示的是"加载中"而非 0。
+   * 只有显式强刷(force, 用户主动要新数据)才继续阻塞等。
+   */
+  if (!hasData) return force ? 'wait' : 'background'
   if (!force && !stale) return 'none'
   if (peek) return age > 1000 ? 'background' : 'none'  // 1 秒内刚拉过就不重复打
   return age > 2000 ? 'wait' : 'none'          // 显式强刷留 2 秒节流, 防连点打爆平台接口
@@ -945,12 +1083,18 @@ async function fetchWithTimeout(url, headers, timeoutMs, method = 'GET') {
 
 /** 读取请求体并限制大小 (默认 256KB) —— 防持有 token 者灌大包打爆内存。超限抛错。 */
 async function readBody(req, limit = 256 * 1024) {
-  let body = ''
+  // H-4d (v1.4.1): 不能对每个 chunk 单独 toString —— 一个汉字的 3 个字节被 TCP 分到两个 chunk 时,
+  // 两边都会解出替换字符 U+FFFD, 中文中转站名/自定义模型名会被写坏并持久化(实测)。
+  // 改成先收集 Buffer 再整体解码。
+  const chunks = []
+  let size = 0
   for await (const chunk of req) {
-    body += chunk
-    if (body.length > limit) throw Object.assign(new Error('request body too large'), { statusCode: 413 })
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    size += buf.length
+    if (size > limit) throw Object.assign(new Error('request body too large'), { statusCode: 413 })
+    chunks.push(buf)
   }
-  return body
+  return Buffer.concat(chunks).toString('utf8')
 }
 
 /** 字符串清洗: 截断到 max 长度 (设置面板传入的任意字段统一过这里) */
@@ -1140,11 +1284,22 @@ export function parseResponse(queryType, json) {
       if (!json || typeof json !== 'object') return null
       const hasAny = 'total_granted' in json || 'total_available' in json || 'total_used' in json
       if (!hasAny) return null
-      const total = toAmount(json?.total_granted)
-      const used = toAmount(json?.total_used)
-      const hasAvail = json?.total_available != null
-      const available = hasAvail ? toAmount(json.total_available) : null
-      return { total: hasAvail ? available : (total - used), currency: 'USD', available, used, note: 'OpenAI 兼容额度' }
+      // H-4a (v1.4.1): 字段**存在但值无效**(null / 非数字)时, toAmount 会归 0,
+      // 于是 total = 0 - used 得到一个**负数余额** —— 与 openrouter 那次是同一类漏洞
+      // (红线: 不许把解析失败冒充成真实数字)。这里改成「值无效就不表态」。
+      // ⚠️ Number(null) === 0、Number('') === 0 —— 必须先把「空值」挡掉, 否则等于没挡
+      const numOrNull = (v) => {
+        if (v === null || v === undefined || v === '') return null
+        const n = Number(v)
+        return Number.isFinite(n) ? n : null
+      }
+      const grantedN = numOrNull(json?.total_granted)
+      const usedN = numOrNull(json?.total_used)
+      const availN = numOrNull(json?.total_available)
+      if (availN === null && (grantedN === null || usedN === null)) return null
+      const used = usedN ?? 0
+      const hasAvail = availN !== null
+      return { total: hasAvail ? availN : (grantedN - used), currency: 'USD', available: hasAvail ? availN : null, used, note: 'OpenAI 兼容额度' }
     }
     case 'siliconflow': {
       const d = json?.data
@@ -1398,6 +1553,13 @@ async function queryCustomRelay(relay, config) {
     )
   }
 
+  // A: 命中过的端点排到最前（只影响顺序, 不影响"全都会试一遍"的语义）
+  if (candidates.length > 1 && relayEndpointHints.has(id)) {
+    const hint = relayEndpointHints.get(id)
+    const idx = candidates.findIndex((c) => c.type === hint)
+    if (idx > 0) candidates.unshift(candidates.splice(idx, 1)[0])
+  }
+
   for (const cand of candidates) {
     const headers = { Accept: 'application/json', Authorization: `Bearer ${apiKey}` }
     const method = cand.type === 'quota' ? 'POST' : 'GET'
@@ -1409,6 +1571,11 @@ async function queryCustomRelay(relay, config) {
       try { json = JSON.parse(text) } catch { continue }
       const parsed = parseResponse(cand.type, json)
       if (parsed) {
+        // A: 记住这次命中的端点（变了才落盘, 避免每次刷新都写状态文件）
+        if (relayEndpointHints.get(id) !== cand.type) {
+          relayEndpointHints.set(id, cand.type)
+          try { savePersistedState({ relayEndpoints: Object.fromEntries(relayEndpointHints) }) } catch { /* 落盘失败不影响本次结果 */ }
+        }
         return {
           platform: id, name: name || '中转站', icon: 'relay', color: '#64748B', category: '中转站',
           status: 'ok', total: parsed.total, currency: parsed.currency, available: parsed.available,
@@ -1914,13 +2081,25 @@ export function makeCostProjection(configOrGetter, services) {
 export function apply(ctx, config) {
   // 用户保存的配置优先于 cordis.patch.yml 的默认 config (持久化状态)
   const persisted = loadPersistedState()
+  // A: 载入上次记住的中转站端点
+  try {
+    relayEndpointHints.clear()
+    const saved = persisted.relayEndpoints
+    if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+      for (const [k, v] of Object.entries(saved)) {
+        if (typeof k === 'string' && k.length <= 128 && typeof v === 'string' && v.length <= 32) relayEndpointHints.set(k, v)
+      }
+    }
+  } catch { /* 忽略 */ }
   const runtimeConfig = {
     refreshIntervalMs: persisted.refreshIntervalMs ?? config.refreshIntervalMs ?? 5000,
     clientPollIntervalMs: persisted.clientPollIntervalMs ?? config.clientPollIntervalMs ?? 5000,
     timeoutMs: persisted.timeoutMs ?? config.timeoutMs ?? 8000,
     presets: config.presets ?? PLATFORM_PRESETS.map(p => p.id),
-    customRelays: (persisted.customRelays ?? config.customRelays ?? []).map(r => ({ ...r })),
-    customModels: (persisted.customModels ?? config.customModels ?? []).map(m => ({ ...m })),
+    // H-1 (v1.4.1): 这里必须带 Array.isArray —— 状态文件形状跑偏时 apply() 抛出 =
+    // 整个 dsh web 启动失败(migratePersistedState 已消毒, 这里是第二道防线)
+    customRelays: (Array.isArray(persisted.customRelays) ? persisted.customRelays : (Array.isArray(config.customRelays) ? config.customRelays : [])).map(r => ({ ...r })),
+    customModels: (Array.isArray(persisted.customModels) ? persisted.customModels : (Array.isArray(config.customModels) ? config.customModels : [])).map(m => ({ ...m })),
     prices: config.prices ?? { 'deepseek-chat': { cacheHit: 0.1, cacheMiss: 1, output: 2 } },
     defaultPrices: config.defaultPrices ?? { cacheHit: 0.1, cacheMiss: 1, output: 2 },
     currency: persisted.currency ?? config.currency ?? 'CNY',
@@ -2129,9 +2308,51 @@ export function apply(ctx, config) {
       res.end(body)
     }
 
+    /**
+     * H-3 (v1.4.1): 插件路由的鉴权闸门。
+     *
+     * 为什么必须有这道闸: dsh 的 webserver 是「先查 exact 路由表, 再走 fallback」,
+     * 而浏览器的登录 cookie 校验只写在 fallback 里(dsh-host-frontend-static) ——
+     * 于是 `/api-dashboard/*` 全部绕过鉴权: 无需 token、无需 cookie 就能读配置、
+     * 改配置、改挂件、甚至触发 `/update/install`(会重写插件目录)。
+     * 更糟的是 `Content-Type: text/plain` 属于**浏览器不预检的 simple request**,
+     * 用户手机上随便打开一个网页, 那个网页就能 POST 过来改配置(实测 HTTP 200 且真的改了)。
+     *
+     * 老版本 dsh 没有 connection 服务时放行(那时本来也没有鉴权概念), 避免把插件打死。
+     */
+    /**
+     * H-3 (v1.4.1): 插件路由的鉴权闸门。
+     *
+     * 为什么必须有这道闸: dsh 的 webserver 是「先查 exact 路由表, 再走 fallback」,
+     * 而浏览器的登录 cookie 校验只写在 fallback 里(dsh-host-frontend-static) ——
+     * 于是 `/api-dashboard/*` 全部绕过鉴权: 无需 token、无需 cookie 就能读配置、
+     * 改配置、改挂件、甚至触发 `/update/install`(会重写插件目录)。
+     * 更糟的是 `Content-Type: text/plain` 属于**浏览器不预检的 simple request**,
+     * 用户手机上随便打开一个网页, 那个网页就能 POST 过来改配置(实测 HTTP 200 且真的改了)。
+     *
+     * 用 `connection.requestRejection(req)`: 与 dsh-web-mobile 同一个闸门,
+     * 同时覆盖「浏览器 cookie 鉴权」与「Host/来源可信」两项检查。
+     * ⚠️ 不能写 `ctx.get('connection')` —— 实测在插件 fiber 上取不到(返回 undefined),
+     *    必须用嵌套 inject 拿服务实例。
+     */
+    let connectionSvc = null
+    ctx.inject(['connection'], (c) => { connectionSvc = c.connection })
+    const allowRequest = (req, res) => {
+      const conn = connectionSvc
+      // 老版本 dsh 没有 connection 服务时放行(那时本来也没有鉴权概念), 避免把插件打死
+      if (!conn || typeof conn.requestRejection !== 'function') return true
+      let rejection
+      try { rejection = conn.requestRejection(req) } catch { rejection = undefined }
+      if (rejection === undefined) return true
+      res.writeHead(rejection, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' })
+      res.end(rejection === 401 ? 'dsh web authentication required; reopen the URL printed by dsh web.\n' : 'forbidden\n')
+      return false
+    }
+
     webCtx.effect(() => webCtx.webServer.register({
       kind: 'exact', path: '/api-dashboard/balances',
       async handler(req, res) {
+        if (!allowRequest(req, res)) return
         if (!['GET', 'HEAD', 'POST'].includes(req.method)) { res.writeHead(405, { Allow: 'GET, HEAD, POST' }); res.end(); return }
         const params = new URL(req.url ?? '/', 'http://127.0.0.1').searchParams
         const force = req.method === 'POST' || params.get('force') === '1'
@@ -2160,7 +2381,7 @@ export function apply(ctx, config) {
           res.end()
           return
         }
-        const body = JSON.stringify({ ok: true, balances: cache.balances, fetchedAt: cache.fetchedAt, config: cache.config })
+        const body = JSON.stringify({ ok: true, balances: cache.balances, fetchedAt: cache.fetchedAt, config: cache.config, loading: cache.balances.length === 0 })
         res.writeHead(200, {
           'Content-Type': 'application/json; charset=utf-8',
           'Cache-Control': 'private, no-cache',
@@ -2175,6 +2396,7 @@ export function apply(ctx, config) {
     webCtx.effect(() => webCtx.webServer.register({
       kind: 'exact', path: '/api-dashboard/prices',
       async handler(req, res) {
+        if (!allowRequest(req, res)) return
         if (req.method !== 'GET') { res.writeHead(405, { Allow: 'GET' }); res.end(); return }
         const cfg = runtimeConfig
         const cur = (cfg.currency ?? 'CNY').toUpperCase() === 'USD' ? 'USD' : 'CNY'
@@ -2195,6 +2417,7 @@ export function apply(ctx, config) {
     webCtx.effect(() => webCtx.webServer.register({
       kind: 'exact', path: '/api-dashboard/platforms',
       async handler(req, res) {
+        if (!allowRequest(req, res)) return
         if (req.method !== 'GET') { res.writeHead(405, { Allow: 'GET' }); res.end(); return }
         const presets = PLATFORM_PRESETS.filter(p => runtimeConfig.presets.includes(p.id)).map(p => ({
           id: p.id, name: p.label, icon: p.icon, color: p.color, category: p.category, queryType: p.queryType,
@@ -2207,6 +2430,7 @@ export function apply(ctx, config) {
     webCtx.effect(() => webCtx.webServer.register({
       kind: 'exact', path: '/api-dashboard/update',
       async handler(req, res) {
+        if (!allowRequest(req, res)) return
         if (req.method !== 'GET') { res.writeHead(405, { Allow: 'GET' }); res.end(); return }
         const force = new URL(req.url ?? '/', 'http://127.0.0.1').searchParams.get('force') === '1'
         try {
@@ -2221,6 +2445,7 @@ export function apply(ctx, config) {
     webCtx.effect(() => webCtx.webServer.register({
       kind: 'exact', path: '/api-dashboard/update/install',
       async handler(req, res) {
+        if (!allowRequest(req, res)) return
         if (req.method !== 'POST') { res.writeHead(405, { Allow: 'POST' }); res.end(); return }
         try {
           const result = await applyUpdate({})
@@ -2242,6 +2467,7 @@ export function apply(ctx, config) {
     webCtx.effect(() => webCtx.webServer.register({
       kind: 'exact', path: '/api-dashboard/icon',
       async handler(req, res) {
+        if (!allowRequest(req, res)) return
         if (req.method !== 'GET') { res.writeHead(405, { Allow: 'GET' }); res.end(); return }
         try {
           if (!iconCache) {
@@ -2267,6 +2493,7 @@ export function apply(ctx, config) {
     webCtx.effect(() => webCtx.webServer.register({
       kind: 'exact', path: '/api-dashboard/whale/image.png',
       async handler(req, res) {
+        if (!allowRequest(req, res)) return
         if (req.method !== 'GET') { res.writeHead(405, { Allow: 'GET' }); res.end(); return }
         try {
           if (!whaleImgCache) whaleImgCache = readFileSync(whaleAsset('DSniang1.png'))
@@ -2284,6 +2511,7 @@ export function apply(ctx, config) {
     webCtx.effect(() => webCtx.webServer.register({
       kind: 'exact', path: '/api-dashboard/whale/rua.gif',
       async handler(req, res) {
+        if (!allowRequest(req, res)) return
         if (req.method !== 'GET') { res.writeHead(405, { Allow: 'GET' }); res.end(); return }
         try {
           if (!whaleGifCache) whaleGifCache = readFileSync(whaleAsset('rua.gif'))
@@ -2301,6 +2529,7 @@ export function apply(ctx, config) {
       webCtx.effect(() => webCtx.webServer.register({
         kind: 'exact', path: `/api-dashboard/whale/sound/${kind}.mp3`,
         async handler(req, res) {
+        if (!allowRequest(req, res)) return
           if (req.method !== 'GET') { res.writeHead(405, { Allow: 'GET' }); res.end(); return }
           try {
             const set = new URL(req.url ?? '/', 'http://127.0.0.1').searchParams.get('set') === 'fx1' ? 'fx1' : 'duck'
@@ -2322,6 +2551,7 @@ export function apply(ctx, config) {
     webCtx.effect(() => webCtx.webServer.register({
       kind: 'exact', path: '/api-dashboard/whale/settings',
       async handler(req, res) {
+        if (!allowRequest(req, res)) return
         if (req.method === 'GET') { sendJson(res, 200, { ok: true, settings: runtimeConfig.whaleSettings }); return }
         if (req.method === 'PUT' || req.method === 'POST') {
           try {
@@ -2372,6 +2602,7 @@ export function apply(ctx, config) {
     webCtx.effect(() => webCtx.webServer.register({
       kind: 'exact', path: '/api-dashboard/config',
       async handler(req, res) {
+        if (!allowRequest(req, res)) return
         if (req.method === 'GET') {
           sendJson(res, 200, {
             ok: true,
@@ -2380,6 +2611,11 @@ export function apply(ctx, config) {
             presets: runtimeConfig.presets,
             refreshIntervalSec: Math.round(runtimeConfig.refreshIntervalMs / 1000),
             currency: runtimeConfig.currency,
+            // C-2 (v1.4.1): 以前这里不返回阈值, 设置面板只能等 /balances 带过来;
+            // 冷启动那几秒(/balances 可能要等 8~10s)打开面板 → 显示默认 50/10 →
+            // 用户一点"保存并生效"就把自己存的阈值覆盖掉了。补上。
+            safeThreshold: runtimeConfig.safeThreshold,
+            warnThreshold: runtimeConfig.warnThreshold,
             overseasCurrency: runtimeConfig.overseasCurrency,
             whaleEnabled: !!runtimeConfig.whaleEnabled,
             showNoBalanceBrands: !!runtimeConfig.showNoBalanceBrands,
