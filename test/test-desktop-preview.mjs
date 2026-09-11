@@ -45,9 +45,13 @@ a('依赖仍然为空 (零依赖是硬约束)',
 // 从源码里把**每一条**作用于 .dshadb_drawer 的媒体查询解出来, 再拿它们去跑设备矩阵
 // —— 断言的是「768×1024 得到居中面板、1024×768 得到居中对话框、844×390 还是手机全宽」
 // 这种**行为**, 而不是「源码里有某个字符串」。改断点数值时, 矩阵会立刻指出谁的观感被改了。
-const TIERS = [...cli.matchAll(/@media\s+([^{]+)\{\s*\.dshadb_drawer\s*\{([^}]*)\}/g)]
-  .map((m) => {
-    const cond = m[1].trim(), body = m[2]
+// 每一档写成一行 `@media (min-width:...){...}`，所以按行切最稳（块里有嵌套花括号，正则贪心到行尾才完整）
+const TIERS = cli.split('\n')
+  .map((l) => l.trim())
+  .filter((l) => l.startsWith('@media (min-width:'))
+  .map((line) => {
+    const m = line.match(/^@media\s+([^{]+)\{([\s\S]*)\}\s*$/)
+    const cond = m ? m[1].trim() : '', body = m ? m[2] : ''
     return {
       cond, body,
       minW: Number((cond.match(/min-width:\s*(\d+)px/) || [])[1] || 0),
@@ -82,6 +86,19 @@ a('桌面档的 max-height 带 !important (否则被内联 style 的 70vh/86vh �
   dialog ? /max-height\s*:\s*min\(720px,\s*80vh\)\s*!important/.test(dialog.body) : false)
 a('两个抽屉的内联 max-height 确实还在 (所以 !important 是必需的, 不是随手加的)',
   (cli.match(/style: \{ maxHeight: "\d+vh" \}/g) || []).length === 2)
+
+// --- 评审第 ② 条「平板空间利用率」的中间档: 桌面档加宽面板 + 卡片两列 ---
+a('桌面档把面板加宽到 720px (560px 单列在 10 寸以上左右全是空的)',
+  dialog ? /width\s*:\s*min\(720px,\s*100vw\s*-\s*64px\)/.test(dialog.body) : false)
+a('卡片容器有独立类名 (否则没法只对看板卡片做网格)',
+  cli.includes('className: "dshadb_cards"'))
+a('桌面档把卡片排成两列', dialog ? /\.dshadb_cards\s*\{\s*display:grid;grid-template-columns:1fr 1fr/.test(dialog.body) : false)
+a('卡片自带的 margin-bottom 在网格里必须归零 (否则行距翻倍)',
+  dialog ? /\.dshadb_cards \.dshadb_card\s*\{\s*margin-bottom:0\s*\}/.test(dialog.body) : false)
+a('平板/手机档不许动卡片布局 (两列只在桌面档出现)',
+  sheet ? !/dshadb_cards/.test(sheet.body) : false)
+a('网格容器用 align-items:start (卡片高度不一时不被拉平)',
+  dialog ? /\.dshadb_cards\s*\{[^}]*align-items:start/.test(dialog.body) : false)
 a('抽屉本体仍带 dshadb_drawer 类名 (断点才有东西可作用)',
   cli.includes('className: "dshadb_drawer"'))
 a('手机端不受影响: 断点条件是 min-width/min-height, 没有 max-width 反写',

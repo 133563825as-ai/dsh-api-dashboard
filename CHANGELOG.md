@@ -4,7 +4,7 @@
 
 ## v1.x
 
-- **v1.5.0-desktop-preview.3**（🧪 预发行，非正式版）— 响应外部评审的三条：① **≥1024px 桌面档**改成**居中对话框**（四角圆角 + 上下留边 + `max-height:min(720px,80vh)`，动画换成纯淡入以避开 transform 与 slideup 冲突；`max-height` 必须 `!important`，因为两个抽屉用内联 `style` 写死了 70vh/86vh）；② 三个抽屉补 **`role="dialog"` + `aria-label`** —— 但**明确不加 `aria-modal="true"`**（手机壳有 46 条以它为前缀的结构性 CSS 会把面板改烂，见 `AGENTS.md`）；③ 去掉 `min()` 里冗余的 `calc()`（lightningcss 规范化后正是 `min(560px, 100vw - 48px)`）。档位对齐宿主手机壳的 `MOBILE_QUERY = max-width:1023px`
+- **v1.5.0-desktop-preview.3**（🧪 预发行，非正式版）— 响应外部评审四条：① **≥1024px 桌面档**改成**居中对话框**（四角圆角 + 上下留边 + `max-height:min(720px,80vh)`，动画换成纯淡入以避开 transform 与 slideup 冲突；`max-height` 必须 `!important`，因为两个抽屉用内联 `style` 写死了 70vh/86vh）；② 桌面档**面板加宽到 720px、平台卡片排成两列**（560px 单列在 10 寸以上两侧全空；卡片自带的 `margin-bottom:9px` 在网格里归零，否则行距翻倍）；③ 三个抽屉补 **`role="dialog"` + `aria-label`** —— 但**明确不加 `aria-modal="true"`**（手机壳有 46 条以它为前缀的结构性 CSS 会把面板改烂，见 `AGENTS.md`）；④ 去掉 `min()` 里冗余的 `calc()`（lightningcss 规范化后正是 `min(560px, 100vw - 48px)`）。档位对齐宿主手机壳的 `MOBILE_QUERY = max-width:1023px`
 - **v1.5.0-desktop-preview.2**（🧪 预发行，非正式版）— 平板覆盖：断点从「只看宽度」改成 **`min-width:768px` + `min-height:600px`**。iPad mini 竖屏(768×1024)、所有平板横竖屏、笔记本与台式都拿到居中 560px 面板；**手机横屏**(844×390 这类宽度过 768 但很矮的视口)被 min-height 挡住，仍走原来的全宽抽屉。正式版仍是 **v1.4.2**
 - **v1.5.0-desktop-preview.1**（🧪 预发行，非正式版）— 桌面宽屏适配：设置/看板抽屉在 ≥768px 收成**居中的 560px 面板**（原先横铺整屏），手机端行为与 v1.4.2 完全一致；预览版带醒目横幅标识，且**不参与一键更新**（避免被 main 的正式版覆盖）
 - **v1.4.2** — 修复 DeepSeek 余额读错钱包：`balance_infos` 多币种且顺序不保证，旧代码盲取第一条，会把有余额的账户随机显示成「$0.00 · 异常」

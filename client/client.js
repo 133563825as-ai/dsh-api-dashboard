@@ -265,7 +265,10 @@ window.__ModuleLoader__.load({
 @media (min-width:768px) and (min-height:600px){.dshadb_drawer{width:min(560px,100vw - 48px);margin:0 auto;border-radius:22px 22px 0 0}}
 /* 桌面档：居中对话框。max-height 必须带 !important —— 两个抽屉各自用**内联 style** 写死了 70vh / 86vh，
    而内联样式优先级高于样式表，不加 !important 这条规则根本轮不到生效。 */
-@media (min-width:1024px) and (min-height:600px){.dshadb_drawer{top:50%;bottom:auto;transform:translateY(-50%);max-height:min(720px,80vh) !important;border-radius:22px;box-shadow:0 24px 64px rgba(0,0,0,0.22);animation:dshadb-fadein .16s ease-out}}
+/* 桌面档：居中对话框 + 卡片两列。
+   面板 560 → 720px，平台卡片在 ≥1024px 排成两列 —— 560px 单列在 10 寸以上的屏上左右全是空的。
+   卡片本体自带 margin-bottom:9px（手机上是纵向列表的间距），进网格后必须归零，否则行距翻倍。 */
+@media (min-width:1024px) and (min-height:600px){.dshadb_drawer{top:50%;bottom:auto;transform:translateY(-50%);width:min(720px,100vw - 64px);max-height:min(720px,80vh) !important;border-radius:22px;box-shadow:0 24px 64px rgba(0,0,0,0.22);animation:dshadb-fadein .16s ease-out}.dshadb_cards{display:grid;grid-template-columns:1fr 1fr;gap:9px;align-items:start}.dshadb_cards .dshadb_card{margin-bottom:0}}
 .dshadb_preview_banner{display:flex;flex-direction:column;gap:2px;margin:0 0 10px;padding:9px 11px;border-radius:12px;background:#fff8e6;border:1px solid #f0d9a0;color:#7a5b12;font-size:11px;font-weight:600;line-height:1.5}
 .dshadb_preview_banner b{font-size:12px;font-weight:800;color:#6b4d06}
 @media (prefers-color-scheme:dark){.dshadb_preview_banner{background:#3a3016;border-color:#6b5a24;color:#f2dfae}.dshadb_preview_banner b{color:#ffe9b0}}
@@ -555,7 +558,7 @@ window.__ModuleLoader__.load({
       "update.done": "已更新, 重启 Web GUI 生效", "update.fail": "更新失败, 已保持原版本",
       "update.checkfail": "检查失败 (网络异常)",
       "preview.title": "桌面 / 平板适配预览版 · 预发行",
-      "preview.body": "供电脑与平板试用：≥1024px 宽时面板变成居中对话框，768~1023px 收成居中 560px 面板；手机与手机横屏保持原样。预览版不参与一键更新。",
+      "preview.body": "供电脑与平板试用：≥1024px 宽时面板变成居中对话框（卡片两列），768~1023px 收成居中 560px 面板；手机与手机横屏保持原样。预览版不参与一键更新。",
       "update.previewHint": "预览版不参与一键更新（避免被 main 上的正式版覆盖）",
       "settings.section.basic": "基础设置", "settings.section.relays": "中转站", "settings.section.models": "自定义模型",
       "settings.section.whale": "大肥鱼",
@@ -616,7 +619,7 @@ window.__ModuleLoader__.load({
       "update.done": "Updated. Restart Web GUI to apply", "update.fail": "Update failed, version unchanged",
       "update.checkfail": "Check failed (network)",
       "preview.title": "Desktop / tablet preview — pre-release",
-      "preview.body": "For desktop and tablet: at 1024px and wider the panel becomes a centred dialog, at 768-1023px a centred 560px sheet. Phones and phone-landscape keep the original layout. Preview builds do not take part in one-click updates.",
+      "preview.body": "For desktop and tablet: at 1024px and wider the panel becomes a centred dialog with a two-column card grid, at 768-1023px a centred 560px sheet. Phones and phone-landscape keep the original layout. Preview builds do not take part in one-click updates.",
       "update.previewHint": "Preview build: one-click update is off, so the stable line on main cannot overwrite it.",
       "settings.section.basic": "Basic", "settings.section.relays": "Relays", "settings.section.models": "Custom Models",
       "settings.section.whale": "Whale",
@@ -1114,7 +1117,7 @@ window.__ModuleLoader__.load({
         ]),
         react.createElement("div", { className: "dshadb_group_body" + (open ? " dshadb_group_body_open" : ""), key: "body" }, [
           react.createElement("div", { className: "dshadb_group_body_inner", key: "inner" }, [
-            react.createElement("div", { key: "cards" }, children),
+            react.createElement("div", { className: "dshadb_cards", key: "cards" }, children),
           ]),
         ]),
       ]);
