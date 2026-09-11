@@ -8,6 +8,12 @@
 > ⚠️ **安装或维护本插件之前，请先读 [`AGENTS.md`](AGENTS.md)** —— 数据准确性红线、踩过的坑、安装姿势对照都在那里。
 > 本插件深度绑定 DeepSeek Harness 的客户端与宿主 API，**只能在 DSH 里运行**（手机版 DSHA 与桌面版同框架）。
 
+> 🧪 **你现在看的是预发行分支 `preview/desktop`** —— 版本 `v1.5.0-desktop-preview.1`。
+> 相对正式版只多一件事：**桌面 / 宽屏适配**（设置与看板抽屉在 ≥768px 宽时收成居中的 560px 面板，
+> 原先会横铺整个窗口）。**手机端行为与正式版 v1.4.2 完全一致**，逻辑一行没动。
+> 预览版在设置面板顶部带黄色标识，并且**不参与一键更新**（不会被 main 上的正式版悄悄覆盖）。
+> 装它：`DSH_DASHBOARD_REF=preview/desktop sh install.sh`；正式版仍在 `main`。
+
 ## 界面预览
 
 **余额条**常驻在输入框下方；会话里有子代理时，下面会多一行**可横滑的消耗胶囊**（顺序 = 创建顺序，长按看详情）。
@@ -67,10 +73,16 @@ dsh plugin --profile web add link:/root/dsha-api-dashboard
 ```
 
 > 仓库根目录的 [`install.sh`](install.sh) 把上面 5 步做完了：`sh install.sh`。
+> 装**预发行（桌面适配预览）分支**：`DSH_DASHBOARD_REF=preview/desktop sh install.sh`。
 
 **桌面版**同理（路径换成你自己的）。npm 一行命令 `dsh plugin --profile web add dsh-api-dashboard`
 在桌面版通常可用，但在**手机版 DSHA 上装完客户端 UI 不会出现** —— 原因与逐条实测对照见
 [`AGENTS.md`](AGENTS.md#二安装须知ai-代理注意)。
+
+> 🖥️ **桌面上能用到什么程度**（本预览分支实测口径）：交互全部走 pointer events，鼠标拖拽 / 点击 / 悬浮正常；
+> 卡片 hover 与深色模式都有；大肥鱼挂件能用鼠标拖。原先唯一的桌面缺口是**抽屉横铺整屏**（CSS 里没有任何宽度断点），
+> 本分支已补 `@media (min-width:768px)` 的居中限宽。手机壳手势层（`dsh-web-mobile`）只认 touch/pen，
+> 桌面上不会干扰。
 
 ### 升级
 
@@ -125,7 +137,7 @@ dsh plugin --profile web add link:/root/dsha-api-dashboard
 
 ## 更新日志
 
-最近一版 **v1.4.1** —— 安全与稳定性审计修复。一版一行的完整历史见 [`CHANGELOG.md`](CHANGELOG.md)。
+最近一版 **v1.4.2**（本分支为预发行 `v1.5.0-desktop-preview.1`）—— DeepSeek 多币种钱包读取修复 + 桌面宽屏适配预览。一版一行的完整历史见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## License
 

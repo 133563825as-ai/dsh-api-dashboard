@@ -111,6 +111,16 @@ const readVersionAt = (dir) => {
   } catch { return null }
 }
 
+/**
+ * v1.5.0-desktop-preview.1: 预发行(预览版)标识。
+ * 判定只看版本号本身 —— semver 预发布后缀(`1.5.0-desktop-preview.1` 里 `-` 之后那一段)
+ * 就是"这不是正式版"的唯一事实来源, 不额外加配置项(加配置项 = 两处真相, 迟早漂移)。
+ * 用途: ① 下发给客户端, 前端据此显示「预览版」横幅; ② 预览版**不参与一键自更新**
+ * (否则一次误点就被 main 的正式版覆盖, 预览用户会莫名回退)。
+ */
+const PLUGIN_VERSION = readVersionAt(SELF_ROOT) || '0.0.0'
+const IS_PREVIEW = PLUGIN_VERSION.includes('-')
+
 /** 轻量 semver 比较: a>b 返回 1, a<b 返回 -1, 相等返回 0 (忽略预发布后缀) */
 export function semverCompare(a, b) {
   const pa = String(a).split('-')[0].split('.').map(Number)
@@ -2293,6 +2303,9 @@ export function apply(ctx, config) {
           providerKinds: readProviderKinds(),
           // v1.4.0「真自动」: DSH provider 发现结果 (只读, 不含 key)
           dshProviders: readDshProviderStatus(),
+          // v1.5.0-desktop-preview: 版本与预发行标识 —— 客户端据此显示「预览版」横幅, 并停用一键更新
+          version: PLUGIN_VERSION,
+          preview: IS_PREVIEW,
         },
       }
       cache.etag = '"' + fnv1a(JSON.stringify(cache.balances) + '|' + JSON.stringify(cache.config)) + '"'
@@ -2639,6 +2652,8 @@ export function apply(ctx, config) {
             // v1.4.0「真自动」: 从 settings.yaml 自动发现的 provider 及启用状态 (不含 key)
             dshProviders: readDshProviderStatus(),
             dshProviderOptOut: runtimeConfig.dshProviderOptOut,
+            version: PLUGIN_VERSION,
+            preview: IS_PREVIEW,
           })
           return
         }
@@ -2729,6 +2744,8 @@ export function apply(ctx, config) {
               providerKinds: readProviderKinds(),
               dshProviders: readDshProviderStatus(),
               dshProviderOptOut: runtimeConfig.dshProviderOptOut,
+              version: PLUGIN_VERSION,
+              preview: IS_PREVIEW,
             })
           } catch (err) {
             const code = err && err.statusCode === 413 ? 413 : 400

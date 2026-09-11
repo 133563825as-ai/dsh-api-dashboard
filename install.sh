@@ -1,5 +1,5 @@
 #!/bin/sh
-# dsh-api-dashboard 安装脚本（v1.4.1）
+# dsh-api-dashboard 安装脚本（v1.5.0-desktop-preview.1）
 #
 # 为什么不是 `dsh plugin --profile web add dsh-api-dashboard`：
 #   手机版 DSHA 跑在 proot 容器里（启动参数带 --link2symlink），pnpm 的硬链接会被降级成
@@ -11,17 +11,21 @@
 # 用法：
 #   sh install.sh [安装目录]        # 默认 /root/dsha-api-dashboard
 #   DSH_HOME=/xxx sh install.sh /path/to/dir
+#   DSH_DASHBOARD_REF=preview/desktop sh install.sh    # 装预发行(桌面适配预览)分支
 #
 # 环境变量：
 #   DSH_INSTALL_NM   手动指定宿主 DSH 的 node_modules 目录
 #   DSHA_STARTUP_PROFILE / DSH_PROFILE   profile 名（默认 web）
+#   DSH_DASHBOARD_REF   要装的 git ref（默认 main）。预发行版是 `preview/desktop`；
+#                       预览版装完后**不参与一键更新**（避免被 main 的正式版覆盖）。
 
 set -eu
 
 TARGET="${1:-/root/dsha-api-dashboard}"
 PROFILE="${DSHA_STARTUP_PROFILE:-${DSH_PROFILE:-web}}"
 DSH_HOME_DIR="${DSH_HOME:-$HOME/.dsh}"
-REPO_URL="https://codeload.github.com/133563825as-ai/dsh-api-dashboard/tar.gz/refs/heads/main"
+REF="${DSH_DASHBOARD_REF:-main}"
+REPO_URL="https://codeload.github.com/133563825as-ai/dsh-api-dashboard/tar.gz/refs/heads/${REF}"
 TMP_TGZ="${TMPDIR:-/tmp}/dsh-api-dashboard-install.tar.gz"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 
@@ -36,6 +40,7 @@ fi
 
 # ---- 1. 下载 ----
 say "→ 下载 $REPO_URL"
+[ "$REF" = "main" ] || say "  （预发行分支：$REF —— 装完后不参与一键更新，正式版仍在 main）"
 if command -v curl >/dev/null 2>&1; then
   curl -fL "$REPO_URL" -o "$TMP_TGZ" || die "下载失败（检查网络/代理）"
 elif command -v wget >/dev/null 2>&1; then
