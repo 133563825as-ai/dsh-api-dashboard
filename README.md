@@ -125,8 +125,7 @@ dsh plugin --profile web add link:/root/dsha-api-dashboard
 
 ## 更新日志
 
-最近一版 **v1.4.1** —— 安全与稳定性审计修复（状态文件形状、一键自更新删 `.git`、路由鉴权、
-冷启动不再阻塞、1 秒刷新、错误路径出口、UI 居中）。完整历史见 [`CHANGELOG.md`](CHANGELOG.md)。
+最近一版 **v1.4.1** —— 安全与稳定性审计修复。一版一行的完整历史见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## License
 
