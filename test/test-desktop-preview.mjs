@@ -152,11 +152,53 @@ a('源码里留了「为什么不用 aria-modal」的说明 (免得后人"顺手
 // ==========================================================================
 // ③ 预览标识: 服务端下发 + 客户端只在 preview 为真时渲染
 // ==========================================================================
-const { semverCompare } = await import(new URL('../src/index.js', import.meta.url).pathname + '?v=' + Date.now())
+const { semverCompare, UPDATE_REF, PREVIEW_CHANNEL } = await import(new URL('../src/index.js', import.meta.url).pathname + '?v=' + Date.now())
 a('semverCompare: 预发行版本号仍能比较 (1.5.0-… > 1.4.2)',
   semverCompare('1.5.0-desktop-preview.1', '1.4.2') === 1)
-a('semverCompare: 同一基线的预发行视为相等 (不会自我提示更新)',
-  semverCompare('1.5.0-desktop-preview.1', '1.5.0') === 0)
+a('semverCompare: 预发行 < 同版本号的正式版 (semver §11, 否则预览版会被当成"已是最新")',
+  semverCompare('1.5.0-desktop-preview.1', '1.5.0') === -1)
+
+// --- v1.5.0-desktop-preview.4: 预览频道自更新 ---
+// 「预览版能不能更新到新预览版」当年的两个拦路虎:
+//   ① 比较函数忽略预发布后缀 → preview.3 与 preview.2 比出来是 0 → 永远"已是最新";
+//   ② 更新源写死 main + 客户端一刀切禁用按钮 → 用户只能重跑 install.sh。
+// 这里把两条都钉住: 顺序要对, 频道要来自 package.json 的 dsh.updateRef。
+a('semverCompare: 同一基线的预发布按 .N 递增 (preview.3 > preview.2)',
+  semverCompare('1.5.0-desktop-preview.3', '1.5.0-desktop-preview.2') === 1)
+a('semverCompare: 预发布的数字标识符按数值比, 不是字典序 (preview.10 > preview.9)',
+  semverCompare('1.5.0-desktop-preview.10', '1.5.0-desktop-preview.9') === 1)
+a('semverCompare: 字母数字标识符按字典序 (preview.b > preview.a)',
+  semverCompare('1.5.0-a.b', '1.5.0-a.a') === 1)
+a('semverCompare: 数字标识符 < 字母数字标识符 (1.5.0-1 < 1.5.0-a)',
+  semverCompare('1.5.0-1', '1.5.0-a') === -1)
+a('semverCompare: 标识符少的那串更小 (1.5.0-a < 1.5.0-a.1)',
+  semverCompare('1.5.0-a', '1.5.0-a.1') === -1)
+a('semverCompare: 相同版本仍相等 (不误报更新)', semverCompare('1.5.0-preview.4', '1.5.0-preview.4') === 0)
+a('semverCompare: 主版本号优先于预发布 (1.6.0-a > 1.5.9)',
+  semverCompare('1.6.0-a', '1.5.9') === 1)
+
+a('package.json 声明了更新频道 dsh.updateRef',
+  pkg.dsh && pkg.dsh.updateRef === 'preview/desktop', JSON.stringify(pkg.dsh && pkg.dsh.updateRef))
+a('服务端从自身 package.json 读频道 (跟着 tarball 走, 不靠状态文件也不猜命名规则)',
+  /pkg\?\.dsh\?\.updateRef/.test(src))
+a('频道值走白名单校验 (会被拼进 URL 与 codeload 路径)',
+  /\^\[A-Za-z0-9\]\[A-Za-z0-9\._\/-\]\{0,99\}\$/.test(src) && /!ref\.includes\('\.\.'\)/.test(src))
+a('更新检查与 tarball 都用频道 ref, 不再写死 main',
+  /\?ref=\$\{UPDATE_REF\}/.test(src) && /refs\/heads\/\$\{UPDATE_REF\}/.test(src) && !/REPO_BRANCH/.test(src))
+a('实测: 这个构建的频道就是预览分支', UPDATE_REF === 'preview/desktop', String(UPDATE_REF))
+a('实测: 这个构建判定为「预览频道」(因此允许一键更新)', PREVIEW_CHANNEL === true)
+a('实测: 同频道的新预览会被识别为可更新 (preview.5 > preview.4)',
+  semverCompare('1.5.0-desktop-preview.5', '1.5.0-desktop-preview.4') > 0)
+a('updateRef / previewChannel 下发到客户端 (3 处 config 载荷)',
+  (src.match(/updateRef:\s*UPDATE_REF,/g) || []).length === 3 &&
+  (src.match(/previewChannel:\s*PREVIEW_CHANNEL,/g) || []).length === 3,
+  `${(src.match(/updateRef:\s*UPDATE_REF,/g) || []).length}/${(src.match(/previewChannel:\s*PREVIEW_CHANNEL,/g) || []).length}`)
+a('客户端只在「预览版但拿不到频道」时才禁用更新 (两种情形分开)',
+  /const previewUpdateLocked = !!\(config && config\.preview && !config\.previewChannel\)/.test(cli))
+a('两个更新按钮都用 previewUpdateLocked, 不再用一刀切的 config.preview',
+  (cli.match(/previewUpdateLocked/g) || []).length >= 4 && !/disabled:.*\|\| !!\(config && config\.preview\)/.test(cli))
+a('面板会告诉用户「更新只在本分支内、不会被正式版覆盖」',
+  (cli.match(/"update\.previewChannelHint"\s*:/g) || []).length === 2 && /config\.updateRef/.test(cli))
 
 a('服务端从自身 package.json 取版本 (PLUGIN_VERSION)',
   /const\s+PLUGIN_VERSION\s*=\s*readVersionAt\(SELF_ROOT\)/.test(src))
@@ -180,14 +222,18 @@ a('横幅样式有深色模式分支',
   /prefers-color-scheme:dark\)\{\.dshadb_preview_banner/.test(cli.replace(/\s+/g, '')))
 
 // ==========================================================================
-// ④ 预览版不参与一键更新
+// ④ 预览版的更新边界: **频道内可更新, 但绝不被正式版覆盖**
+//    （.1~.3 是一刀切禁用; .4 起改成频道机制 —— 所以这里钉的是「两种情形分开」,
+//      以及「一旦没有频道字段就必须退回禁用」这条兜底。）
 // ==========================================================================
-a('「检查更新」按钮在预览版下被禁用',
-  /disabled:\s*upd\.phase === "checking" \|\| upd\.phase === "installing" \|\| !!\(config && config\.preview\)/.test(cli))
-a('「一键更新」按钮在预览版下不渲染',
-  /upd\.info\?\.hasUpdate && !\(config && config\.preview\)/.test(cli))
-a('面板里说明了为什么不给更新 (不是静默失效)',
-  cli.includes('t("update.previewHint")') &&
+a('有频道时不禁用「检查更新」(否则预览用户每版都得重跑 install.sh)',
+  /disabled: upd\.phase === "checking" \|\| upd\.phase === "installing" \|\| previewUpdateLocked/.test(cli))
+a('「一键更新」按钮的显示条件是 hasUpdate **且** 未被锁, 不再看 config.preview',
+  /upd\.info\?\.hasUpdate && !previewUpdateLocked/.test(cli))
+a('锁的条件必须是「预览版 **且** 没有预览频道」(没有频道才退回禁用兜底)',
+  /previewUpdateLocked = !!\(config && config\.preview && !config\.previewChannel\)/.test(cli))
+a('面板里说明了两种情形 (不是静默失效)',
+  cli.includes('t("update.previewHint")') && cli.includes('t("update.previewChannelHint")') &&
   (cli.match(/"update\.previewHint"\s*:/g) || []).length === 2)
 a('更新成功后的 DSHA Toast 未被预览改动波及 (仍是容错调用)',
   /\/app\/toast\?text=/.test(cli))

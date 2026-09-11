@@ -558,8 +558,9 @@ window.__ModuleLoader__.load({
       "update.done": "已更新, 重启 Web GUI 生效", "update.fail": "更新失败, 已保持原版本",
       "update.checkfail": "检查失败 (网络异常)",
       "preview.title": "桌面 / 平板适配预览版 · 预发行",
-      "preview.body": "供电脑与平板试用：≥1024px 宽时面板变成居中对话框（卡片两列），768~1023px 收成居中 560px 面板；手机与手机横屏保持原样。预览版不参与一键更新。",
+      "preview.body": "供电脑与平板试用：≥1024px 宽时面板变成居中对话框（卡片两列），768~1023px 收成居中 560px 面板；手机与手机横屏保持原样。预览版只在预览分支内自更新，不会被正式版覆盖。",
       "update.previewHint": "预览版不参与一键更新（避免被 main 上的正式版覆盖）",
+      "update.previewChannelHint": "预览频道自更新：只会更新到该分支上的新预览版，不会被 main 的正式版覆盖 ·",
       "settings.section.basic": "基础设置", "settings.section.relays": "中转站", "settings.section.models": "自定义模型",
       "settings.section.whale": "大肥鱼",
       "whale.enable": "收养大肥鱼", "whale.enableHint": "在屏幕边缘养一只会探头的大肥鱼（纯互动，不显示余额）",
@@ -619,8 +620,9 @@ window.__ModuleLoader__.load({
       "update.done": "Updated. Restart Web GUI to apply", "update.fail": "Update failed, version unchanged",
       "update.checkfail": "Check failed (network)",
       "preview.title": "Desktop / tablet preview — pre-release",
-      "preview.body": "For desktop and tablet: at 1024px and wider the panel becomes a centred dialog with a two-column card grid, at 768-1023px a centred 560px sheet. Phones and phone-landscape keep the original layout. Preview builds do not take part in one-click updates.",
+      "preview.body": "For desktop and tablet: at 1024px and wider the panel becomes a centred dialog with a two-column card grid, at 768-1023px a centred 560px sheet. Phones and phone-landscape keep the original layout. Preview builds update only within the preview branch, never to the stable release.",
       "update.previewHint": "Preview build: one-click update is off, so the stable line on main cannot overwrite it.",
+      "update.previewChannelHint": "Preview-channel update: only newer previews on this branch, never the stable release on main ·",
       "settings.section.basic": "Basic", "settings.section.relays": "Relays", "settings.section.models": "Custom Models",
       "settings.section.whale": "Whale",
       "whale.enable": "Adopt Big Whale", "whale.enableHint": "Keep a peeking whale on the screen edge (interactive only)",
@@ -1490,6 +1492,13 @@ window.__ModuleLoader__.load({
       // 服务端按 baseURL 域名自动判定的结果 (只读, 供用户判断还需不需要手填)
       const [providerKinds, setProviderKinds] = react.useState(
         (config && config.providerKinds) || {});
+      /**
+       * v1.5.0-desktop-preview.4: 预览版**只有在「拿不到预览频道」时**才禁用一键更新。
+       * 频道由服务端从自身 package.json 的 `dsh.updateRef` 读出来下发 —— 更新源就是那条分支,
+       * 所以「被 main 的正式版覆盖」在结构上就不可能发生, 不需要靠禁用按钮来防。
+       * 预览版但没有频道字段(手动安装 / 字段缺失) → 维持旧的禁用兜底。
+       */
+      const previewUpdateLocked = !!(config && config.preview && !config.previewChannel);
       // v1.4.0「真自动」: 从 settings.yaml 自动发现的 DSH provider + 用户关掉的名单。
       // 服务端只下发「名字/baseURL/是否官方」, **不下发 key**。
       const [dshProviders, setDshProviders] = react.useState(
@@ -1974,14 +1983,20 @@ window.__ModuleLoader__.load({
               upd.info?.hasUpdate ? react.createElement("span", { key: "upd_badge", style: { color: "#35b56b", fontSize: "12px", fontWeight: "700" } }, "→ v" + upd.info.remote) : null,
             ]),
             react.createElement("div", { key: "upd_btns", style: { display: "flex", gap: "8px", marginTop: "8px" } }, [
-              react.createElement("button", { type: "button", className: "dshadb_add_btn", onClick: () => checkUpdate(true), disabled: upd.phase === "checking" || upd.phase === "installing" || !!(config && config.preview), key: "upd_chk", style: { flex: 1, padding: "8px", fontSize: "12px" } },
+              react.createElement("button", { type: "button", className: "dshadb_add_btn", onClick: () => checkUpdate(true), disabled: upd.phase === "checking" || upd.phase === "installing" || previewUpdateLocked, key: "upd_chk", style: { flex: 1, padding: "8px", fontSize: "12px" } },
                 upd.phase === "checking" ? t("update.checking") : t("update.check")),
-              upd.info?.hasUpdate && !(config && config.preview) ? react.createElement("button", { type: "button", className: "dshadb_save_btn", onClick: installUpdate, disabled: upd.phase === "installing", key: "upd_go", style: { flex: 1, padding: "8px", fontSize: "12px" } },
+              upd.info?.hasUpdate && !previewUpdateLocked ? react.createElement("button", { type: "button", className: "dshadb_save_btn", onClick: installUpdate, disabled: upd.phase === "installing", key: "upd_go", style: { flex: 1, padding: "8px", fontSize: "12px" } },
                 upd.phase === "installing" ? t("update.installing") : t("update.install") + " v" + upd.info.remote) : null,
             ]),
-            // v1.5.0-desktop-preview: 预览版**不参与一键更新** —— 否则一次误点就被 main 上的正式版覆盖,
-            // 预览用户会莫名回退到 v1.4.2 且桌面布局消失。这里明确说清楚原因, 而不是让按钮静默失效。
-            (config && config.preview) ? react.createElement("div", { key: "upd_preview", style: { color: "#7a5b12", background: "#fff8e6", border: "1px solid #f0d9a0", borderRadius: "6px", padding: "6px 8px", fontSize: "11px", fontWeight: "600", marginTop: "8px", lineHeight: "1.4" } }, t("update.previewHint")) : null,
+            // v1.5.0-desktop-preview 系列: 预览版分两种情形, 别一刀切禁掉更新 ——
+            //   · **有预览频道**(package.json 的 dsh.updateRef, 例如 preview/desktop): 允许一键更新,
+            //     因为更新源就是它自己那条分支 → 结构上不可能被 main 的正式版覆盖。
+            //     (v1.5.0-desktop-preview.1~.3 是直接禁用按钮, 结果每发一版预览都得让用户重跑 install.sh。)
+            //   · 预览版但**没有**频道字段(手动装的、或字段被删): 维持禁用兜底。
+            (config && config.preview) ? react.createElement("div", { key: "upd_preview", style: { color: "#7a5b12", background: "#fff8e6", border: "1px solid #f0d9a0", borderRadius: "6px", padding: "6px 8px", fontSize: "11px", fontWeight: "600", marginTop: "8px", lineHeight: "1.4" } },
+              previewUpdateLocked
+                ? t("update.previewHint")
+                : t("update.previewChannelHint") + " " + (config.updateRef || "main")) : null,
             // v1.3.3: 更新结果改为醒目横幅 —— 原来的 11px 灰色字在移动端几乎看不到,
             // 用户点完「一键更新」后以为没反应。成功=绿色底, 失败=红色底, 检查有新版=原来的灰色。
             upd.msg ? react.createElement("div", { key: "upd_msg", style: {

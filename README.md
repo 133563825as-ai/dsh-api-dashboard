@@ -8,7 +8,7 @@
 > ⚠️ **安装或维护本插件之前，请先读 [`AGENTS.md`](AGENTS.md)** —— 数据准确性红线、踩过的坑、安装姿势对照都在那里。
 > 本插件深度绑定 DeepSeek Harness 的客户端与宿主 API，**只能在 DSH 里运行**（手机版 DSHA 与桌面版同框架）。
 
-> 🧪 **你现在看的是预发行分支 `preview/desktop`** —— 版本 `v1.5.0-desktop-preview.3`。
+> 🧪 **你现在看的是预发行分支 `preview/desktop`** —— 版本 `v1.5.0-desktop-preview.4`。
 > 相对正式版只多一件事：**桌面 / 平板适配**。抽屉按三档走（档位对齐宿主手机壳自己的
 > `MOBILE_QUERY = max-width:1023px`）：
 >
@@ -21,7 +21,9 @@
 > 逻辑一行没动。三个抽屉补了 `role="dialog"` + `aria-label`（无障碍），但**刻意不加
 > `aria-modal="true"`** —— 手机壳把带这个属性的元素当自家对话框，有 46 条以其为前缀的结构性 CSS
 > 会把我们的面板重排，见 [`AGENTS.md`](AGENTS.md)。
-> 预览版在设置面板顶部带黄色标识，并且**不参与一键更新**（不会被 main 上的正式版悄悄覆盖）。
+> 预览版在设置面板顶部带黄色标识，并且**可以一键更新 —— 但只在预览分支内**：
+> 更新频道来自 `package.json` 的 `dsh.updateRef`（本轮 = `preview/desktop`），
+> 所以它既能装到同分支上的新预览版，**结构上也不可能被 main 的正式版覆盖**。
 > 装它：`DSH_DASHBOARD_REF=preview/desktop sh install.sh`；正式版仍在 `main`。
 
 ## 界面预览
@@ -147,7 +149,7 @@ dsh plugin --profile web add link:/root/dsha-api-dashboard
 
 ## 更新日志
 
-最近一版 **v1.4.2**（本分支为预发行 `v1.5.0-desktop-preview.3`）—— DeepSeek 多币种钱包读取修复 + 桌面/平板适配预览。一版一行的完整历史见 [`CHANGELOG.md`](CHANGELOG.md)。
+最近一版 **v1.4.2**（本分支为预发行 `v1.5.0-desktop-preview.4`）—— DeepSeek 多币种钱包读取修复 + 桌面/平板适配预览。一版一行的完整历史见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## License
 

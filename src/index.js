@@ -70,9 +70,7 @@ export const name = 'dsh-api-dashboard'
 // ============================================================
 const REPO_OWNER = '133563825as-ai'
 const REPO_NAME = 'dsh-api-dashboard'
-const REPO_BRANCH = 'main'
-const MANIFEST_API = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/package.json?ref=${REPO_BRANCH}`
-const TARBALL_URL = `https://codeload.github.com/${REPO_OWNER}/${REPO_NAME}/tar.gz/refs/heads/${REPO_BRANCH}`
+// MANIFEST_API / TARBALL_URL 在下面 —— 它们依赖 UPDATE_REF(来自 SELF_ROOT 的 package.json)
 
 /** 插件运行实体的安装根目录 (src/index.js 上两级; ESM 默认按 realpath 加载) */
 /**
@@ -113,27 +111,86 @@ const readVersionAt = (dir) => {
 
 /**
  * v1.5.0-desktop-preview 系列: 预发行(预览版)标识。
- * 判定只看版本号本身 —— semver 预发布后缀(`1.5.0-desktop-preview.2` 里 `-` 之后那一段)
+ * 判定只看版本号本身 —— semver 预发布后缀(`1.5.0-desktop-preview.4` 里 `-` 之后那一段)
  * 就是"这不是正式版"的唯一事实来源, 不额外加配置项(加配置项 = 两处真相, 迟早漂移)。
- * 用途: ① 下发给客户端, 前端据此显示「预览版」横幅; ② 预览版**不参与一键自更新**
- * (否则一次误点就被 main 的正式版覆盖, 预览用户会莫名回退)。
+ * 用途: ① 下发给客户端, 前端据此显示「预览版」横幅; ② 配合 UPDATE_REF 决定能不能自更新。
  */
 const PLUGIN_VERSION = readVersionAt(SELF_ROOT) || '0.0.0'
 const IS_PREVIEW = PLUGIN_VERSION.includes('-')
 
-/** 轻量 semver 比较: a>b 返回 1, a<b 返回 -1, 相等返回 0 (忽略预发布后缀) */
+/**
+ * 更新频道 (v1.5.0-desktop-preview.4)。
+ *
+ * 需求: 预览版**要能在预览频道内更新自己**(否则每发一版预览都得让用户重跑 install.sh),
+ * 但**绝不能被 main 上的正式版覆盖**(否则桌面布局会无声消失、用户莫名回退)。
+ * 这两个要求合起来只有一种干净做法: 频道 = 「这份代码自己是从哪个 ref 装来的」。
+ *
+ * 它写在 **package.json 的 `dsh.updateRef`** 里, 跟着 tarball 一起走 ——
+ * 不用状态文件(用户手动装、或换机器时状态文件可能不在), 也不用去猜版本号命名规则
+ * (`1.5.0-desktop-preview.4` 与分支名 `preview/desktop` 之间没有可推导关系)。
+ * 正式版没有这个字段 → 默认 main, 与 v1.4.2 行为完全一致。
+ */
+export const UPDATE_REF = (() => {
+  try {
+    const pkg = JSON.parse(readFileSync(join(SELF_ROOT, 'package.json'), 'utf8'))
+    const ref = pkg?.dsh?.updateRef
+    if (typeof ref !== 'string') return 'main'
+    // 这个值会被拼进 URL 和 codeload 路径, 必须严格白名单: 只允许普通 ref 字符, 且不许出现 `..`
+    return /^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$/.test(ref) && !ref.includes('..') ? ref : 'main'
+  } catch { return 'main' }
+})()
+/** 预览频道 = 版本号带预发布后缀 **且** 频道不是 main —— 只有这种情况才允许自更新 */
+export const PREVIEW_CHANNEL = IS_PREVIEW && UPDATE_REF !== 'main'
+const MANIFEST_API = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/package.json?ref=${UPDATE_REF}`
+const TARBALL_URL = `https://codeload.github.com/${REPO_OWNER}/${REPO_NAME}/tar.gz/refs/heads/${UPDATE_REF}`
+
+/**
+ * semver 比较: a>b 返回 1, a<b 返回 -1, 相等返回 0。
+ *
+ * ⚠️ v1.5.0-desktop-preview.4 起**带预发布后缀的优先级**(之前是直接 `split('-')[0]`,
+ * 于是 `…-preview.3` 与 `…-preview.2` 比出来是 0 → 预览频道里永远显示「已是最新」,
+ * 这正是「预览版没法更新到新预览版」的第二半原因)。规则同 semver 2.0.0 §11:
+ *   1.5.0-preview.2 < 1.5.0-preview.3 < 1.5.0-preview.10 < 1.5.0
+ *   数字标识符按数值比, 字母数字按字典序, 数字 < 字母数字, 短的那串更小。
+ * 解析不出来的(缺失段)按 0 处理, 与旧实现一致, 免得对垃圾输入产生新的行为差异。
+ */
 export function semverCompare(a, b) {
-  const pa = String(a).split('-')[0].split('.').map(Number)
-  const pb = String(b).split('-')[0].split('.').map(Number)
+  const parse = (v) => {
+    const m = String(v ?? '').trim().match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?/)
+    if (!m) return null
+    return { main: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] ? m[4].split('.') : null }
+  }
+  const na = parse(a), nb = parse(b)
+  const pa = na ? na.main : []
+  const pb = nb ? nb.main : []
   for (let i = 0; i < 3; i++) {
     const x = Number.isFinite(pa[i]) ? pa[i] : 0
     const y = Number.isFinite(pb[i]) ? pb[i] : 0
     if (x !== y) return x > y ? 1 : -1
   }
+  const xa = na ? na.pre : null
+  const xb = nb ? nb.pre : null
+  if (!xa && !xb) return 0
+  if (!xa) return 1    // 有预发布后缀 < 同版本号无后缀
+  if (!xb) return -1
+  const n = Math.max(xa.length, xb.length)
+  for (let i = 0; i < n; i++) {
+    const x = xa[i], y = xb[i]
+    if (x === undefined) return -1
+    if (y === undefined) return 1
+    const xn = /^\d+$/.test(x), yn = /^\d+$/.test(y)
+    if (xn && yn) {
+      const d = Number(x) - Number(y)
+      if (d !== 0) return d > 0 ? 1 : -1
+      continue
+    }
+    if (xn !== yn) return xn ? -1 : 1   // 数字标识符 < 字母数字标识符
+    if (x !== y) return x > y ? 1 : -1
+  }
   return 0
 }
 
-/** 经 api.github.com Contents API 读取远端 main 分支的 package.json version */
+/** 经 api.github.com Contents API 读取**当前频道**(UPDATE_REF) 的 package.json version */
 async function fetchRemoteVersion(timeoutMs = 8000) {
   const res = await fetch(MANIFEST_API, {
     headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'dsh-api-dashboard-updater' },
@@ -2306,6 +2363,9 @@ export function apply(ctx, config) {
           // v1.5.0-desktop-preview: 版本与预发行标识 —— 客户端据此显示「预览版」横幅, 并停用一键更新
           version: PLUGIN_VERSION,
           preview: IS_PREVIEW,
+          // v1.5.0-desktop-preview.4: 更新频道 —— 客户端据此决定「一键更新」能不能点
+          updateRef: UPDATE_REF,
+          previewChannel: PREVIEW_CHANNEL,
         },
       }
       cache.etag = '"' + fnv1a(JSON.stringify(cache.balances) + '|' + JSON.stringify(cache.config)) + '"'
@@ -2654,6 +2714,8 @@ export function apply(ctx, config) {
             dshProviderOptOut: runtimeConfig.dshProviderOptOut,
             version: PLUGIN_VERSION,
             preview: IS_PREVIEW,
+            updateRef: UPDATE_REF,
+            previewChannel: PREVIEW_CHANNEL,
           })
           return
         }
@@ -2746,6 +2808,8 @@ export function apply(ctx, config) {
               dshProviderOptOut: runtimeConfig.dshProviderOptOut,
               version: PLUGIN_VERSION,
               preview: IS_PREVIEW,
+              updateRef: UPDATE_REF,
+              previewChannel: PREVIEW_CHANNEL,
             })
           } catch (err) {
             const code = err && err.statusCode === 413 ? 413 : 400
