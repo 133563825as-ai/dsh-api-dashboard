@@ -414,8 +414,15 @@ horizontally scrollable container never reach this state at all*）：起手元�
    （`dsh-session-projection` 的 `buildCell`/`restore` 都传第二个参数）。框架自己的
    `subagentCatalog` 投影用的就是同一套判据：`if (event.type !== 'subagent/catalog' || event.seq < state.inheritedEventCount) return state`。
    ⚠️ 拿不到边界（`ownBoundaryKnown` 为假）时**宁可显示等待，也不要退回 full** —— 显示错的数字比不显示更糟。
-9. `stateVersion` 已 bump 到 **3**：v2 的缓存行里没有 `own` 字段，冷路径按版本号识别并当作「等待自身用量」，
-   不做「旧缓存凑合显示」。改状态字段记得继续 bump，并同步 `cachedCostState` 里的版本判断。
+9. `stateVersion` 已 bump 到 **3**，v3 的状态自带 `own`。改状态字段记得继续 bump。
+   ⚠️ **但冷路径不能只看版本号就判"等待"**（v1.4.3 就是这么栽的）：老框架**不会**再给已经结束的子会话
+   重写缓存，于是升级后**所有旧缓存行永远显示 `~—`**（真机实测 47 行里 46 行是旧版）。旧缓存其实能精确
+   还原**非分叉**子会话：缓存记录的 `identity` 里就记着 `isSeeded` / `inheritedEventCount` ——
+   `inheritedEventCount === 0` → 自身 == 全量，直接用旧 `byModel`（**精确值**）；
+   只有**分叉过**的旧行才真的分不出继承段，这时才返回 null 显示「等待」。
+   ❌ 别为了"修好那几行"去自己解压 `~/.dsh/sessions/**/session.*.jsonl.zstd` 重放日志 ——
+   那是在插件里重新实现框架的存储与投影，格式一变就悄悄错，而框架只有同步的 `sessions.get()/list()`（**只给常驻会话**），
+   没有同步读冷会话的正规接口。宁可那几行显示 `~—`。
 10. 行数封顶 `SUBAGENT_MAX_ROWS=12`。全部调用包在 try/catch 里：**取不到服务 / 会话不存在 / 宿主抛异常 → 静默降级**，
    绝不让子代理汇总拖垮主投影。`SUBAGENT_MAX_DEPTH` / `mergeSummary` 已随递归汇总一起退役（`mergeSummary` 仍导出、有单测）。
 

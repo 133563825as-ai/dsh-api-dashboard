@@ -1703,32 +1703,64 @@ let subagentCostSummarize = null
 
 const safeSessionId = (id) => typeof id === 'string' && /^[A-Za-z0-9._-]{1,128}$/.test(id) ? id : null
 
-/** 读某会话的投影缓存记录(带 TTL 内存缓存)。任何异常 → null。 */
-const readSessionCacheRecord = (sessionId) => {
+/**
+ * 读某会话的投影缓存记录(带 TTL 内存缓存)。任何异常 → null。
+ * v1.4.4: 同时把 `identity` 带出来 —— 里面记着 `isSeeded` / `inheritedEventCount`（fork 边界），
+ * 旧版本的缓存行（状态里没有 own）要靠它判断「自身用量」能不能精确还原。
+ */
+const loadCacheEntry = (sessionId) => {
   const id = safeSessionId(sessionId)
   if (id === null) return null
   const now = Date.now()
   const hit = sessionCacheFiles.get(id)
-  if (hit !== undefined && now - hit.at < SUBAGENT_FILE_TTL_MS) return hit.rows
-  let rows = null
+  if (hit !== undefined && now - hit.at < SUBAGENT_FILE_TTL_MS) return hit
+  let entry = null
   try {
     const home = process.env.DSH_HOME || join(homedir(), '.dsh')
     const file = join(home, 'storages', 'session_projcache', 'sessions', `${id}.json`)
     const parsed = JSON.parse(readFileSync(file, 'utf8'))
     const r = parsed?.record?.rows
-    if (r !== null && typeof r === 'object') rows = r
-  } catch { rows = null }
+    if (r !== null && typeof r === 'object') {
+      const identity = parsed?.record?.identity
+      entry = { at: now, rows: r, identity: (identity !== null && typeof identity === 'object') ? identity : null }
+    }
+  } catch { entry = null }
   // 只缓存成功结果, 避免一次读失败被 TTL 钉住 3 秒
-  if (rows !== null) sessionCacheFiles.set(id, { at: now, rows })
+  if (entry !== null) sessionCacheFiles.set(id, entry)
   if (sessionCacheFiles.size > 256) sessionCacheFiles.clear()
-  return rows
+  return entry
 }
 
-/** 冷路径: 从缓存文件里取该会话的 queryBalanceCost **状态**(不是 wire 视图)。 */
+/** 读某会话的投影缓存 rows。任何异常 → null。 */
+const readSessionCacheRecord = (sessionId) => loadCacheEntry(sessionId)?.rows ?? null
+
+/**
+ * 冷路径: 从缓存文件里取该会话的 queryBalanceCost **状态**(不是 wire 视图)。
+ *
+ * ⚠️ v1.4.4 修正 v1.4.3 的一个过严判断：v1.4.3 只认 `ver === 3`，于是**升级后所有旧缓存行
+ * 一律显示 `~—`**（老框架不会再给已结束的子会话重写缓存，那些行永远好不了）。
+ * 实际上旧缓存也能精确还原**非分叉**子会话的自身用量：
+ *   · `inheritedEventCount === 0`（没有继承任何事件）→ 自身 == 全量，`byModel` 就是精确值；
+ *   · 分叉过的子会话 → 旧缓存分不出继承段，**仍然返回 null**（上层显示「等待」），
+ *     绝不退化成把父会话历史算进去的错数字。
+ */
 const cachedCostState = (sessionId) => {
-  const row = readSessionCacheRecord(sessionId)?.queryBalanceCost
-  const val = row?.ver === 3 ? row.val : null
-  return (val !== null && typeof val === 'object' && Array.isArray(val.modelOrder) && val.byModel !== null && typeof val.byModel === 'object') ? val : null
+  const entry = loadCacheEntry(sessionId)
+  const row = entry?.rows?.queryBalanceCost
+  const val = row?.val
+  if (val === null || typeof val !== 'object' || !Array.isArray(val.modelOrder) || val.byModel === null || typeof val.byModel !== 'object') return null
+  if (row.ver === 3 && val.own !== undefined) return val
+  const inherited = entry?.identity?.inheritedEventCount
+  if (inherited === 0) {
+    return {
+      ...val, ownBoundaryKnown: true, inheritedEventCount: 0,
+      own: {
+        currentModel: val.currentModel ?? null, currentProvider: val.currentProvider ?? null,
+        last: val.last ?? null, byModel: val.byModel, modelOrder: val.modelOrder,
+      },
+    }
+  }
+  return null
 }
 
 /** 冷路径: 从缓存文件里取该会话的 subagentCatalog 条目。 */
