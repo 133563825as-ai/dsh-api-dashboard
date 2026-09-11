@@ -14,7 +14,21 @@
 > 本插件深度绑定 DeepSeek Harness 框架 API（`__ModuleLoader__` 客户端模块格式、
 > `conversation.composer.dock` slot 挂载、`sessionProjections` 会话投影、`webServer` 路由注入、
 > `credentials` 凭证系统），**仅适用于 DeepSeek Harness**（手机版 DSHA 与桌面版同框架），
-> 无法在其他软件中加载运行。UI 为移动端优先设计，已在手机版 DSHA 上实测。<!-- 截图占位：请将界面截图命名为 assets/preview.png 放入 -->
+> 无法在其他软件中加载运行。UI 为移动端优先设计，已在手机版 DSHA 上实测（下方预览图均来自真机）。
+
+## 界面预览
+
+**余额条**常驻在输入框下方；会话里有子代理时，下面会多一行**可横滑的消耗胶囊**（顺序 = 创建顺序，长按看详情）。
+
+<a href="docs/screenshots/1-balance-bar.webp"><img src="docs/screenshots/1-balance-bar.webp" width="100%" alt="输入框下方的余额条"></a>
+<a href="docs/screenshots/2-subagent-row.webp"><img src="docs/screenshots/2-subagent-row.webp" width="100%" alt="子代理消耗行"></a>
+
+| 看板（点余额条打开） | 大肥鱼挂件（可拖拽 / 吸附边缘） |
+|:---:|:---:|
+| <img src="docs/screenshots/3-dashboard.webp" width="300" alt="看板"> | <img src="docs/screenshots/6-whale-tab.webp" width="300" alt="大肥鱼"> |
+| **设置 · 基础** | **设置 · 大肥鱼** |
+| <img src="docs/screenshots/4-settings-basic.webp" width="300" alt="设置基础"> | <img src="docs/screenshots/5-settings-whale.png" width="300" alt="设置大肥鱼"> |
+
 
 ## 功能
 
