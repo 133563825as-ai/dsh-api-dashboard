@@ -111,5 +111,16 @@ a('install.sh 的下载地址用的是该 ref',
 a('install.sh 会提示这是预发行分支',
   /预发行分支/.test(sh))
 
+// ==========================================================================
+// ⑥ 预发行 tag 不许把预览版发到 npm (否则 latest 会被预览版顶掉)
+// ==========================================================================
+const wf = readFileSync(path.join(ROOT, '.github/workflows/publish.yml'), 'utf8')
+a('publish.yml 有预发行守卫步骤', /id:\s*prerelease_guard/.test(wf))
+a('publish.yml 的发布步骤挂了守卫条件',
+  /- name:\s*发布到 npm\n\s*if:\s*steps\.prerelease_guard\.outputs\.skip != 'true'/.test(wf))
+a('守卫用「版本号里有没有 -」判定预发行',
+  /case "\$PKG" in\s*\n\s*\*-\*\)/.test(wf))
+a('守卫对正式版本仍放行 (skip=false 分支存在)', /skip=false/.test(wf))
+
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`)
 if (fail > 0) process.exitCode = 1
