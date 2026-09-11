@@ -1262,16 +1262,30 @@ function checkAlerts(balances, config, ctx) {
 // ============================================================
 
 // 纯函数, 导出便于单测 (不影响对外行为)
-export function parseResponse(queryType, json) {
+export function parseResponse(queryType, json, pref) {
   if (!json || typeof json !== 'object' || Array.isArray(json)) return null
   switch (queryType) {
     case 'deepseek': {
       const infos = Array.isArray(json?.balance_infos) ? json.balance_infos : []
-      const p = infos[0]
+      // H-4d (v1.4.2): balance_infos 是「一个币种钱包一条」—— 官方文档 currency 取值 CNY / USD。
+      // 旧代码盲取 infos[0]，而**数组顺序不保证**：真机实测同一 key 连打 5 次，第 4 次顺序翻成
+      // [USD=0.00, CNY=123.45] → 读到 USD 那条 → 有 123.45 元的账户显示成「$0.00 · 异常」。
+      // 更糟的是下面那道 `total_balance == null` 红线**拦不住**它 —— "0.00" 是合法字符串，
+      // 于是红线守卫被绕过、0 被当成真实余额渲染（与 v1.4.0 openai-credit-grants、
+      // v1.4.1 openrouter 是同一族漏洞：选错一条就当真实数字）。
+      // 现在按「主货币优先 → 余额 > 0 → 首条」确定性挑选，结果与接口返回顺序无关。
+      const amountOf = (v) => {
+        if (v === null || v === undefined || v === '') return null
+        const n = Number(v)
+        return Number.isFinite(n) ? n : null
+      }
+      const want = String(pref ?? '').trim().toUpperCase()
+      const usable = infos.filter((x) => x && amountOf(x.total_balance) !== null)
+      const p =
+        (want ? usable.find((x) => String(x.currency || '').toUpperCase() === want) : undefined) ??
+        usable.find((x) => amountOf(x.total_balance) > 0) ??
+        usable[0]
       if (!p) return null
-      // v1.4.0 修复: total_balance 缺失时 toAmount(null)=0 会伪造「余额 0」。
-      // 与 AGENTS.md「字段存在性校验」一致 —— 缺关键字段即返回 null, 交给上层显示「未开放」。
-      if (p.total_balance == null) return null
       // total_balance 当前余额, granted_balance 赠送, topped_up_balance 充值
       const total = toAmount(p.total_balance)
       const grant = toAmount(p.granted_balance)
@@ -1490,7 +1504,7 @@ async function queryPreset(platform, apiKey, config) {
     const text = await res.text()
     let json
     try { json = JSON.parse(text) } catch { json = null }
-    const parsed = parseResponse(queryType, json)
+    const parsed = parseResponse(queryType, json, config?.currency)
 
     if (!parsed) {
       // v1.2.6: 业务错误分类抽到 classifyBizError (可单测)。
@@ -1569,7 +1583,7 @@ async function queryCustomRelay(relay, config) {
       const text = await res.text()
       let json
       try { json = JSON.parse(text) } catch { continue }
-      const parsed = parseResponse(cand.type, json)
+      const parsed = parseResponse(cand.type, json, config?.currency)
       if (parsed) {
         // A: 记住这次命中的端点（变了才落盘, 避免每次刷新都写状态文件）
         if (relayEndpointHints.get(id) !== cand.type) {
@@ -1635,14 +1649,14 @@ export async function queryCustomModel(model, config) {
 
     // 2) 指定解析类型
     if (queryType && queryType !== 'auto') {
-      const parsed = parseResponse(queryType, json)
+      const parsed = parseResponse(queryType, json, config?.currency)
       if (parsed) {
         return { ...base, status: 'ok', total: parsed.total, currency: parsed.currency, available: parsed.available, used: parsed.used, note: parsed.note, percent: parsed.percent, noBalance: false, queryType, fetchedAt: Date.now() }
       }
     } else {
       // 3) auto: 尝试常见格式
       for (const qt of ['openai', 'quota', 'deepseek', 'openai-billing']) {
-        const parsed = parseResponse(qt, json)
+        const parsed = parseResponse(qt, json, config?.currency)
         if (parsed) {
           return { ...base, status: 'ok', total: parsed.total, currency: parsed.currency, available: parsed.available, used: parsed.used, note: parsed.note, percent: parsed.percent, noBalance: false, queryType: qt, fetchedAt: Date.now() }
         }
