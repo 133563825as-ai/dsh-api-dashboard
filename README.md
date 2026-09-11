@@ -125,7 +125,7 @@ dsh plugin --profile web add link:/root/dsha-api-dashboard
 
 ## 更新日志
 
-最近一版 **v1.4.1** —— 安全与稳定性审计修复。一版一行的完整历史见 [`CHANGELOG.md`](CHANGELOG.md)。
+最近一版 **v1.4.2** —— 修复 DeepSeek 多币种钱包读错（有余额的账户会一秒一跳地显示成「$0.00 · 异常」）。一版一行的完整历史见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## License
 
