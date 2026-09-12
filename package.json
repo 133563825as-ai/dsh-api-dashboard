@@ -1,6 +1,6 @@
 {
   "name": "dsh-api-dashboard",
-  "version": "1.5.0-desktop-preview.7",
+  "version": "1.5.0-desktop-preview.8",
   "description": "DeepSeek Harness 多平台 API 余额 / 用量看板：输入框下方实时显示各平台余额与本会话估算消耗",
   "keywords": [
     "dsh",

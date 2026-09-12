@@ -4,7 +4,13 @@
 
 ## v1.x
 
-- **v1.5.0-desktop-preview.7**（🧪 预发行，非正式版）— 平板横屏那条**贯穿竖线**改到正确的层，并撤掉 `.6` 的无效试验。
+- **v1.5.0-desktop-preview.8**（🧪 预发行，非正式版）— 同一根竖线，**去掉 `.7` 那两层多余条件**。
+  `.7` 把抑制规则写成 `@media (min-width:1024px) and (pointer:coarse)`，想当 `dsh-web-mobile` 那条 `(max-width:1023px) and (pointer:coarse)` 的补集 —— 但**平板只要报 `pointer:fine`（接了鼠标/触控板、或桌面模式），这条媒体条件就整段不匹配**，和当初漏掉宽屏触屏是同一个坑。
+  现在整条规则不再带任何媒体条件，只挂在 `body:has(.dshadb_scrim)` 上：`body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !important}` —— **只有我们自己的遮罩打开时才动宿主，平时一个像素都不碰**。
+  两处写法也一并校正：① 不再设宽度/指针门槛（作用域本来就只由 `:has(.dshadb_scrim)` 决定）；② 用 `border-right-color:transparent` 取代 `.7` 的 `border-right:none` —— 那个简写会连 0.5px 的边框宽度一起去掉，开关面板时侧栏与内容区会有 0.5px 位移，只让颜色透明则几何完全不变。
+  补充取证：维护者确认那条线**能拖**、且**面板一关就没有**。宿主框架里全高的竖向 1px 线只有这一条，而它旁边正好压着 8px 全高、`cursor:col-resize` 的 `DragHandle`（`@deepseek-ai/dsh-client-ui-layout/lib/client.js:306`，`margin-left:-4px` 骑在边上）—— 「竖线」与「能拖」落在同一处，两个特征互相印证。「只有面板开着才出现」则来自我们的 `.dshadb_scrim`：`position:fixed` + `inset:0` + `fadein` 动画会提升合成层并重排整页，把那 0.5px 从混合出的淡线吸附成实心 1px；我们打开面板时**不碰**宿主任何布局（不设 `overflow`、不动 `data-sidebar-*`、不加全局 class，已逐条核对）。
+  真机验收：**平板横屏**确认竖线消失、且面板关闭后宿主侧栏分隔线照常；另请做一次**竖屏对照**（宽 < 1024 时 `dsh-web-mobile` 本来就杀了这条边框）—— 竖屏下线消失即确认根因是这条随宽度生效的宿主规则。
+- **v1.5.0-desktop-preview.7**（🧪 预发行，非正式版）— 平板横屏那条**贯穿竖线**改到正确的层，并撤掉 `.6` 的无效试验。**已被 `.8` 取代**（媒体条件在报 `pointer:fine` 的平板上整段失效，且 `border-right:none` 会带来 0.5px 位移）。
   现象：平板横屏（1238px）打开看板/设置时，面板内部偏左多出一条贯穿灰竖线。**成因不在本插件**：宿主侧栏 `.pI_x6G_sidebarCol` 带 `border-right:.5px solid var(--dsw-alias-border-l3)`，dpr 2.5 下正好占满 1 个物理像素；`dsh-web-mobile` 已经把它杀掉（`border-right:none !important`），但那条规则整段位于 `@media (max-width:1023px) and (pointer:coarse)` —— **手机档杀了、宽屏触屏档漏了**（已在本机 `dsh-web-mobile/lib/client.js:1613` 核对）。
   本版补上缺口：`@media (min-width:1024px) and (pointer:coarse){ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right:none !important} }` ——
   ① 媒体条件正好是那条 1023px 规则的补集；② `:has(.dshadb_scrim)` 保证**只在我们面板打开时**抑制，平时完全不动宿主界面；③ 桌面鼠标档（`pointer:fine`）保持宿主官方分隔线。

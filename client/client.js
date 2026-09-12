@@ -361,19 +361,28 @@ window.__ModuleLoader__.load({
    只在有精确指针时隐藏 —— iPad Pro 横屏(1366×1024)也落进对话框档, 而看板抽屉没有关闭按钮
    (只有 Esc / 点遮罩), 触摸设备上把手是唯一看得见的关闭抓手, 不能一起收掉。 */
 @media (min-width:1024px) and (pointer:fine){.dshadb_handle{display:none}}
-/* preview.7：宽屏触屏档漏掉抑制的宿主侧栏竖线（preview.6 的 contain 试验无效，已撤）。
-   现象：平板横屏打开看板/设置时，面板内部偏左多出一条贯穿灰竖线。
-   成因（真机单效果 A/B + 本机 dsh-web-mobile 源码核对）：宿主 .*sidebarCol 有
-   border-right:.5px solid var(--dsw-alias-border-l3)，dpr 2.5 下正好占满 1 个物理像素。
-   dsh-web-mobile 已经杀掉它（border-right:none !important），但整段位于
-   @media (max-width:1023px) and (pointer:coarse)（lib/client.js 1613 行起）——
-   宽屏触屏档不匹配 → 竖线露出来（手机档杀了、平板/桌面档漏了）。
-   这里补上缺口，且**只在我们自己的遮罩打开时**生效：
-     · (min-width:1024px) and (pointer:coarse) 正好是那条 1023px 规则的补集；
-       桌面鼠标档(pointer:fine)保持宿主官方分隔线不动。
-     · :has(.dshadb_scrim) —— 只有我们的面板开着才抑制，平时完全不动宿主界面。
+/* preview.8：同一条竖线，去掉 preview.7 那两层多余条件。
+   现象（维护者确认，平板横屏）：打开看板/设置时面板偏左多出一条贯穿竖线，
+   **它能拖**，且**面板一关就没有**。
+   定位：宿主 .*sidebarCol 的 border-right:.5px solid var(--dsw-alias-border-l3)
+   （dpr 2.5 下正好占满 1 个物理像素）就是那条线。宿主框架里全高的竖向 1px 线只此一条。
+   它旁边正好压着 8px 全高、cursor:col-resize 的 DragHandle
+   （@deepseek-ai/dsh-client-ui-layout/lib/client.js 306 行，margin-left:-4px 骑在边上），
+   —— 所以「竖线」和「能拖」落在同一处，两个特征互相印证。
+   「只有面板开着才出现」= 我们的 .dshadb_scrim 是 position:fixed + inset:0 + fadein 动画，
+   会提升合成层、把整页重新栅格化：那 0.5px 本来是混合出来的淡线，重绘后被吸附成实心 1px。
+   （本插件打开面板时**不碰**宿主任何布局：不设 overflow、不动 data-sidebar-*、不加全局 class，
+     已逐条核对过 —— 所以这不是我们画上去的。）
+   preview.7 把它写成 (min-width:1024px) and (pointer:coarse)，想当 dsh-web-mobile 那条
+   (max-width:1023px) and (pointer:coarse) 的补集。但平板只要报 pointer:fine
+   （接了鼠标/触控板、或桌面模式），这条媒体条件就整段不匹配 —— 和当初漏掉宽屏触屏是同一个坑。
+   ✂ 这里不再设任何媒体条件：规则只挂在 body:has(.dshadb_scrim) 上，
+     **只有我们自己的遮罩打开时才动宿主**，平时一个像素都不碰。
+   ✂ 用 border-right-color:transparent 而不是 preview.7 的 border-right:none：
+     后者那个简写会连 0.5px 的边框宽度一起去掉，开关面板时侧栏与内容区会有 0.5px 位移；
+     只让颜色透明，几何完全不变，位移为零。
    选择器用语义后缀 [class*="sidebarCol"]：宿主类名是 CSS Module 哈希（当前 pI_x6G_sidebarCol）。 */
-@media (min-width:1024px) and (pointer:coarse){body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right:none !important}}
+body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !important}
 .dshadb_preview_banner{display:flex;flex-direction:column;gap:2px;margin:0 0 10px;padding:9px 11px;border-radius:12px;background:#fff8e6;border:1px solid #f0d9a0;color:#7a5b12;font-size:11px;font-weight:600;line-height:1.5}
 .dshadb_preview_banner b{font-size:12px;font-weight:800;color:#6b4d06}
 @media (prefers-color-scheme:dark){.dshadb_preview_banner{background:#3a3016;border-color:#6b5a24;color:#f2dfae}.dshadb_preview_banner b{color:#ffe9b0}}
