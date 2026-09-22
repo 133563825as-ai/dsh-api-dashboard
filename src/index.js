@@ -879,8 +879,10 @@ export const MODEL_PRICES = {
   // 来源: modelradar.cn 2026-09-03 快照 (各模型 sourceUrl 均指官方定价页)。
   //       仅采纳与官方口径无分歧的条目; 与原表冲突时保留原值并注明 ——
   //       radar 的 GPT-5.6 系输出价全呈「输入×1.25」异常模式, 疑似抓错列, 未采纳。
-  // ⚠️ OpenAI / Anthropic / Gemini 官方定价页在本容器环境被 403 / 地域封锁, v1.4.0 未能取到原文复核,
-  //    下列海外条目仍为 radar/hermes-agent 二手源, 未逐条核实 —— 有账单单据时优先以单据为准。
+  // ⚠️ 上注为 v1.4.0 时期状况。v1.4.5 (2026-09-22) 起: OpenAI / Anthropic / **Gemini** 三家均已用官方原文逐条核对
+  //    (OpenAI / Anthropic 的价格藏在页面内嵌转义 JSON 里; Gemini 走 ai.google.dev 定价页的 Standard 档表),
+  //    并**整段补录 xAI Grok** —— 此前表内没有任何 grok 键, 全部落 defaultPrices。
+  //    下列海外条目现为官方现价; 有账单单据时仍以单据为准。
   // OpenAI GPT-5.6 系列 (radar 报 sol 输出 $5 / terra $2.5 / luna $0.25, 均为输入×1.25 异常模式, 未采纳)
   // —— 2026-09-22 官方 API 定价页 (openai.com/api/pricing 的内嵌 JSON) 逐条核对 ——
   //    注: 该页 HTML 里的价格藏在 <script> 的双层转义 JSON 中, 不在 <table> 里; 本容器内 chromium 无网络渲染不了,
@@ -905,15 +907,48 @@ export const MODEL_PRICES = {
   'claude-fable-5':       { cacheHit: 1.0,   cacheMiss: 10.0,  cacheWrite: 12.5,  output: 50.0 },  // 官方 $10 / $1 / $50; 缓存写 $12.50
   'claude-opus-4-8':      { cacheHit: 0.5,   cacheMiss: 5.0,   cacheWrite: 6.25,  output: 25.0 },  // 官方 $5 / $0.5 / $25; 缓存写 $6.25
   'claude-sonnet-4-5':    { cacheHit: 0.30,  cacheMiss: 3.0,   cacheWrite: 3.75,  output: 15.0 },  // 官方 $3 / $0.30 / $15; 缓存写 $3.75
-  // Google Gemini 3.x
-  'gemini-3.7-flash':     { cacheHit: 0.075, cacheMiss: 0.75,  output: 3.75 },  // 促销至 2026-12-31, 之后翻倍
-  'gemini-3.8-flash':     { cacheHit: 0.075, cacheMiss: 0.75,  output: 3.75 },  // radar 2026-09-02 新增, 与 3.7/3.6 同价
-  'gemini-3.6-flash':     { cacheHit: 0.075, cacheMiss: 0.75,  output: 3.75 },  // 促销至 2026-12-31, 之后翻倍
-  'gemini-3-flash-preview': { cacheHit: 0.025, cacheMiss: 0.5, output: 3.0 },
-  'gemini-3.5-flash-lite':  { cacheHit: 0.3,  cacheMiss: 0.3,  output: 2.5 },   // 无缓存折扣
-  'gemini-3.1-pro':       { cacheHit: 2.0,   cacheMiss: 2.0,   output: 12.0 },  // 无缓存折扣; 长上下文 $4/$24
-  'gemini-2.5-pro':       { cacheHit: 0.125, cacheMiss: 1.25,  output: 10.00 },
-  'gemini-2.5-flash':     { cacheHit: 0.03,  cacheMiss: 0.3,   output: 2.5 },   // radar 2026-09-03, 1M ctx
+  // —— Google Gemini (2026-09-22 官方页 ai.google.dev/gemini-api/docs/pricing 的 Standard 档 Text API 逐条核对) ——
+  //    官方口径: Context caching price 一律 = 输入价 **10%**(3.7/3.8/3.6 Flash $0.075/$0.75、3.5 Flash $0.15/$1.50、
+  //    3.5 Flash-Lite $0.03/$0.30、3.1 Flash-Lite $0.025/$0.25、3.1 Pro $0.20/$2.00、3 Flash Preview $0.05/$0.50、
+  //    2.5 Pro $0.125/$1.25、2.5 Flash $0.03/$0.30、2.5 Flash-Lite $0.01/$0.10 全部吻合)。
+  //    ⇒ 凡官方页**列出** Context caching price 的条目一律按官方值入库。旧表把 3 条标成「无缓存折扣」是错的(见下三条 ✗→✓)。
+  //    ⚠️ 促销价: 3.6/3.7/3.8 Flash 官方明文 "through December 31, 2026", 到期翻倍($1.50/$7.50/缓存 $0.15) —— 有到期日兜底才可入库。
+  //    ⚠️ 分档: 3.1 Pro / 2.5 Pro 官方另有 >200k 档, 本表取主档(与 Claude 同口径), 更贵档见各条注释。
+  'gemini-3.8-flash':     { cacheHit: 0.075, cacheMiss: 0.75,  output: 3.75 },  // 官方 $0.75/$3.75/缓存 $0.075; 促销至 2026-12-31, 之后 $1.50/$7.50
+  'gemini-3.7-flash':     { cacheHit: 0.075, cacheMiss: 0.75,  output: 3.75 },  // 同上
+  'gemini-3.6-flash':     { cacheHit: 0.075, cacheMiss: 0.75,  output: 3.75 },  // 同上
+  'gemini-3.5-flash':     { cacheHit: 0.15,  cacheMiss: 1.5,   output: 9.0 },   // 官方 $1.50/$9.00/缓存 $0.15 ✚补录: 旧表无此键 → 落默认价($1/$2), 输出低估 4.5 倍
+  'gemini-3.5-flash-lite':  { cacheHit: 0.03,  cacheMiss: 0.3,  output: 2.5 },   // 官方 $0.30/$2.50/缓存 $0.03 ✗→✓ 旧 cacheHit 0.3 且标「无缓存折扣」, 官方页明列 $0.03 → 高估缓存读 10 倍
+  'gemini-3.1-flash-lite':  { cacheHit: 0.025, cacheMiss: 0.25, output: 1.5 },  // 官方 $0.25(text/图/视频)/$1.50/缓存 $0.025 ✚补录
+  'gemini-3-flash-preview': { cacheHit: 0.05,  cacheMiss: 0.5,  output: 3.0 },   // 官方 $0.50/$3.00/缓存 $0.05 ✗→✓ 旧 0.025 = 输入的 5%, 官方是 10%
+  'gemini-3.1-pro':       { cacheHit: 0.20,  cacheMiss: 2.0,   output: 12.0 },  // 官方 $2.00/$12.00/缓存 $0.20 ✗→✓ 旧 cacheHit 2.0 且标「无缓存折扣」→ 高估缓存读 10 倍; >200k 档 $4/$18/缓存 $0.40
+  'gemini-omni-flash':    { cacheHit: 1.5,   cacheMiss: 1.5,   output: 9.0 },   // 官方 $1.50/$9.00(text) ✚补录; 官方页**未列**缓存价 → 按输入价计, 不假设折扣(video 输出 $17.50 未建模)
+  'gemini-2.5-pro':       { cacheHit: 0.125, cacheMiss: 1.25,  output: 10.00 },  // 官方 $1.25/$10.00/缓存 $0.125; >200k 档 $2.50/$15.00/缓存 $0.25
+  'gemini-2.5-flash':     { cacheHit: 0.03,  cacheMiss: 0.3,   output: 2.5 },   // 官方 $0.30(text/图/视频; audio $1.00)/$2.50/缓存 $0.03
+  'gemini-2.5-flash-lite':{ cacheHit: 0.01,  cacheMiss: 0.10,  output: 0.40 },  // 官方 $0.10/$0.40/缓存 $0.01 ✚补录: 旧表无此键 → 落默认价, 输入高估 10 倍 / 输出高估 5 倍
+
+  // —— xAI Grok (2026-09-22 官方页 docs.x.ai/docs/pricing 的 Text API 表逐条核对, **整段补录**) ——
+  //    ⚠️ v1.4.5 之前本表**没有任何 grok 键**: 所有 grok 请求落 defaultPrices(USD $1/$2, 缓存读 $0.1),
+  //       而 grok-4.7 / 4.6 真价 $2/$6 → 输入少算 2 倍、输出少算 3 倍; grok-4.3 / 4.20 系输入输出各少算 25%。
+  //    官方口径: 每模型两档, 长上下文阈值一律 **200k tokens**(≥200k 时输入×2、输出×2、缓存×2);
+  //       本表取**主档(短上下文)**入库, 与同为 200k 阈值的 gemini-3.1-pro / gemini-2.5-pro 处理一致。
+  //    交叉验证: 官方页面内嵌机读数据 __XAI_PUBLIC_MODELS__ 的 us-east-1 / us-west-2 集群与本表逐项吻合;
+  //       其 us-central-1 集群是 US 区域端点价(= 标准 ×1.1, 目前只覆盖 4.7/4.6), 未入库。
+  //    未建模: Batch API 对 4.3 / 4.20 系有 20% 折扣; Priority Processing 一律 ×2 标准价。
+  //    未收录: 官方页现只列 grok-4.3 起的在售模型, grok-3 / grok-4 / grok-4-fast 等已不在页内 → 落默认价。
+  'grok-4.7':             { cacheHit: 0.50,  cacheMiss: 2.0,   output: 6.0 },   // 官方 $2.00/$6.00/缓存 $0.50 (500k 上限); ≥200k: $4/$12/缓存 $1
+  'grok-4.6':             { cacheHit: 0.50,  cacheMiss: 2.0,   output: 6.0 },   // 同上
+  'grok-4.5':             { cacheHit: 0.30,  cacheMiss: 2.0,   output: 6.0 },   // 官方 $2.00/$6.00/缓存 $0.30; ≥200k: $4/$12/缓存 $0.60
+  'grok-4.3':             { cacheHit: 0.20,  cacheMiss: 1.25,  output: 2.5 },   // 官方 $1.25/$2.50/缓存 $0.20 (1M 上限); ≥200k: $2.50/$5/缓存 $0.40
+  'grok-4.20':            { cacheHit: 0.20,  cacheMiss: 1.25,  output: 2.5 },   // 官方别名(等价 grok-4.20-0309-reasoning, 同价)
+  'grok-4.20-reasoning':  { cacheHit: 0.20,  cacheMiss: 1.25,  output: 2.5 },   // 官方别名; 连带 -latest / -0309 等
+  'grok-4.20-non-reasoning':       { cacheHit: 0.20, cacheMiss: 1.25, output: 2.5 },  // 官方 $1.25/$2.50/缓存 $0.20 (1M)
+  'grok-4.20-multi-agent-0309':    { cacheHit: 0.20, cacheMiss: 1.25, output: 2.5 },  // 官方 $1.25/$2.50/缓存 $0.20 (1M)
+  'grok-4.20-0309-reasoning':      { cacheHit: 0.20, cacheMiss: 1.25, output: 2.5 },  // 官方 $1.25/$2.50/缓存 $0.20 (1M)
+  'grok-4.20-0309-non-reasoning':  { cacheHit: 0.20, cacheMiss: 1.25, output: 2.5 },  // 官方 $1.25/$2.50/缓存 $0.20 (1M)
+  'grok-build-0.1':       { cacheHit: 0.20,  cacheMiss: 1.0,   output: 2.0 },   // 官方 $1.00/$2.00/缓存 $0.20 (256k); ≥200k: $2/$4/缓存 $0.40
+  'grok-code-fast-1':     { cacheHit: 0.20,  cacheMiss: 1.0,   output: 2.0 },   // grok-build-0.1 的官方别名(-1-0825 亦由安全后缀命中)
+  'grok-code-fast':       { cacheHit: 0.20,  cacheMiss: 1.0,   output: 2.0 },   // 同上(别名短名)
   // —— 国内厂商: 单位 CNY/百万tokens (原生官方价, 不要再 ÷7) ——
   // 阿里云百炼 Qwen3 (华北2/北京; help.aliyun.com/zh/model-studio/model-pricing 2026-09-10 抓取)
   //   官方上下文缓存规则: 命中按「标准输入单价 10%」计费。
@@ -996,8 +1031,19 @@ export const MODEL_PRICES = {
   'step-1o-turbo-vision': { cacheHit: 0.5,  cacheMiss: 2.5,  output: 8 },   // 2026-09-22 官方 ¥2.5/¥8/缓存 ¥0.5
   // 小米 MiMo — 官方 2026-05-27 起「永久降价」(最高降幅 99%), 取消上下文分档; 与中转站 tokenrhythm 实时报价一致。
   // v1.3.4 修的「除两次 7」结论正确, v1.4.0 起改为直接存官方 CNY 原值, 不再有 ÷7 环节。
-  'mimo-v2.5':            { cacheHit: 0.02,  cacheMiss: 1, output: 2 },    // 官方 ¥1/¥2/缓存 ¥0.02
-  'mimo-v2.5-pro':        { cacheHit: 0.025, cacheMiss: 3, output: 6 },    // 官方 ¥3/¥6/缓存 ¥0.025
+  // —— 2026-09-22 官方按量付费页 (platform.xiaomimimo.com/docs/zh-CN/price/pay-as-you-go) 逐条核对 ——
+  //    V2.6 系列于当日发布(官方 updates/model 页 2026-09-22「模型发布」), 与 V2.5 系**同价**(实时推理档)。
+  //    ✚补录 3 条: 此前表内无任何 v2.6 键 → 全部落 defaultPrices(USD $1/$2), 按国内口径换算后为 ¥7/¥14,
+  //      即 v2.6-pro 高估 2.33 倍、v2.6-flash 高估 7 倍。
+  //    ⚠️ V2.5 系官方下线公告 (updates/deprecate): **北京时间 2026-10-21 10:00 直接下线, 无系统替换模型** —
+  //       保留其键仅供旧会话估算, 到期后新调用会失败, 别再把新流量算作 v2.5。
+  //    未建模: 批量推理档(v2.6-pro ¥1.5/¥3、v2.6-flash ¥0.5/¥1)、mimo-v2.5-asr(按音频时长 ¥0.5/小时)、
+  //       国内联网服务(¥16/1000 次); 官方另有 USD 表($0.435/$0.87 等), 按「原生币种存储」规则本表只用 CNY 表。
+  'mimo-v2.6-pro':        { cacheHit: 0.025, cacheMiss: 3, output: 6 },    // 官方实时推理 ¥3/¥6/缓存 ¥0.025 (与 v2.5-pro 同价)
+  'mimo-v2.6-flash':      { cacheHit: 0.02,  cacheMiss: 1, output: 2 },    // 官方实时推理 ¥1/¥2/缓存 ¥0.02 (与 v2.5 同价)
+  'mimo-v2.6-pro-ultraspeed': { cacheHit: 0.25, cacheMiss: 30, output: 60 },  // 官方 ¥30/¥60/缓存 ¥0.25 (旗舰性能 + 最高 20 倍推理速度)
+  'mimo-v2.5':            { cacheHit: 0.02,  cacheMiss: 1, output: 2 },    // 官方 ¥1/¥2/缓存 ¥0.02 ⚠️ 2026-10-21 10:00 下线
+  'mimo-v2.5-pro':        { cacheHit: 0.025, cacheMiss: 3, output: 6 },    // 官方 ¥3/¥6/缓存 ¥0.025 ⚠️ 2026-10-21 10:00 下线
   // —— 以下为历史/参考模型 (2025-08, 实际以平台为准) ——
   // 币种规则同上: 海外的写 USD, 国内的写 CNY。
   // 🔴 v1.4.0 重要修复: 本段「国内」条目历来填的是**官方 CNY 原值**(不是 ÷7 后的 USD),
@@ -1016,7 +1062,9 @@ export const MODEL_PRICES = {
   'claude-3-5-sonnet':    { cacheHit: 0.3,   cacheMiss: 3,    output: 15 },
   'claude-3-5-haiku':     { cacheHit: 0.08,  cacheMiss: 0.8,  output: 4 },
   'claude-3-opus':        { cacheHit: 1.5,   cacheMiss: 15,   output: 75 },
-  // Gemini — v1.4.0 修正: 缓存读 = 输入 ×25% (Gemini 官方 75% off 口径)。旧值 50% 偏高。
+  // Gemini 历史条目 — ⚠️ 2026-09-22 复核: 官方定价页现**已不列** 2.0 / 1.5 全系(页面自 Gemini 2.5 起),
+  //    故这三条的「缓存读 = 输入 ×25%」口径**无法取证**, 原样保留仅作旧会话估算占位, **非官方现价**。
+  //    现役 Gemini 3.x / 2.5 官方页一律「缓存读 = 输入 ×10%」(2026-09-22 逐条吻合) —— 历史 25% 口径勿再套用到新条目。
   'gemini-2.0-flash':     { cacheHit: 0.025, cacheMiss: 0.1,  output: 0.4 },
   'gemini-2.0-pro':       { cacheHit: 0.625, cacheMiss: 2.5,  output: 10 },
   'gemini-1.5-pro':       { cacheHit: 0.875, cacheMiss: 3.5,  output: 10.5 },

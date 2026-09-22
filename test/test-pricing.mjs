@@ -18,6 +18,47 @@ a('claude-opus-5 5/25', p('claude-opus-5').cacheMiss===5.0 && p('claude-opus-5')
 a('claude-sonnet-5 2/10', p('claude-sonnet-5').cacheMiss===2.0 && p('claude-sonnet-5').output===10.0)
 a('gemini-3.7-flash 0.75/3.75', p('gemini-3.7-flash').cacheMiss===0.75 && p('gemini-3.7-flash').output===3.75)
 
+// ===== 2026-09-22 ai.google.dev/gemini-api/docs/pricing (Standard 档) 官方原文核对 =====
+// 官方口径: 缓存读 = 输入 ×10%。旧表 3 条标「无缓存折扣」是错的; 并补录 4 条此前**没有任何键**的模型。
+a('gemini-3.7/3.8/3.6-flash 官方 $0.75/$3.75/缓存 $0.075 (促销至 2026-12-31)',
+  ['gemini-3.7-flash','gemini-3.8-flash','gemini-3.6-flash'].every(k => p(k).cacheMiss===0.75 && p(k).output===3.75 && p(k).cacheHit===0.075))
+a('gemini-3.5-flash 官方 $1.50/$9.00/缓存 $0.15 (v1.4.5 补录)',
+  p('gemini-3.5-flash').cacheMiss===1.5 && p('gemini-3.5-flash').output===9.0 && p('gemini-3.5-flash').cacheHit===0.15)
+a('BUG gemini-3.5-flash 此前落默认价($1/$2, 输出低估 4.5 倍)', p('gemini-3.5-flash').output!==2)
+a('BUG gemini-3.5-flash-lite 缓存读 = 官方 $0.03 (旧值 0.3 且标「无缓存折扣」→ 高估 10 倍)',
+  near(p('gemini-3.5-flash-lite').cacheHit, 0.03) && p('gemini-3.5-flash-lite').cacheMiss===0.3 && p('gemini-3.5-flash-lite').output===2.5)
+a('BUG gemini-3.1-pro 缓存读 = 官方 $0.20 (旧值 2.0 且标「无缓存折扣」→ 高估 10 倍)',
+  near(p('gemini-3.1-pro').cacheHit, 0.20) && p('gemini-3.1-pro').cacheMiss===2.0 && p('gemini-3.1-pro').output===12.0)
+a('BUG gemini-3-flash-preview 缓存读 = 官方 $0.05 (旧值 0.025 = 输入的 5%, 官方是 10%)',
+  near(p('gemini-3-flash-preview').cacheHit, 0.05) && p('gemini-3-flash-preview').cacheMiss===0.5 && p('gemini-3-flash-preview').output===3.0)
+a('gemini-2.5-flash-lite 官方 $0.10/$0.40/缓存 $0.01 (补录: 旧表无此键 → 输入高估 10 倍)',
+  p('gemini-2.5-flash-lite').cacheMiss===0.1 && p('gemini-2.5-flash-lite').output===0.4 && near(p('gemini-2.5-flash-lite').cacheHit, 0.01))
+a('gemini-3.1-flash-lite 官方 $0.25/$1.50/缓存 $0.025 (补录)',
+  p('gemini-3.1-flash-lite').cacheMiss===0.25 && p('gemini-3.1-flash-lite').output===1.5 && near(p('gemini-3.1-flash-lite').cacheHit, 0.025))
+a('gemini-omni-flash 官方 $1.50/$9.00 (官方未列缓存价 → 按输入价计, 不假设折扣)',
+  p('gemini-omni-flash').cacheMiss===1.5 && p('gemini-omni-flash').output===9.0 && p('gemini-omni-flash').cacheHit===1.5)
+a('gemini-3.1-pro-preview 走安全后缀命中 gemini-3.1-pro (官方页名为 Preview)', p('gemini-3.1-pro-preview').cacheMiss===2.0)
+a('gemini 历史条目(2.0/1.5)标注未取证后原值不变', near(p('gemini-2.0-flash').cacheHit,0.025) && p('gemini-1.5-pro').output===10.5)
+
+// ===== 2026-09-22 docs.x.ai/docs/pricing (Text API 表) 官方原文 —— Grok 整段补录 =====
+// 官方口径: 每模型两档, 长上下文阈值 200k; ≥200k 输入/输出/缓存各 ×2。本表取主档(短上下文)。
+// 交叉验证: 页面内嵌 __XAI_PUBLIC_MODELS__ 的 us-east-1/us-west-2 集群逐项吻合 (us-central-1 为 US 区域端点 ×1.1)。
+a('BUG grok-4.7 官方 $2.00/$6.00/缓存 $0.50 (旧表无 grok 键 → 落默认价 $1/$2, 输出少算 3 倍)',
+  p('grok-4.7').cacheMiss===2.0 && p('grok-4.7').output===6.0 && p('grok-4.7').cacheHit===0.50)
+a('grok-4.6 与 4.7 同价 $2.00/$6.00/缓存 $0.50', p('grok-4.6').cacheMiss===2.0 && p('grok-4.6').output===6.0 && p('grok-4.6').cacheHit===0.50)
+a('grok-4.5 官方 $2.00/$6.00/缓存 $0.30', p('grok-4.5').cacheMiss===2.0 && p('grok-4.5').output===6.0 && p('grok-4.5').cacheHit===0.30)
+a('grok-4.3 官方 $1.25/$2.50/缓存 $0.20', p('grok-4.3').cacheMiss===1.25 && p('grok-4.3').output===2.5 && p('grok-4.3').cacheHit===0.20)
+a('grok-4.20 三变体同价 $1.25/$2.50/缓存 $0.20',
+  ['grok-4.20-0309-reasoning','grok-4.20-0309-non-reasoning','grok-4.20-multi-agent-0309']
+    .every(k => p(k).cacheMiss===1.25 && p(k).output===2.5 && p(k).cacheHit===0.20))
+a('grok-build-0.1 官方 $1.00/$2.00/缓存 $0.20 (输入输出恰好等于默认价, 缓存读旧为 0.1)',
+  p('grok-build-0.1').cacheMiss===1.0 && p('grok-build-0.1').output===2.0 && p('grok-build-0.1').cacheHit===0.20)
+a('grok-code-fast-1 为官方别名, 与 grok-build-0.1 同价', p('grok-code-fast-1').cacheMiss===1.0 && p('grok-code-fast-1').cacheHit===0.20)
+a('grok 官方别名经安全后缀命中: -latest / -0825 / -0309',
+  p('grok-4.3-latest').cacheMiss===1.25 && p('grok-code-fast-1-0825').cacheMiss===1.0 && p('grok-4.20-0309').cacheMiss===1.25)
+a('未收录 grok(grok-3/grok-4/grok-4-fast)仍落默认价, 不假装有官方价',
+  p('grok-3').cacheMiss===1 && p('grok-4').output===2 && p('grok-4-fast').cacheMiss===1)
+
 // ===== 国内厂商: 原生 CNY, 默认配置下**就是官方价**, 不再 ÷7 再 ×7 =====
 // 官方来源已逐个抓原文核对 (2026-09-10): docs.bigmodel.cn / platform.kimi.com / platform.minimaxi.com /
 // platform.stepfun.com / help.aliyun.com(百炼) / MiMo 官方降价公告。
@@ -37,6 +78,16 @@ a('minimax-m2.7 官方缓存读 ¥0.42 (v1.4.0 修正: 旧值拿 cacheMiss 顶�
 a('minimax-m2.7-highspeed 新增 ¥4.2/¥16.8', p('minimax-m2.7-highspeed').cacheMiss===4.2 && p('minimax-m2.7-highspeed').output===16.8)
 a('mimo-v2.5 官方永久降价后 ¥1/¥2/缓存¥0.02', near(p('mimo-v2.5').cacheHit,0.02) && p('mimo-v2.5').cacheMiss===1 && p('mimo-v2.5').output===2)
 a('mimo-v2.5-pro 官方 ¥3/¥6/缓存¥0.025', near(p('mimo-v2.5-pro').cacheHit,0.025) && p('mimo-v2.5-pro').cacheMiss===3 && p('mimo-v2.5-pro').output===6)
+// 2026-09-22 platform.xiaomimimo.com/docs/zh-CN/price/pay-as-you-go 官方原文 —— V2.6 系列当日发布, 与 V2.5 同价
+a('BUG mimo-v2.6-flash 官方 ¥1/¥2/缓存 ¥0.02 (此前无键 → 落默认价 ¥7/¥14, 高估 7 倍)',
+  p('mimo-v2.6-flash').cacheMiss===1 && p('mimo-v2.6-flash').output===2 && near(p('mimo-v2.6-flash').cacheHit,0.02))
+a('BUG mimo-v2.6-pro 官方 ¥3/¥6/缓存 ¥0.025 (此前无键 → 落默认价 ¥7/¥14, 高估 2.33 倍)',
+  p('mimo-v2.6-pro').cacheMiss===3 && p('mimo-v2.6-pro').output===6 && near(p('mimo-v2.6-pro').cacheHit,0.025))
+a('mimo-v2.6-pro-ultraspeed 官方 ¥30/¥60/缓存 ¥0.25',
+  p('mimo-v2.6-pro-ultraspeed').cacheMiss===30 && p('mimo-v2.6-pro-ultraspeed').output===60 && near(p('mimo-v2.6-pro-ultraspeed').cacheHit,0.25))
+a('mimo v2.6 与 v2.5 实时档同价(官方原文两行同价)', p('mimo-v2.6-pro').cacheMiss===p('mimo-v2.5-pro').cacheMiss && p('mimo-v2.6-flash').cacheMiss===p('mimo-v2.5').cacheMiss)
+a('mimo-v2.5 系键保留(官方 2026-10-21 10:00 下线, 仅供旧会话估算)',
+  p('mimo-v2.5').cacheMiss===1 && p('mimo-v2.5-pro').cacheMiss===3)
 a('step-3.7-flash 官方 ¥1.35/¥8.1/缓存¥0.27', p('step-3.7-flash').cacheMiss===1.35 && p('step-3.7-flash').output===8.1 && p('step-3.7-flash').cacheHit===0.27)
 a('step-3.5-flash 官方 ¥0.7/¥2.1/缓存¥0.14', p('step-3.5-flash').cacheMiss===0.7 && p('step-3.5-flash').output===2.1 && p('step-3.5-flash').cacheHit===0.14)
 a('qwen3.8-max 官方 ¥12/¥36', p('qwen3.8-max').cacheMiss===12 && p('qwen3.8-max').output===36)
