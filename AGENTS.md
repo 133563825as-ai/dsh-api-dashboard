@@ -136,6 +136,39 @@ DSH 启动时会把 profile 的 `dsh.profile.bundles` **逐个 import**，只要
 
 ---
 
+> - 🕐 **峰谷按「事件发生时刻」计价，不按「查看时刻」（2026-09-22 修复）**：投影状态新增 `phaseBuckets`。
+>   `foldUsage` 用事件自带的 **`time`** 字段判定这笔用量属于峰还是谷，分相累积；`summarize` 再按峰/谷两套单价相加。
+>   旧实现只在 `summarize` 时取 `Date.now()`，等于把整段历史消耗都按「你打开面板那一刻」的时段计价 ——
+>   **谷时跑的 token 在峰时查看会被翻倍，反之漏掉一半**（DeepSeek 峰谷差整整 2 倍，本插件主力模型就是它）。
+>   `resolveModelPrice` 增加了第 4 个参数 `phase`（`'peak'` / `'offPeak'`），传 null 才是老的「按 timestamp 判定」行为。
+>   `stateVersion` 随之 **3 → 4**：版本不匹配时框架从 `seq 0` 重放，重放时 `event.time` 仍在，所以分相结果正确；
+>   读不到分相的老缓存（冷路径）会**自动回落旧行为**，不会崩也不会显示错数字。
+>   改这块务必跑 `test-cost-projection.mjs` 的 **T11**（峰谷混合用例：1M@峰 ¥8 + 1M@谷 ¥4 = ¥12，与跑测试的时刻无关；旧实现恒不等于 12）。
+> - 📅 **法定节假日全天算谷时**：官方**英文**定价页写明 peak 是 `"Monday through Friday, excluding Chinese public holidays ... including Chinese public holidays in full"`（中文页只写「其余为空闲时段」，容易漏掉这半句）。
+>   表在 `src/index.js` 的 `CN_HOLIDAY_RANGES`（2026 年 7 个区间，来源：国务院办公厅 2025-11-04 通知 `gov.cn/zhengce/zhengceku/202511/content_7047091.htm`）。
+>   ⚠️ **每年 11 月国务院办公布次年安排后必须补表**；未收录年份按「无节假日」回落（保守）。
+>   漏掉这条会在全年 **33 天**假期里把消耗按峰价高估一倍。调休上班的周末不列入表内 —— 官方口径是 `Monday through Friday` 字面，周末本身已是谷时。
+>   回归钉子：`test-cost-projection.mjs` 的 **T13 / T13b~T13g**（含「普通工作日仍须判峰时」与「表外年份不误判」两条防误伤断言）。
+> - 🧭 **2026-09-22 国内价格复核结论**：DeepSeek / 智谱 / 阿里百炼 / MiniMax / 阶跃 / Kimi 六家已逐条对官方原文核对，现有条目**基本准确**；
+>   已补录 15 条（GLM-5.3-FlashX、GLM-5、GLM-4.7 系、GLM-4.5-Air、GLM-4-Long、GLM-4-FlashX、MiniMax-M3、step-5-preview、step-1o-turbo-vision、qwen3.8-max-prime、qwen3.8-omni-flash、qwen3.5-plus 等）。
+>   ⚠️ 修掉一个真实键名错配：官方 `GLM-4-Flash-250414` 是**免费**，`GLM-4-FlashX-250414` 才是 ¥0.1/¥0.1 —— 旧表把后者的价挂在前者键上，而 `glm-4-flashx-250414` 没有任何键能收它，一直落到 `defaultPrices`（USD $1/$2 ≈ ¥7/¥14）。
+>   ⚠️ 官方已下线、仅作估算占位的条目：`moonshot-v1-*` 与 `kimi-k2.5`（2026-08-31 全平台下线，调用 404）、`qwen2.5-72b-instruct`（2026-05-13 下线）。
+> - 🌏 **海外取证进展（2026-09-22）—— OpenAI / Anthropic 已拿下官方原文，且不需要代理**：
+>   关键技巧：这两家的价格**不在 `<table>` 里**，而是藏在页面 `<script>` 的**双层转义 JSON** 中，
+>   而本容器内 chromium 无网络渲染不了。直接 fetch 页面后**依次还原**（双反斜杠→单反斜杠、`\n`→换行、`\"`→`"`）即可拿到官方值：
+>   OpenAI 形如 `"pricingGroups":[... "Input:\n$X / 1M tokens\n\nCached input:\n$Y ...\n\nOutput:\n$Z" ...]`；
+>   Anthropic 在 `ApiTab-module__*__priceLabel` 之后，且**额外给出 Prompt caching 的 Read / Write 两档**。
+>   ✅ 实测结论：OpenAI `gpt-5.6-sol` 官方现价 **$5 / $0.5 / $30**（旧值 4/20 记的是"促销价"，官方页已无促销标记 → 按红线改用官方现价）；
+>   同页新增 `gpt-6-astra` **$10 / $1 / $50**；`gpt-5.3-codex` 官方页**已不列**（仍为 radar 二手源）。
+>   ✅ Anthropic 现有 `claude-opus-5` / `sonnet-5` / `sonnet-4-6` / `haiku-4-5` 与官方**逐项一致**（未改动）；新增 `claude-fable-5.1` / `fable-5` / `opus-4-8` / `sonnet-4-5`。
+>   🔴 重要口径：Anthropic **缓存写价一律 = 输入价 ×125%**（Opus 5 $6.25/$5、Sonnet 5 $2.50/$2、Haiku 4.5 $1.25/$1、Fable 5.1 $12.50/$10 全部吻合）；
+>   缓存读价多数 = 输入 ×10%，**Fable 5.1 例外仅 2.5%**。这条是「缓存写入价未区分」那条待办的直接证据。
+> - 🌏 **Gemini 仍缺**：`ai.google.dev` / `cloud.google.com` 在本环境 **TCP 直连失败**（被墙）；
+>   `docs.claude.com` 返回 *"App unavailable in region"*、`platform.openai.com/docs/pricing` 403（但这两家已从别的官方入口拿到，见上）。
+>   **要取 Gemini 官方原文必须有代理/VPN；没拿到官方页就别改它的值**（红线：不许编造）。
+
+---
+
 ## 四、维护铁律（改代码前必读）
 
 1. **先备份再改**：改 `client/client.js` 或 `src/index.js` 前，先 `tar` 一份 / 存回退点。用户习惯 A/B 对比+回滚。
@@ -194,6 +227,8 @@ DSH 启动时会把 profile 的 `dsh.profile.bundles` **逐个 import**，只要
 ### 仍未完成
 - [ ] 推送前自检：文件树无 `.dsh/`、无本地状态文件、无任何 API key（**推送需仓库维护者授权，代理不得擅自推**）
 - [ ] 验证 B 栏（OpenRouter/siliconflow/Novita/one-api/xAI）的真实字段，修正解析（**需真实 key**）
+- [ ] **缓存写入价未区分（已知简化，2026-09-22 记录）**：`summarize` 把 `cacheWriteTokens` 并进 `cacheMiss` 按**标准输入价**算，但官方普遍按输入的 **125%** 计（阿里显式缓存明文 125%、MiniMax 2.625/2.1=125%、Anthropic 1.25×），Kimi K3 更是另有独立写入费（TTL 5min ¥20 / 1M）。
+      对 DeepSeek **无影响**（其缓存为自动缓存，无单独写入费），而本插件主力就是 deepseek-flash，故暂未实现；改用 Anthropic/阿里为主力时需重新评估。
 - [ ] `glm-5-turbo` model id 官方确认（`model_id_mapping.json` 标 `confirmed: false`）
 - [ ] **重新取证「未核实」价格条目**（v1.4.0 逐条标了注释，均按 `×7` 保号迁移、显示值未跳变）：豆包 Seed 2.0 全系（火山方舟官方页是 SPA，`.md` 出口返回壳页）、腾讯混元三条、`kimi-k2.5`、`moonshot-v1-*`、`step-1-*`、`deepseek-chat/reasoner/r1` 三条占位价（与 DeepSeek 官方历史价对不上）
 - [ ] **海外三家官方定价页复核**：OpenAI / Anthropic / Gemini 在容器环境 403 或地域封锁，v1.4.0 未能取原文 —— `gpt-5.6-*` / `claude-*` / `gemini-3.*` 仍是 radar 二手源
@@ -393,7 +428,7 @@ horizontally scrollable container never reach this state at all*）：起手元�
 
 **热路径（首选，数据更新鲜）**
 1. `init(header, inheritedEventCount)` 把 `header.id` 存进投影状态的 `sessionId`（子代理汇总要拿它去查 `subagentCatalog`），
-   同时记下 fork 继承边界（见下方第 8 条）。**状态字段一改就要继续 bump `stateVersion`**（现为 **3**）。
+   同时记下 fork 继承边界（见下方第 8 条）。**状态字段一改就要继续 bump `stateVersion`**（现为 **4**）。
 2. `ctx.sessions.get(id)` → `sessionProjections.snapshot(session, ['subagentCatalog'])` 拿**直接子会话列表** —— 顺序就是父会话的 catalog 事件顺序（= 创建顺序），客户端**不重排**。
 3. 每个子会话用 `stateOf(childSession, 'queryBalanceCost')` 取**同一个 unit 的状态**，喂给**同一个 `summarize()`** —— 保证与主板数字口径一致（峰谷 / 原生币种 / 缓存分桶）。
 
@@ -414,7 +449,7 @@ horizontally scrollable container never reach this state at all*）：起手元�
    （`dsh-session-projection` 的 `buildCell`/`restore` 都传第二个参数）。框架自己的
    `subagentCatalog` 投影用的就是同一套判据：`if (event.type !== 'subagent/catalog' || event.seq < state.inheritedEventCount) return state`。
    ⚠️ 拿不到边界（`ownBoundaryKnown` 为假）时**宁可显示等待，也不要退回 full** —— 显示错的数字比不显示更糟。
-9. `stateVersion` 已 bump 到 **3**，v3 的状态自带 `own`。改状态字段记得继续 bump。
+9. `stateVersion` 已 bump 到 **4**（v3 自带 `own`；**v4 新增 `phaseBuckets` 做峰谷分相**，见第三节末尾）。改状态字段记得继续 bump。
    ⚠️ **但冷路径不能只看版本号就判"等待"**（v1.4.3 就是这么栽的）：老框架**不会**再给已经结束的子会话
    重写缓存，于是升级后**所有旧缓存行永远显示 `~—`**（真机实测 47 行里 46 行是旧版）。旧缓存其实能精确
    还原**非分叉**子会话：缓存记录的 `identity` 里就记着 `isSeeded` / `inheritedEventCount` ——

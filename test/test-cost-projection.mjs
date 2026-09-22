@@ -96,5 +96,50 @@ const run = (events) => {
   a('T10 重试+attempt 合计 1M 输入 = ¥3 (少算时会是 ¥1.5)', Math.abs(v.cost - 3) < 1e-9)
 }
 
+// ---- 11. 🔴 峰谷必须按**事件发生时刻**计价, 不能按"查看时刻" ----
+// 北京时间 11:00 = UTC 03:00 → 峰时; 北京时间 13:00 = UTC 05:00 → 谷时。
+// 2026-09-22 是周二, 两笔都在工作日, 不落周末特惠。
+{
+  const peakTs = Date.UTC(2026, 8, 22, 3, 0, 0)
+  const offTs  = Date.UTC(2026, 8, 22, 5, 0, 0)
+  const ts = (ev, t) => ({ ...ev, time: t })
+  const v = run([
+    ts(hdr('deepseek-flash'), peakTs),
+    ts(msg(1, 1, { outputTokens: 1_000_000 }), peakTs),
+    ts(msg(2, 1, { outputTokens: 1_000_000 }), offTs),
+  ])
+  // 1M 输出 @峰 ¥8 + 1M 输出 @谷 ¥4 = ¥12 —— 与"跑测试的时刻"无关。
+  // 旧实现只用 Date.now() 计价, 两笔会被算成同一个价(¥8 或 ¥16), 恒不等于 12。
+  a('T11 峰谷按事件时间分相计价 (¥8 + ¥4 = ¥12)', Math.abs(v.cost - 12) < 1e-9)
+}
+// ---- 12. 事件缺 time 字段时回退当前时刻, 不崩 ----
+{
+  const v = run([hdr('deepseek-flash'), msg(1, 1, { outputTokens: 1_000_000 })])
+  a('T12 缺 time 的事件仍能计价(回退当前时刻)', v.cost > 0)
+}
+// ---- 13. 🔴 法定节假日必须算谷时 ----
+// 官方英文定价页: "Peak hours are 01:00-04:00 and 06:00-10:00 UTC, Monday through Friday,
+//   excluding Chinese public holidays ... including weekends and Chinese public holidays in full."
+// 漏掉这条会在全年 33 天假期里把消耗按峰价高估一倍。
+{
+  const bj = (y, mo, d, h) => Date.UTC(y, mo - 1, d, h - 8) // 构造"北京时间 h:00"的时间戳
+  a('T13 国庆 10-01 北京11:00 → 谷时', m.isPeakTime(bj(2026, 10, 1, 11)) === false)
+  a('T13b 春节 02-17 北京10:00 → 谷时', m.isPeakTime(bj(2026, 2, 17, 10)) === false)
+  a('T13c 普通工作日 2026-09-22 北京11:00 → 峰时(不能被假期逻辑误伤)', m.isPeakTime(bj(2026, 9, 22, 11)) === true)
+  a('T13d 普通工作日 北京13:00 → 谷时(午休段)', m.isPeakTime(bj(2026, 9, 22, 13)) === false)
+  a('T13e 表外年份不误判 (2027 国庆仍是峰时)', m.isCnHoliday('2027-10-01') === false && m.isPeakTime(bj(2027, 10, 1, 11)) === true)
+  a('T13f 2026 七个假期区间首末日均命中', ['01-01','01-03','02-15','02-23','04-04','05-01','06-19','09-25','10-01','10-07'].every(d => m.isCnHoliday('2026-' + d) === true))
+  a('T13g 假期外不误判 (09-22 / 10-08)', m.isCnHoliday('2026-09-22') === false && m.isCnHoliday('2026-10-08') === false)
+}
+// ---- 14. 缓存写入按 cacheWrite 计价 (官方 Anthropic = 输入 ×125%) ----
+{
+  const v = run([hdr('claude-opus-5'), msg(1, 1, { cacheWriteTokens: 1_000_000 })])
+  // 海外模型走 USD, 不进主货币 cost, 而在 costByCurrency.USD 里 (v1.3.2 混合币种设计)
+  a('T14 claude-opus-5 1M 缓存写 = $6.25 (旧实现按 cacheMiss 只算 $5)', Math.abs((v.costByCurrency?.USD ?? 0) - 6.25) < 1e-9)
+}
+{
+  const v = run([hdr('glm-5.3'), msg(1, 1, { cacheWriteTokens: 1_000_000 })])
+  a('T15 未给 cacheWrite 的条目回落 cacheMiss (glm-5.3 1M 缓存写 = ¥8)', Math.abs(v.cost - 8) < 1e-9)
+}
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`)
 if (fail > 0) process.exitCode = 1

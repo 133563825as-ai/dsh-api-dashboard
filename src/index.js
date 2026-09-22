@@ -755,10 +755,14 @@ const fnv1a = (str) => {
 // 北京时间 09:00~12:00 / 14:00~18:00 为峰时(100%), 其余时段谷时特惠(5折)
 // ============================================================
 // v1.3.4 (2026-09-10): 官方同日 12:00 起调整 Flash 系列定价(最高降幅 60%), 并收敛模型名 ——
-//   deepseek-v4-flash → deepseek-flash (旧名仍可调用, 由 V4.1-Flash 服务并按 Flash 价计费, 定价页注 1);
-//   2026-09-14 12:00 后 deepseek-v4-pro 的请求将全部路由到 V4.1-Flash 并按 Flash 价计费(官方计划下线 Pro, 注 2)。
+//   deepseek-v4-flash → deepseek-flash (旧名仍可调用, 由 V4.1-Flash 服务并按 Flash 价计费, 定价页注 1)。
+// ⚠️ 2026-09-22 复核更正: 官方注(2) 已改写为「为响应广大用户的需求, 我们决定在 2026 年 9 月 14 日之后
+//   继续提供 DeepSeek V4 Pro 的 API 调用服务, 计费方式保持不变」—— **Pro 档仍在售、仍按 Pro 价计费**,
+//   故本表 pro 档保留正确。此前「9-14 后 pro 请求全部路由到 Flash 并按 Flash 价计费」的记录已作废, 勿再回填。
 // 来源: https://api-docs.deepseek.com/zh-cn/quick_start/pricing (CNY) 与 /quick_start/pricing (USD) ——
-//   USD 表为官方直发(非 ÷7 换算, 实际口径约 1 USD ≈ 6.67 CNY), pro 档与调整前一致, 未变动。
+//   USD 表为官方直发(非 ÷7 换算, 实际口径约 1 USD ≈ 6.67 CNY), 已逐项核对与表内值一致 (2026-09-22)。
+//   ⚠️ 官方英文页明确: 高峰时段为 UTC 01:00-04:00 / 06:00-10:00 (北京 9-12 / 14-18) 周一至周五,
+//      **excluding Chinese public holidays**(不含中国法定节假日) —— 见 isPeakTime 的已知缺口。
 export const V4_RATES = {
   CNY: {
     peak: { 'deepseek-flash': { cacheHit: 0.04, cacheMiss: 2, output: 8 }, 'deepseek-v4-pro': { cacheHit: 0.3, cacheMiss: 9, output: 27 } },
@@ -778,10 +782,41 @@ export const V4_RATES = {
  */
 const USD_TO_CNY_RATE = 7
 
-/** 北京时间(UTC+8)的星期与小时, 先 +8h 再取值, 避免跨日界(00:00~08:00)星期比北京时间早一天 */
+/**
+ * 中国法定节假日 (2026 年) —— DeepSeek 官方定价页**英文版**明确:
+ *   "Peak hours are 01:00 - 04:00 and 06:00 - 10:00 UTC, Monday through Friday,
+ *    **excluding Chinese public holidays**. All other hours are off-peak, including weekends
+ *    and Chinese public holidays in full."
+ * 即法定节假日**全天按空闲(谷)价**计费。这不是可选项: 漏掉它会在这 33 天里把消耗按峰价高估一倍。
+ * 来源: 国务院办公厅《关于2026年部分节假日安排的通知》(2025-11-04 发布)
+ *   https://www.gov.cn/zhengce/zhengceku/202511/content_7047091.htm
+ * ⚠️ 维护: 国务院办每年 11 月公布**次年**安排 —— 跨年前必须补下一年表; 表外年份按"无节假日"回落旧行为(保守)。
+ * ⚠️ 调休上班的周末(2026 年为 02-14 / 02-28 / 05-09 / 09-20 / 10-10)不列入本表:
+ *   官方口径是 "Monday through Friday" 字面 —— 周末本身就已是谷时, 无需专门处理。
+ */
+const CN_HOLIDAY_RANGES = {
+  2026: [
+    ['2026-01-01', '2026-01-03'], // 元旦 3 天
+    ['2026-02-15', '2026-02-23'], // 春节 9 天
+    ['2026-04-04', '2026-04-06'], // 清明节 3 天
+    ['2026-05-01', '2026-05-05'], // 劳动节 5 天
+    ['2026-06-19', '2026-06-21'], // 端午节 3 天
+    ['2026-09-25', '2026-09-27'], // 中秋节 3 天
+    ['2026-10-01', '2026-10-07'], // 国庆节 7 天
+  ],
+}
+
+/** 该北京日期 (yyyy-mm-dd) 是否落在法定节假日区间内。未收录的年份返回 false (不表态)。 */
+export const isCnHoliday = (ymd) => {
+  const ranges = CN_HOLIDAY_RANGES[Number(String(ymd).slice(0, 4))]
+  if (!Array.isArray(ranges)) return false
+  return ranges.some(([from, to]) => ymd >= from && ymd <= to)
+}
+
+/** 北京时间(UTC+8)的日期/星期/小时, 先 +8h 再取值, 避免跨日界(00:00~08:00)星期比北京时间早一天 */
 const bjtParts = (timestamp) => {
   const d = new Date(timestamp + 8 * 3600 * 1000)
-  return { weekday: d.getUTCDay(), hour: d.getUTCHours() }
+  return { weekday: d.getUTCDay(), hour: d.getUTCHours(), ymd: d.toISOString().slice(0, 10) }
 }
 
 /**
@@ -790,13 +825,15 @@ const bjtParts = (timestamp) => {
  *  周末(周六日): 整天都是谷时特惠。
  */
 export const isPeakTime = (timestamp = Date.now()) => {
-  const { weekday, hour } = bjtParts(timestamp)
+  const { weekday, hour, ymd } = bjtParts(timestamp)
   // 周末(0=周日, 6=周六)整天谷时
   if (weekday === 0 || weekday === 6) return false
+  // 法定节假日全天谷时 (官方英文定价页: "excluding Chinese public holidays ... in full")
+  if (isCnHoliday(ymd)) return false
   return (hour >= 9 && hour < 12) || (hour >= 14 && hour < 18)
 }
 
-/** 当前是否周末 */
+/** 当前是否周末 (注意: 周末与法定节假日是两回事, 峰谷判定请用 isPeakTime) */
 export const isWeekend = (timestamp = Date.now()) => {
   const { weekday } = bjtParts(timestamp)
   return weekday === 0 || weekday === 6
@@ -834,15 +871,29 @@ export const MODEL_PRICES = {
   // ⚠️ OpenAI / Anthropic / Gemini 官方定价页在本容器环境被 403 / 地域封锁, v1.4.0 未能取到原文复核,
   //    下列海外条目仍为 radar/hermes-agent 二手源, 未逐条核实 —— 有账单单据时优先以单据为准。
   // OpenAI GPT-5.6 系列 (radar 报 sol 输出 $5 / terra $2.5 / luna $0.25, 均为输入×1.25 异常模式, 未采纳)
-  'gpt-5.6-sol':          { cacheHit: 0.5,   cacheMiss: 4.0,   output: 20.0 },  // 临时促销价(至少到 2026-11-21)
+  // —— 2026-09-22 官方 API 定价页 (openai.com/api/pricing 的内嵌 JSON) 逐条核对 ——
+  //    注: 该页 HTML 里的价格藏在 <script> 的双层转义 JSON 中, 不在 <table> 里; 本容器内 chromium 无网络渲染不了,
+  //    但直接取页面 + 还原转义即可拿到官方原文 (无需代理)。同一页还列出 GPT-Image-2.5 / GPT-Live-1 / GPT-Realtime-2.1 mini。
+  //    ⚠️ 官方现列表价 $5/$30, 已无促销标记 —— 旧值 4/20 记的是"临时促销价", 按 AGENTS.md 红线(促销必须有官方原文兜底)改用官方现价。
+  'gpt-6-astra':          { cacheHit: 1.0,   cacheMiss: 10.0,  output: 50.0 },  // 官方 Input $10 / Cached input $1 / Output $50 (官方页当前最强档)
+  'gpt-5.6-sol':          { cacheHit: 0.5,   cacheMiss: 5.0,   output: 30.0 },  // 官方 $5 / $0.5 / $30
   'gpt-5.6-terra':        { cacheHit: 0.2,   cacheMiss: 2.0,   output: 12.0 },  // 2026-07-30 降价
   'gpt-5.6-luna':         { cacheHit: 0.02,  cacheMiss: 0.2,   output: 1.2 },   // 2026-07-30 降价
-  'gpt-5.3-codex':        { cacheHit: 0.175, cacheMiss: 1.75,  output: 14.0 },  // radar 2026-09-03, OpenAI 官方页
+  'gpt-5.3-codex':        { cacheHit: 0.175, cacheMiss: 1.75,  output: 14.0 },  // ⚠️ 2026-09-22 复核: OpenAI 官方 API 定价页现**未列**此模型(页面只列 GPT-6 Astra / GPT-5.6 三档 / 图像 / Live / Realtime), 值仍为 radar 二手源, 未能取证
   // Anthropic Claude 5
-  'claude-opus-5':        { cacheHit: 0.5,   cacheMiss: 5.0,   output: 25.0 },  // v1.2.0 修正缓存读价: Anthropic 缓存读=0.1×输入, radar 对照 claude.com/pricing (opus-4-8 亦 $0.5); 原误标"无缓存折扣"
-  'claude-sonnet-5':      { cacheHit: 0.2,   cacheMiss: 2.0,   output: 10.0 },
-  'claude-sonnet-4-6':    { cacheHit: 0.30,  cacheMiss: 3.00,  output: 15.00 },
-  'claude-haiku-4-5':     { cacheHit: 0.10,  cacheMiss: 1.00,  output: 5.00 },
+  'claude-opus-5':        { cacheHit: 0.5,   cacheMiss: 5.0,   cacheWrite: 6.25,  output: 25.0 },  // v1.2.0 修正缓存读价: Anthropic 缓存读=0.1×输入, radar 对照 claude.com/pricing (opus-4-8 亦 $0.5); 原误标"无缓存折扣"
+  'claude-sonnet-5':      { cacheHit: 0.2,   cacheMiss: 2.0,   cacheWrite: 2.5,   output: 10.0 },
+  'claude-sonnet-4-6':    { cacheHit: 0.30,  cacheMiss: 3.00,  cacheWrite: 3.75,  output: 15.00 },
+  'claude-haiku-4-5':     { cacheHit: 0.10,  cacheMiss: 1.00,  cacheWrite: 1.25,  output: 5.00 },
+  // —— 2026-09-22 官方 API 定价页 (anthropic.com/pricing 的 ApiTab) 核对后补录 ——
+  //    官方**同时**给出 Prompt caching 的 Read/Write 两档: Write 一律 = 输入价 ×125%
+  //    (Opus 5 $6.25/$5、Sonnet 5 $2.50/$2、Haiku 4.5 $1.25/$1、Fable 5.1 $12.50/$10 全部吻合),
+  //    Read 多数 = 输入价 ×10%(本表 cacheHit 口径), **Fable 5.1 例外仅 2.5%**。
+  //    ⚠️ 现有 claude-opus-5 / sonnet-5 / sonnet-4-6 / haiku-4-5 四条经核对与官方逐项一致, 未改动。
+  'claude-fable-5.1':     { cacheHit: 0.25,  cacheMiss: 10.0,  cacheWrite: 12.5,  output: 50.0 },  // 官方 $10 / $0.25(缓存读仅 2.5%) / $50; 缓存写 $12.50
+  'claude-fable-5':       { cacheHit: 1.0,   cacheMiss: 10.0,  cacheWrite: 12.5,  output: 50.0 },  // 官方 $10 / $1 / $50; 缓存写 $12.50
+  'claude-opus-4-8':      { cacheHit: 0.5,   cacheMiss: 5.0,   cacheWrite: 6.25,  output: 25.0 },  // 官方 $5 / $0.5 / $25; 缓存写 $6.25
+  'claude-sonnet-4-5':    { cacheHit: 0.30,  cacheMiss: 3.0,   cacheWrite: 3.75,  output: 15.0 },  // 官方 $3 / $0.30 / $15; 缓存写 $3.75
   // Google Gemini 3.x
   'gemini-3.7-flash':     { cacheHit: 0.075, cacheMiss: 0.75,  output: 3.75 },  // 促销至 2026-12-31, 之后翻倍
   'gemini-3.8-flash':     { cacheHit: 0.075, cacheMiss: 0.75,  output: 3.75 },  // radar 2026-09-02 新增, 与 3.7/3.6 同价
@@ -862,6 +913,10 @@ export const MODEL_PRICES = {
   'qwen3.7-plus':         { cacheHit: 0.16, cacheMiss: 1.6, output: 6.4 }, // v1.4.0: 官方限时 8 折 (原价 ¥2/¥8)
   'qwen3.7-flash':        { cacheHit: 0.02, cacheMiss: 0.2, output: 0.8 }, // v1.4.0: 官方 ¥0.2/¥0.8 (旧值 0.21/0.91 系中转站高档位, 已废)
   'qwen3.8-flash':        { cacheHit: 0.1,  cacheMiss: 0.8, output: 2.7 }, // 官方 ¥0.8/¥2.7; cacheHit ¥0.1 同 3.8-max 为控制台例外价
+  // —— 2026-09-22 官方百炼定价页 (help.aliyun.com/zh/model-studio/model-pricing) 核对后补录 ——
+  'qwen3.8-max-prime':    { cacheHit: 2.4,  cacheMiss: 24,  output: 72 },  // 官方优速模式(Prime) ¥24/¥72; 官方未单列缓存价, 按"显式缓存命中=标准输入 10%"规则推
+  'qwen3.8-omni-flash':   { cacheHit: 0.1,  cacheMiss: 0.8, output: 2.7 }, // 官方 ¥0.8/¥2.7/缓存命中 ¥0.1 (3.8 系里唯一官方单列缓存价的)
+  'qwen3.5-plus':         { cacheHit: 0.08, cacheMiss: 0.8, output: 4.8 }, // 官方 [0,128K) ¥0.8/¥4.8
   'qwen3.8-27b':          { cacheHit: 0.3,  cacheMiss: 3,   output: 12 },  // v1.4.0: 官方 ¥3/¥12; 缓存命中按官方 10% 规则 → ¥0.3 (旧值 ¥0.6 偏高 100%)
   'qwen3.6-plus':         { cacheHit: 0.2,  cacheMiss: 2,   output: 12 },  // 官方 ¥2/¥12 (256K 档 ¥8/¥48 未做分档)
   // 智谱 GLM (docs.bigmodel.cn/cn/guide/start/pricing 2026-09-10 抓取)
@@ -871,13 +926,30 @@ export const MODEL_PRICES = {
   'glm-5.1':              { cacheHit: 2,    cacheMiss: 8,   output: 28 },  // 官方 ≥32K 档 ¥8/¥28/缓存 ¥2 ([0,32K) 档为 ¥6/¥24/¥1.3)
   'glm-5-turbo':          { cacheHit: 1.8,  cacheMiss: 7,   output: 26 },  // v1.4.0: 官方 ≥32K 档 ¥7/¥26/缓存 ¥1.8 (旧值 1.68/8.4/28 两档都不符)
   'glm-5.3-flash':        { cacheHit: 0.23, cacheMiss: 0.8, output: 2.8 }, // 官方 ¥0.8/¥2.8/缓存 ¥0.23
+  // —— 2026-09-22 官方定价页 (docs.bigmodel.cn/cn/guide/start/pricing) 逐条核对后补录 ——
+  //    分档口径 = 按**输入长度**在 32K 切开 ([0, 32K) / ≥32K); 分档模型一律取更贵的 ≥32K 档(保守)。
+  'glm-5.3-flashx':       { cacheHit: 0.57, cacheMiss: 2,   output: 7 },    // 官方 ¥2/¥7/缓存 ¥0.57 (1M)
+  'glm-5':                { cacheHit: 1.5,  cacheMiss: 6,   output: 22 },   // 官方 ≥32K 档 ¥6/¥22/缓存 ¥1.5 ([0,32K) 档为 ¥4/¥18/缓存 ¥1)
+  'glm-4.7':              { cacheHit: 0.8,  cacheMiss: 4,   output: 16 },   // 官方 [32K,200K) 档 ¥4/¥16/缓存 ¥0.8 (低档 ¥2~3/¥8~14)
+  'glm-4.7-flashx':       { cacheHit: 0.1,  cacheMiss: 0.5, output: 3 },    // 官方 ¥0.5/¥3/缓存 ¥0.1 (200K)
+  'glm-4.5-air':          { cacheHit: 0.24, cacheMiss: 1.2, output: 8 },    // 官方 [32K,128K) 档 ¥1.2/¥8/缓存 ¥0.24
+  'glm-4-air-250414':     { cacheHit: 0.25, cacheMiss: 0.5, output: 0.5 },  // 官方 ¥0.5/¥0.5/缓存 ¥0.25
+  'glm-4-long':           { cacheHit: 0.5,  cacheMiss: 1,   output: 1 },    // 官方 ¥1/¥1/缓存 ¥0.5 (1M)
+  // ⚠️ 这一条同时修掉一个键名错配: 原来 'glm-4-flashx-250414' 没有任何键能收它(旧值 0.05/0.1/0.1 被挂在
+  //    'glm-4-flash' 上), 而官方 GLM-4-Flash-250414 其实是**免费**、GLM-4-FlashX-250414 才是 ¥0.1/¥0.1/缓存 ¥0.05。
+  //    'glm-4-flashx' 比 'glm-4-flash' 长, matchModelPrice 取最长键 → FlashX 现在能命中自己的价。
+  'glm-4-flashx':         { cacheHit: 0.05, cacheMiss: 0.1, output: 0.1 },  // 官方 GLM-4-FlashX-250414 ¥0.1/¥0.1/缓存 ¥0.05
   // Kimi / Moonshot (platform.kimi.com/docs/pricing/* 2026-09-10 抓取, 均 CNY)
   'kimi-k3':              { cacheHit: 2,    cacheMiss: 20,  output: 100 }, // v1.4.0: 官方 ¥2/¥20/¥100 (旧值全线 +5%)
   'kimi-k2.7-code':       { cacheHit: 1.3,  cacheMiss: 6.5, output: 27 },  // 官方 ¥1.3/¥6.5/¥27
   'kimi-k2.7-code-highspeed': { cacheHit: 2.6, cacheMiss: 13, output: 54 },// v1.4.0 新增: 官方高速版 ¥2.6/¥13/¥54
   'kimi-k2.6':            { cacheHit: 1.1,  cacheMiss: 6.5, output: 27 },  // v1.4.0: 官方缓存命中 ¥1.1 (旧值误抄成 k2.7-code 的 ¥1.3)
-  'kimi-k2.5':            { cacheHit: 0.679, cacheMiss: 3.864, output: 20.279 }, // ⚠️ 未核实: 官方页未列(历史款), 由 v1.3.4 USD 值 ×7 保号迁移
-  // 字节豆包 Seed (火山方舟; ⚠️ 官方页是 SPA, v1.4.0 未能取到原文 → ×7 保号迁移, 未核实)
+  // ⚠️ 官方已于 **2026-08-31 全平台下线** (platform.kimi.com/docs/models.md, 调用返回 404), 官方无价目。
+  //    值仍为 v1.3.4 的 USD×7 保号迁移, **非官方价**, 仅作旧会话估算占位 —— 2026-09-22 复核确认下线, 未能取证。
+  'kimi-k2.5':            { cacheHit: 0.679, cacheMiss: 3.864, output: 20.279 },
+  // 字节豆包 Seed —— ⚠️ 2026-09-22 复核: 火山方舟官方文档/定价页都是 SPA, fetch 只拿到壳(0 表),
+  //   而本容器内 chromium 无网络(无法渲染), 故**仍未能取证**。下列值仍是 v1.3.4 的 ×7 保号迁移, **非官方价**。
+  //   取证路径: 用带网络的浏览器打开 volcengine.com/docs/82379/1544106 抄表后回填。
   'doubao-seed-2.0-pro-32k':   { cacheHit: 0.616, cacheMiss: 3.087, output: 15.449 },
   'doubao-seed-2.0-pro-128k':  { cacheHit: 0.924, cacheMiss: 4.634, output: 23.17 },
   'doubao-seed-2.0-pro-256k':  { cacheHit: 1.855, cacheMiss: 9.268, output: 46.347 },
@@ -896,15 +968,21 @@ export const MODEL_PRICES = {
   // MiniMax (platform.minimaxi.com/docs/guides/pricing-paygo 2026-09-10 抓取)
   'minimax-m2.7':           { cacheHit: 0.42, cacheMiss: 2.1, output: 8.4 },  // v1.4.0 修复: 官方缓存读 ¥0.42 (旧值拿 cacheMiss ¥2.1 顶替 → 长会话高估 5 倍, 同 AGENTS.md 红线 4)
   'minimax-m2.7-highspeed': { cacheHit: 0.42, cacheMiss: 4.2, output: 16.8 }, // v1.4.0 新增: 官方高速版
+  'minimax-m3':             { cacheHit: 0.42, cacheMiss: 2.1, output: 8.4 },  // 2026-09-22 官方"永久五折" ≤512k 输入档 ¥2.1/¥8.4/缓存 ¥0.42 (>512k 档 ¥4.2/¥16.8/缓存 ¥0.84)
   // 美团 LongCat (中转站实测; 官方页未取到明文)
   'longcat-2.0':          { cacheHit: 0.1,  cacheMiss: 5,   output: 20 },  // 实测 ¥5/¥20/缓存 ¥0.1
-  // 腾讯混元 (⚠️ 官方页是 SPA, v1.4.0 未能取到原文 → ×7 保号迁移, 未核实)
+  // 腾讯混元 —— ⚠️ 2026-09-22 复核: 官方计费页 (cloud.tencent.com/document/product/1729/97731) 与模型列表里
+  //   **均无以下三个 API 名** (官方现役计费项为 Hunyuan-a13b / hunyuan-role-latest / hunyuan-translation /
+  //   Tencent HY Vision 1.5 Instruct 等), 无从对照 → 下列值仍是 v1.3.4 的 ×7 保号迁移, **非官方价**。
+  //   若确认是历史名/中转站命名, 可整段删除; 现在保留只为老会话估算不断档。
   'hunyuan-2.0-instruct-128k': { cacheHit: 4.347, cacheMiss: 4.347, output: 10.745 },
   'hunyuan-2.0-think-128k':    { cacheHit: 5.117, cacheMiss: 5.117, output: 20.468 },
   'hunyuan-turbo-s':           { cacheHit: 0.77,  cacheMiss: 0.77,  output: 1.932 },
   // 阶跃星辰 (platform.stepfun.com/docs/zh/guides/pricing/details 2026-09-10 抓取)
   'step-3.7-flash':       { cacheHit: 0.27, cacheMiss: 1.35, output: 8.1 }, // 官方 ¥1.35/¥8.1/缓存 ¥0.27
   'step-3.5-flash':       { cacheHit: 0.14, cacheMiss: 0.7,  output: 2.1 }, // 官方 ¥0.7/¥2.1/缓存 ¥0.14
+  'step-5-preview':       { cacheHit: 0.35, cacheMiss: 7,    output: 20 },  // 2026-09-22 官方新增 ¥7/¥20/缓存 ¥0.35
+  'step-1o-turbo-vision': { cacheHit: 0.5,  cacheMiss: 2.5,  output: 8 },   // 2026-09-22 官方 ¥2.5/¥8/缓存 ¥0.5
   // 小米 MiMo — 官方 2026-05-27 起「永久降价」(最高降幅 99%), 取消上下文分档; 与中转站 tokenrhythm 实时报价一致。
   // v1.3.4 修的「除两次 7」结论正确, v1.4.0 起改为直接存官方 CNY 原值, 不再有 ÷7 环节。
   'mimo-v2.5':            { cacheHit: 0.02,  cacheMiss: 1, output: 2 },    // 官方 ¥1/¥2/缓存 ¥0.02
@@ -943,15 +1021,20 @@ export const MODEL_PRICES = {
   'glm-4-plus':           { cacheHit: 2.5,   cacheMiss: 5,    output: 5 },  // ✅ v1.4.0 修复: 官方 ¥2.5/¥5/¥5 (旧口径下显示 ¥17.5/¥35/¥35, 高 7 倍)
   'glm-4-flash':          { cacheHit: 0.05,  cacheMiss: 0.1,  output: 0.1 }, // ⚠️ 官方 GLM-4-Flash-250414 现为免费; 此处保留历史 ¥0.1 档(宁高不低, 中转站可能仍计费)
   // 通义千问 (官方 CNY; 2026-09-10 抓取)
-  'qwen-plus':            { cacheHit: 0.4,   cacheMiss: 0.8,  output: 2 },  // 官方 ¥0.8/¥2 ✅; ⚠️ cacheHit 0.4(=50%) 未核实
+  'qwen-plus':            { cacheHit: 0.08,  cacheMiss: 0.8,  output: 2 },  // 官方 ¥0.8/¥2 ✅ (2026-09-22 核对: 现役 qwen-plus-2025-01-25 无阶梯计价);
+  //   ⚠️ cacheHit 原值 0.4(=输入 50%) **无官方依据** —— 官方明文「显式缓存命中按标准输入单价的 10% 计费」,
+  //   同表其余 8 个 qwen 条目也都严格等于 10%, 只有 qwen-plus / qwen-turbo 是 50% → 已按官方规则改为 0.08 (旧值高估缓存读 5 倍)。
   'qwen-max':             { cacheHit: 0.24,  cacheMiss: 2.4,  output: 9.6 },// v1.4.0: 官方现价 ¥2.4/¥9.6 (旧值 20/60 是远古价)
-  'qwen-turbo':           { cacheHit: 0.15,  cacheMiss: 0.3,  output: 0.6 },// 官方 ¥0.3/¥0.6 ✅; ⚠️ cacheHit 未核实
-  'qwen2.5-72b-instruct': { cacheHit: 2,     cacheMiss: 4,    output: 12 }, // 官方 ¥4/¥12 ✅
-  // Kimi — ⚠️ 未核实: 官方页未列旧款, 且这些值与 Moonshot 官方历史价(¥12/¥12 一档)对不上, 待重新取证
+  'qwen-turbo':           { cacheHit: 0.03,  cacheMiss: 0.3,  output: 0.6 },// 官方 ¥0.3/¥0.6 (思考模式输出 ¥3) ✅; cacheHit 同上按官方 10% 规则改为 0.03 (旧值 0.15=50%)
+  'qwen2.5-72b-instruct': { cacheHit: 2,     cacheMiss: 4,    output: 12 }, // ⚠️ 官方 2026-05-13 已下线(百炼下线公告), 保留仅为旧会话估算占位
+  // Kimi — ⚠️ 官方 **2026-08-31 已全平台下线 moonshot-v1 全系** (调用 404), 官方价目已撤, 无法取证。
+  //    下列值与原 Moonshot 官方历史价(¥12/¥12 一档)对不上, 仅作旧会话估算占位, 别当官方价引用。
   'moonshot-v1-8k':       { cacheHit: 0.6,   cacheMiss: 1.2,  output: 2.4 },
   'moonshot-v1-32k':      { cacheHit: 1.2,   cacheMiss: 2.4,  output: 4.8 },
   'moonshot-v1-128k':     { cacheHit: 3,     cacheMiss: 6,    output: 12 },
-  // 阶跃星辰 — ⚠️ 未核实: 官方页未列旧款
+  // 阶跃星辰 —— ⚠️ 2026-09-22 复核: 官方定价页现仅列 step-5-preview / step-3.7-flash / step-3.5-flash(-2603)
+  //   / step-1o-turbo-vision 与音频系列, **无下列 step-1-flash / step-1-8k / step-1-32k**(历史款),
+  //   官方无从对照, 值仍为旧存留, **非当前官方价**。
   'step-1-flash':         { cacheHit: 0.5,   cacheMiss: 1,    output: 2 },
   'step-1-8k':            { cacheHit: 2,     cacheMiss: 4,    output: 8 },
   'step-1-32k':           { cacheHit: 4,     cacheMiss: 8,    output: 15 },
@@ -995,9 +1078,13 @@ export const nativeCurrencyOf = (model) => (modelRegion(model) === '海外' ? 'U
  * 默认配置(国内 CNY / 海外 USD)下两边同币种, 根本不走换算 —— 这正是 v1.4.0 想达到的效果。
  */
 const convertPrice = (price, from, to) => {
-  if (from === to) return { cacheHit: price.cacheHit, cacheMiss: price.cacheMiss, output: price.output }
+  // v1.5.0: cacheWrite 是**可选**档 (官方 Anthropic/阿里 = 输入 ×125%) —— 必须一并带过,
+  //   否则会被这里静默丢掉, 缓存写入就退化成按 cacheMiss 计 (这正是 T14 第一次没测过的原因)。
+  const cw = price.cacheWrite
+  const withCw = (o) => (cw !== undefined ? { ...o, cacheWrite: cw } : o)
+  if (from === to) return withCw({ cacheHit: price.cacheHit, cacheMiss: price.cacheMiss, output: price.output })
   const k = from === 'USD' ? USD_TO_CNY_RATE : 1 / USD_TO_CNY_RATE
-  return { cacheHit: price.cacheHit * k, cacheMiss: price.cacheMiss * k, output: price.output * k }
+  return withCw({ cacheHit: price.cacheHit * k, cacheMiss: price.cacheMiss * k, output: price.output * k })
 }
 
 /**
@@ -1038,7 +1125,7 @@ const matchModelPrice = (model) => {
 }
 
 /** 解析模型单价, 仅 deepseek-flash / deepseek-v4-* 支持峰谷自动切换; chat/reasoner 等走通用价格表 */
-export const resolveModelPrice = (configOrGetter, model, timestamp = Date.now()) => {
+export const resolveModelPrice = (configOrGetter, model, timestamp = Date.now(), phase = null) => {
   const config = typeof configOrGetter === 'function' ? configOrGetter() : configOrGetter
   const peak = isPeakTime(timestamp)
   const display = currencyForModel(config, model)
@@ -1056,7 +1143,10 @@ export const resolveModelPrice = (configOrGetter, model, timestamp = Date.now())
   if (typeof model === 'string' && (model.startsWith('deepseek-v4') || model.startsWith('deepseek-flash'))) {
     const table = V4_RATES[display] ?? V4_RATES.CNY
     const key = model.startsWith('deepseek-v4-pro') ? 'deepseek-v4-pro' : 'deepseek-flash'
-    const hit = (peak ? table.peak[key] : table.offPeak[key])
+    // v1.5.0 峰谷分相: phase 显式给出时以它为准(历史上的每笔消耗按各自发生时刻计价),
+    //   为 null 才回退到「按 timestamp 判定」的老行为 —— 默认参数保持向后兼容。
+    const usePeak = phase === 'peak' ? true : phase === 'offPeak' ? false : peak
+    const hit = (usePeak ? table.peak[key] : table.offPeak[key])
     if (hit) return { ...hit }
   }
 
@@ -1913,6 +2003,29 @@ export function makeCostProjection(configOrGetter, services) {
   const round6 = (n) => Math.round(n * 1e6) / 1e6
 
   /**
+   * v1.5.0: 某模型是否走 V4 峰谷表 —— 条件必须与 resolveModelPrice 内部一致
+   * (用户在 config.prices 里自填过价的那一档不算峰谷, 自填价不做峰谷切换)。
+   */
+  const phaseOfModel = (model, ts) => {
+    if (typeof model !== 'string') return null
+    if (!(model.startsWith('deepseek-v4') || model.startsWith('deepseek-flash'))) return null
+    const cfg = getConfig()
+    if (cfg?.prices && Object.prototype.hasOwnProperty.call(cfg.prices, model) && cfg.prices[model]) return null
+    return isPeakTime(ts) ? 'peak' : 'offPeak'
+  }
+  /** 往分相桶加一份用量 (不可变更新)。 */
+  const phaseAdd = (map, model, phase, buckets) => {
+    const cur = map[model] ?? {}
+    return { ...map, [model]: { ...cur, [phase]: addBuckets(cur[phase] ?? zero(), buckets) } }
+  }
+  /** 从分相桶减一份 (替换语义); 该相不存在时原样返回。 */
+  const phaseSub = (map, model, phase, buckets) => {
+    const cur = map[model]
+    if (cur === undefined || cur[phase] === undefined) return map
+    return { ...map, [model]: { ...cur, [phase]: subBuckets(cur[phase], buckets) } }
+  }
+
+  /**
    * v1.4.0: 从一条 assistant stream 里取**最后一次** usage chunk。
    * 与 dsh-llm 的 `lastAssistantStreamChunk(stream, 'usage')` 同语义, 本地实现以免给插件引入额外依赖
    * (`dependencies` 必须保持为空是硬约束)。
@@ -1959,8 +2072,16 @@ export function makeCostProjection(configOrGetter, services) {
       tokens.cacheWrite += b.cacheWriteTokens
       tokens.output += b.outputTokens
       // 支持 DeepSeek 谷峰自动计费
-      const price = resolveModelPrice(cfg, model)
-      const c = ((b.uncachedInputTokens + b.cacheWriteTokens) * price.cacheMiss + b.cacheReadTokens * price.cacheHit + b.outputTokens * price.output) / 1e6
+      // v1.5.0: 缓存写入单独计价 —— 官方普遍按**标准输入价的 125%**收 (Anthropic $6.25/$5、阿里显式缓存明文 125%、
+      //   MiniMax 2.625/2.1), Kimi K3 更是另有 ¥20/1M 的写入费。表里没给 cacheWrite 的条目回落到 cacheMiss (= 旧行为, 结果不变)。
+      const costOf = (bk, price) => ((bk.uncachedInputTokens * price.cacheMiss + bk.cacheWriteTokens * (price.cacheWrite ?? price.cacheMiss) + bk.cacheReadTokens * price.cacheHit + bk.outputTokens * price.output)) / 1e6
+      // v1.5.0: 有分相数据就按峰/谷各自计价 (每笔用量用**它发生那一刻**的价),
+      //   没有(老缓存/非峰谷模型)才回退到按当前时刻计价的老行为。
+      const pb = state?.phaseBuckets?.[model]
+      const c = (pb !== undefined && (pb.peak !== undefined || pb.offPeak !== undefined))
+        ? costOf(pb.peak ?? zero(), resolveModelPrice(cfg, model, undefined, 'peak'))
+          + costOf(pb.offPeak ?? zero(), resolveModelPrice(cfg, model, undefined, 'offPeak'))
+        : (() => { const price = resolveModelPrice(cfg, model); return costOf(b, price) })()
       // v1.3.2: 该模型实际币种 (海外模型可能与主货币不同)
       const cur = currencyForModel(cfg, model)
       if (c > 0) {
@@ -2013,15 +2134,26 @@ export function makeCostProjection(configOrGetter, services) {
       if (usage === null) return unchanged ? state : { ...state, currentModel: nextModel, currentProvider: nextProvider }
       const model = nextModel ?? 'unknown'
       const buckets = bucketsOf(usage)
+      // v1.5.0: 按**事件发生时刻**(event.time)判定峰谷, 而不是等 summarize 时用 Date.now()。
+      //   后者会把整段历史消耗都按"打开面板那一刻"的时段计价 —— DeepSeek 峰谷价差 2 倍,
+      //   谷时跑的量在峰时查看会被翻倍, 反之漏掉一半。事件无 time 时回退当前时刻。
+      const eventTime = Number.isFinite(event?.time) ? event.time : Date.now()
+      const phase = phaseOfModel(model, eventTime)
       const prev = state.last !== null && state.last.turn === turn && state.last.step === step ? state.last : null
       if (prev !== null && prev.model === model && bucketsEqual(prev.buckets, buckets)) {
         return unchanged ? state : { ...state, currentModel: nextModel, currentProvider: nextProvider }
       }
       const isNewModel = !(model in state.byModel)
       let byModel = state.byModel
-      if (prev !== null) byModel = { ...byModel, [prev.model]: subBuckets(byModel[prev.model] ?? zero(), prev.buckets) }
+      let phaseBuckets = state.phaseBuckets ?? {}
+      if (prev !== null) {
+        byModel = { ...byModel, [prev.model]: subBuckets(byModel[prev.model] ?? zero(), prev.buckets) }
+        // 替换槽位时, 分相桶也要按**上一个事件当时的相**回退, 否则重试会把同一笔算两次。
+        if (prev.phase) phaseBuckets = phaseSub(phaseBuckets, prev.model, prev.phase, prev.buckets)
+      }
       byModel = { ...byModel, [model]: addBuckets(byModel[model] ?? zero(), buckets) }
-      return { ...state, currentModel: nextModel, currentProvider: nextProvider, last: { turn, step, model, buckets }, byModel, modelOrder: isNewModel ? [...state.modelOrder, model] : state.modelOrder }
+      if (phase) phaseBuckets = phaseAdd(phaseBuckets, model, phase, buckets)
+      return { ...state, currentModel: nextModel, currentProvider: nextProvider, last: { turn, step, model, buckets, phase }, byModel, phaseBuckets, modelOrder: isNewModel ? [...state.modelOrder, model] : state.modelOrder }
   }
 
   return {
@@ -2041,6 +2173,8 @@ export function makeCostProjection(configOrGetter, services) {
           cacheWriteTokens: z.number(),
           outputTokens: z.number(),
         }),
+        /** v1.5.0: 该事件发生时的峰谷相, 替换槽位时要按同一个相回退分相桶。 */
+        phase: z.string().nullable().optional(),
       }).nullable(),
       byModel: z.record(z.string(), z.object({
         uncachedInputTokens: z.number(),
@@ -2048,21 +2182,26 @@ export function makeCostProjection(configOrGetter, services) {
         cacheWriteTokens: z.number(),
         outputTokens: z.number(),
       })),
+      /** v1.5.0: 按事件发生时刻拆分的峰/谷用量桶 (仅走 V4 峰谷表的模型才会出现)。 */
+      phaseBuckets: z.record(z.string(), z.object({
+        peak: z.object({ uncachedInputTokens: z.number(), cacheReadTokens: z.number(), cacheWriteTokens: z.number(), outputTokens: z.number() }).optional(),
+        offPeak: z.object({ uncachedInputTokens: z.number(), cacheReadTokens: z.number(), cacheWriteTokens: z.number(), outputTokens: z.number() }).optional(),
+      })).optional(),
       modelOrder: z.array(z.string()),
       /** v1.4.0: 本投影所属会话 id —— 子代理汇总要拿它去查 `subagentCatalog`。空串表示未知。 */
       sessionId: z.string(),
       inheritedEventCount: z.number().int().nonnegative(),
       ownBoundaryKnown: z.boolean(),
       ownChildIds: z.array(z.string()),
-      own: z.object({ currentModel: z.string().nullable(), currentProvider: z.string().nullable(), last: z.any().nullable(), byModel: z.record(z.string(), z.object({ uncachedInputTokens: z.number().nonnegative(), cacheReadTokens: z.number().nonnegative(), cacheWriteTokens: z.number().nonnegative(), outputTokens: z.number().nonnegative() })), modelOrder: z.array(z.string()) }),
+      own: z.object({ currentModel: z.string().nullable(), currentProvider: z.string().nullable(), last: z.any().nullable(), byModel: z.record(z.string(), z.object({ uncachedInputTokens: z.number().nonnegative(), cacheReadTokens: z.number().nonnegative(), cacheWriteTokens: z.number().nonnegative(), outputTokens: z.number().nonnegative() })), phaseBuckets: z.record(z.string(), z.any()).optional(), modelOrder: z.array(z.string()) }),
     }),
     init: (header, inheritedEventCount) => ({
-      currentModel: null, currentProvider: null, last: null, byModel: {}, modelOrder: [],
+      currentModel: null, currentProvider: null, last: null, byModel: {}, phaseBuckets: {}, modelOrder: [],
       sessionId: typeof header?.id === 'string' ? header.id : '',
       inheritedEventCount: Number.isSafeInteger(inheritedEventCount) && inheritedEventCount >= 0 ? inheritedEventCount : 0,
       ownBoundaryKnown: (Number.isSafeInteger(inheritedEventCount) && inheritedEventCount >= 0) || !header?.isSeeded,
       ownChildIds: [],
-      own: { currentModel: null, currentProvider: null, last: null, byModel: {}, modelOrder: [] },
+      own: { currentModel: null, currentProvider: null, last: null, byModel: {}, phaseBuckets: {}, modelOrder: [] },
     }),
     apply: (state, event) => {
       const full = foldUsage(state, event)
@@ -2131,7 +2270,7 @@ export function makeCostProjection(configOrGetter, services) {
       }
       },
     },
-    stateVersion: 3,
+    stateVersion: 4,
   }
 }
 
