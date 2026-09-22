@@ -3,6 +3,6 @@
     - id: dsh-api-dashboard
       name: dsh-api-dashboard
       config:
-        refreshIntervalMs: 300000
-        clientPollIntervalMs: 30000
+        refreshIntervalMs: 5000
+        clientPollIntervalMs: 5000
         timeoutMs: 8000

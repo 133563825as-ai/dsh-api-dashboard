@@ -14,6 +14,16 @@ const src = readFileSync(path.join(ROOT, 'src/index.js'), 'utf8')
 const cli = readFileSync(path.join(ROOT, 'client/client.js'), 'utf8')
 
 // ==========================================================================
+// S-1 打开设置不得瞬删看板 (2026-09-22 维护者反馈「每次点设置都抽搐一下」)
+//   openSettings 原来是 setView("bar") + setSettingsOpen(true) 同帧生效: 从看板点设置时
+//   DashboardDrawer 被当场卸载、SettingsModal 同时挂载, 两块全屏遮罩一换一 (drawer 的
+//   .dshadb_scrim 只有入场动画, 没有出场动画) → 视觉上「啪」一下。改为打开时不收看板、
+//   关闭时再收, 交互结果不变 (关掉设置一样回状态条)。
+// ==========================================================================
+a('S1 openSettings 不再同帧 setView("bar")', !/const openSettings = [^\n]*setView\("bar"\)/.test(cli))
+a('S2 关闭设置时收回看板 (保持关闭后回状态条的原有结果)', /onClose: \(\) => \{ setSettingsOpen\(false\); setView\("bar"\); \}/.test(cli))
+
+// ==========================================================================
 // H-1 状态文件形状损坏 → apply() 绝不能抛
 // 实测后果: `{"customRelays": 5}` 会让整个 `dsh web` 启动失败(不是插件不显示, 是 GUI 打不开)。
 // 这里用**独立子进程**跑, 因为模块顶层的 DSH_HOME 在 import 时就固化了。
@@ -77,7 +87,19 @@ const cli = readFileSync(path.join(ROOT, 'client/client.js'), 'utf8')
 // ==========================================================================
 {
   a('H4b 加载路径有夹取(源码级)', /NUMBER_FIELDS[\s\S]{0,400}refreshIntervalMs/.test(src))
-  a('H4b clampRefreshSec 下限 1 / 上限 60', (() => {
+  // H-4b 补漏 (2026-09-22): cordis.patch.yml 里曾硬编码 refreshIntervalMs: 300000,
+//   而 sanitizePersistedShape 只夹**状态文件**的值 → config 这条路绕过了所有闸门,
+//   真机表现为「刷新间隔 300 秒」(而 clampRefreshSec 上限明明是 60 秒)。
+{
+  const mm = await import(new URL('../src/index.js', import.meta.url).pathname + '?v=' + Date.now())
+  a('H4b2 clampMs 把 300000 夹到 60000 (config 路径)', mm.clampMs(300000, 1000, 60000, 5000) === 60000)
+  a('H4b3 clampMs 把 -1 抬到下限 1000', mm.clampMs(-1, 1000, 60000, 5000) === 1000)
+  a('H4b4 clampMs 非数字回落 default', mm.clampMs('abc', 1000, 60000, 5000) === 5000 && mm.clampMs(undefined, 1000, 60000, 5000) === 5000)
+}
+a('H4b5 runtimeConfig 对 config 来源也夹取(源码级)', /clampMs\(persisted\.refreshIntervalMs \?\? config\.refreshIntervalMs/.test(src))
+a('H4b6 cordis.patch.yml 不再写死 300000', !readFileSync(path.join(ROOT, 'cordis.patch.yml'), 'utf8').includes('300000'))
+
+a('H4b clampRefreshSec 下限 1 / 上限 60', (() => {
     const m2 = { clampRefreshSec: null }
     return src.includes('Math.min(Math.max(Math.round(Number(v) || 1), 1), 60)')
   })())

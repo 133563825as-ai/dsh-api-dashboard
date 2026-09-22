@@ -2620,7 +2620,12 @@ window.__ModuleLoader__.load({
           const openDetail = (id) => { setDetailId(id); setView("detail"); };
           const closeDetail = () => setView("list");
           const closeList = () => setView("bar");
-          const openSettings = (section) => { setSettingsSection(section || "basic"); setView("bar"); setSettingsOpen(true); };
+          // 2026-09-22: 原来这里是 setView("bar") + setSettingsOpen(true) 同帧生效 —— 从看板点设置时,
+//   DashboardDrawer 会被**当场卸载**、SettingsModal 同时挂载, 两块全屏遮罩一换一, 而 drawer
+//   的 .dshadb_scrim 只有入场动画没有出场动画 → 视觉上「啪」一下(维护者反馈「点设置会抽搐一下」)。
+//   改为: 打开设置时**不**收看板(设置面板照常盖在它上面), 关闭设置时再收 —— 交互结果不变
+//   (关掉设置后一样回到状态条), 但中间那次同帧卸载/挂载消失了。
+const openSettings = (section) => { setSettingsSection(section || "basic"); setSettingsOpen(true); };
 
           // v0.6.0: 启动自动检查更新 (一次静默请求, 服务端 5 分钟缓存; 结果供设置弹窗直接显示)
           react.useEffect(() => {
@@ -2656,7 +2661,7 @@ window.__ModuleLoader__.load({
               react.createElement(BarReadout, { t, onOpen: openList, onOpenSettings: () => openSettings("basic"), selectedId, onSelect: handleSelect, config, cost: costDisp, provider: curProvider, key: "bar" }),
               view === "list" ? react.createElement(DashboardDrawer, { isOpen: true, onClose: closeList, t, selectedId, onSelect: handleSelect, onOpenDetail: (id) => { setDetailId(id); setView("detail"); }, onAddRelay: () => openSettings("relays"), onAddCustom: () => openSettings("models"), onOpenSettings: () => openSettings("basic"), config, currentModel, key: "drawer" }) : null,
               view === "detail" ? react.createElement(PlatformDetail, { isOpen: true, onClose: closeDetail, platformId: detailId, t, useProjection, config, key: "detail" }) : null,
-              isSettingsOpen ? react.createElement(SettingsModal, { isOpen: true, onClose: () => setSettingsOpen(false), onBack: () => { setSettingsOpen(false); setView("list"); }, t, config, initialSection: settingsSection, key: "settings" }) : null,
+              isSettingsOpen ? react.createElement(SettingsModal, { isOpen: true, onClose: () => { setSettingsOpen(false); setView("bar"); }, onBack: () => { setSettingsOpen(false); setView("list"); }, t, config, initialSection: settingsSection, key: "settings" }) : null,
             ]),
             subRow,
           ]);

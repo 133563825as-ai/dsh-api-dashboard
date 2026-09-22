@@ -619,6 +619,17 @@ export const planBalancesFetch = ({ force = false, peek = false, hasData = false
 export const clampRefreshSec = (v) => Math.min(Math.max(Math.round(Number(v) || 1), 1), 60)
 
 /**
+ * 毫秒级夹取 (2026-09-22 补漏): sanitizePersistedShape 只夹**状态文件**读出来的值,
+ * 而从 config (cordis.patch.yml / profile 配置) 进来的值**没有任何夹取** ——
+ * 于是 patch 里写死的 refreshIntervalMs: 300000 (300 秒) 会绕过 clampRefreshSec 直接生效,
+ * 用户看到「刷新间隔 300 秒」。这里给 config 这条路补上同一道闸门。
+ */
+export const clampMs = (v, min, max, fallback) => {
+  const n = Number(v)
+  return Number.isFinite(n) ? Math.min(Math.max(Math.round(n), min), max) : fallback
+}
+
+/**
  * 第 2 层自动判定的补充素材: 提取 settings.yaml 里 `llm-pi-ai.providers.<name>` 的
  * **全部 provider 名**，包括没有写 baseURL 的 provider。这样即使别人没有手写 URL，
  * 只要用的是已知官方 preset 名，也能自动判定为官方，而不必先手动补 settings。
@@ -2291,9 +2302,10 @@ export function apply(ctx, config) {
     }
   } catch { /* 忽略 */ }
   const runtimeConfig = {
-    refreshIntervalMs: persisted.refreshIntervalMs ?? config.refreshIntervalMs ?? 5000,
-    clientPollIntervalMs: persisted.clientPollIntervalMs ?? config.clientPollIntervalMs ?? 5000,
-    timeoutMs: persisted.timeoutMs ?? config.timeoutMs ?? 8000,
+    // ⚠️ 两个来源都要夹: persisted 已被 sanitizePersistedShape 夹过, 但 config 没有 (见 clampMs 注释)。
+    refreshIntervalMs: clampMs(persisted.refreshIntervalMs ?? config.refreshIntervalMs, 1000, 60000, 5000),
+    clientPollIntervalMs: clampMs(persisted.clientPollIntervalMs ?? config.clientPollIntervalMs, 1000, 60000, 5000),
+    timeoutMs: clampMs(persisted.timeoutMs ?? config.timeoutMs, 1000, 60000, 8000),
     presets: config.presets ?? PLATFORM_PRESETS.map(p => p.id),
     // H-1 (v1.4.1): 这里必须带 Array.isArray —— 状态文件形状跑偏时 apply() 抛出 =
     // 整个 dsh web 启动失败(migratePersistedState 已消毒, 这里是第二道防线)
