@@ -10,7 +10,10 @@
   峰/谷各按对应单价求和（状态结构版本 3 → 4；读不到分相的老缓存自动回落旧行为，不会崩也不会显示错数字）。
   ② **法定节假日全天算谷时**：官方英文定价页明文 `excluding Chinese public holidays ... in full`，2026 年 7 个假期共 **33 天**，漏掉会整体高估一倍。
   ③ **缓存写入单独计价**：官方 Anthropic 一律 = 输入价 **×125%**（Opus 5 $6.25/$5、Sonnet 5 $2.50/$2、Haiku 4.5 $1.25/$1 逐项吻合）。
-  价格表：DeepSeek / 智谱 / 阿里百炼 / MiniMax / 阶跃 / Kimi / OpenAI / Anthropic 八家已**逐条对官方原文**核对，补录 20+ 条
+  另外把「点设置抽搐」修到底（同日三次）：打开设置不再同帧卸载看板（两块全屏遮罩一换一那一下）；
+  再修两处余震 —— 设置面板与看板两层遮罩同为 35% 黑、叠加后背景会渐暗到 58%（下层已有遮罩时本层背景设透明）；
+  以及面板「高度随内容」而更新检查结果是异步插入的约 23px（bottom 锚定 → 上边缘往上跳），现改为固定高度槽位。
+  价格表：DeepSeek / 智谱 / 阿里百炼 / MiniMax / 阶跃 / Kimi / OpenAI / Anthropic / **Google Gemini** / **xAI Grok** / **小米 MiMo** 十一家已**逐条对官方原文**核对，补录 40+ 条
   （GPT-6 Astra、Claude Fable 5.1、GLM-5.3-FlashX、MiniMax-M3、step-5-preview、qwen3.8-max-prime 等）；
   修正 `gpt-5.6-sol` 为官方现价 $5/$30（旧值记的是促销价，官方页已无促销标记）、`qwen-plus`/`qwen-turbo` 缓存读价（旧值 50% 无官方依据，官方规则为输入 ×10%）、
   `glm-4-flashx` 键名错配（旧表把 FlashX 的价挂在 `glm-4-flash` 上，而 `glm-4-flashx-250414` 一直落到默认价）；标注已下线模型（`moonshot-v1` 全系、`kimi-k2.5`、`qwen2.5-72b-instruct`）。

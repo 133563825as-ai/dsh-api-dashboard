@@ -1445,7 +1445,7 @@ window.__ModuleLoader__.load({
     //#endregion
 
     //#region 设置面板 (安全阈值 + 中转站)
-    function SettingsModal({ isOpen, onClose, onBack, t, config, initialSection }) {
+    function SettingsModal({ isOpen, onClose, onBack, t, config, initialSection, underScrim }) {
       const [section, setSection] = react.useState(initialSection || "basic");
       const [relays, setRelays] = react.useState([]);
       const [models, setModels] = react.useState([]);
@@ -1938,21 +1938,30 @@ window.__ModuleLoader__.load({
             ]),
             // v1.3.3: 更新结果改为醒目横幅 —— 原来的 11px 灰色字在移动端几乎看不到,
             // 用户点完「一键更新」后以为没反应。成功=绿色底, 失败=红色底, 检查有新版=原来的灰色。
-            upd.msg ? react.createElement("div", { key: "upd_msg", style: {
-              color: upd.phase === "fail" ? "#b33" : upd.phase === "done" ? "#1a7a3a" : "#777b84",
-              background: upd.phase === "fail" ? "#fde8e8" : upd.phase === "done" ? "#e8fde8" : "transparent",
-              fontSize: upd.phase === "done" || upd.phase === "fail" ? "13px" : "11px",
-              fontWeight: upd.phase === "done" || upd.phase === "fail" ? "600" : "400",
-              padding: upd.phase === "done" || upd.phase === "fail" ? "8px 10px" : "0",
-              borderRadius: upd.phase === "done" || upd.phase === "fail" ? "6px" : "0",
-              marginTop: "8px",
-              lineHeight: "1.4"
-            } }, upd.msg) : (upd.info?.hasUpdate ? react.createElement("div", { key: "upd_msg", style: { color: "#777b84", fontSize: "11px", marginTop: "6px" } },
-              t("update.available") + " v" + upd.info.remote) : null),
+            // 2026-09-22: 外面这层是**固定高度槽位**。原来结果行是条件渲染, 打开面板时它还不存在,
+            //   checkUpdate 回来才插入(约 23px) —— 而面板是 position:fixed + bottom:0 + 高度随内容,
+            //   于是「上边缘往上跳一下」; 本地请求 <20ms, 往往在滑入动画(.22s)期间就填充 → 边滑边长。
+            //   槽位恒定后结果填进同一高度, 打开过程中版面零位移。
+            react.createElement("div", { key: "upd_slot", style: { minHeight: "16px", marginTop: "8px" } }, [
+              upd.msg ? react.createElement("div", { key: "upd_msg", style: {
+                color: upd.phase === "fail" ? "#b33" : upd.phase === "done" ? "#1a7a3a" : "#777b84",
+                background: upd.phase === "fail" ? "#fde8e8" : upd.phase === "done" ? "#e8fde8" : "transparent",
+                fontSize: upd.phase === "done" || upd.phase === "fail" ? "13px" : "11px",
+                fontWeight: upd.phase === "done" || upd.phase === "fail" ? "600" : "400",
+                padding: upd.phase === "done" || upd.phase === "fail" ? "8px 10px" : "0",
+                borderRadius: upd.phase === "done" || upd.phase === "fail" ? "6px" : "0",
+                lineHeight: "1.4"
+              } }, upd.msg) : (upd.info?.hasUpdate ? react.createElement("div", { key: "upd_msg", style: { color: "#777b84", fontSize: "11px" } },
+                t("update.available") + " v" + upd.info.remote) : null),
+            ]),
           ]),
         ]),
       ]);
-      return react.createElement("div", { className: "dshadb_scrim", onClick: (e) => { if (e.target === e.currentTarget) onClose(); } }, [
+      // 2026-09-22: 从看板打开设置时, 下层 DashboardDrawer 的 .dshadb_scrim **仍在**(S1 的修法就是保留它),
+      //   而两层遮罩同为 rgba(0,0,0,0.35) → 叠加后总暗度 1-(0.65)² ≈ 0.58, 打开瞬间背景从 0.35 渐暗到 0.58
+      //   (dshadb-fadein .15s), 看上去「又抽了一下」。已知下层已有遮罩时本层不再重复加深 ——
+      //   只把背景设为透明, scrim 本身保留(继续拦截点击 / 点空白关闭)。
+      return react.createElement("div", { className: "dshadb_scrim", style: underScrim ? { background: "transparent" } : undefined, onClick: (e) => { if (e.target === e.currentTarget) onClose(); } }, [
         react.createElement("div", { className: "dshadb_swipeguard", "aria-hidden": "true", key: "swipeguard" }),
         output,
       ]);
@@ -2661,7 +2670,8 @@ const openSettings = (section) => { setSettingsSection(section || "basic"); setS
               react.createElement(BarReadout, { t, onOpen: openList, onOpenSettings: () => openSettings("basic"), selectedId, onSelect: handleSelect, config, cost: costDisp, provider: curProvider, key: "bar" }),
               view === "list" ? react.createElement(DashboardDrawer, { isOpen: true, onClose: closeList, t, selectedId, onSelect: handleSelect, onOpenDetail: (id) => { setDetailId(id); setView("detail"); }, onAddRelay: () => openSettings("relays"), onAddCustom: () => openSettings("models"), onOpenSettings: () => openSettings("basic"), config, currentModel, key: "drawer" }) : null,
               view === "detail" ? react.createElement(PlatformDetail, { isOpen: true, onClose: closeDetail, platformId: detailId, t, useProjection, config, key: "detail" }) : null,
-              isSettingsOpen ? react.createElement(SettingsModal, { isOpen: true, onClose: () => { setSettingsOpen(false); setView("bar"); }, onBack: () => { setSettingsOpen(false); setView("list"); }, t, config, initialSection: settingsSection, key: "settings" }) : null,
+              // 2026-09-22: underScrim —— view 是 list/detail 时下层已有全屏遮罩, 设置面板不再叠加第二层 (见 SettingsModal)
+              isSettingsOpen ? react.createElement(SettingsModal, { isOpen: true, underScrim: view !== "bar", onClose: () => { setSettingsOpen(false); setView("bar"); }, onBack: () => { setSettingsOpen(false); setView("list"); }, t, config, initialSection: settingsSection, key: "settings" }) : null,
             ]),
             subRow,
           ]);
