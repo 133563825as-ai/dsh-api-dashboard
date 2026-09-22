@@ -127,6 +127,12 @@ dsh plugin --profile web add link:/root/dsha-api-dashboard
 
 最近一版 **v1.4.5** —— 消耗估算口径三处修正：**峰谷改按「事件发生时刻」计价**（旧实现按「打开面板那一刻」，谷时跑的量在峰时查看会被翻倍）、**法定节假日全天算谷时**、**缓存写入按官方 ×125% 单独计价**；同时把十一家厂商的价格表逐条对官方原文重核，并补录 40+ 条新模型（GPT-6 Astra、Claude Fable 5.1、GLM-5.3-FlashX、MiniMax-M3、Gemini 3.5 Flash、Grok 4.7 / 4.6、MiMo V2.6 等）；另修「点设置抽搐一下」与刷新间隔 300 秒两处交互根因。一版一行的完整历史见 [`CHANGELOG.md`](CHANGELOG.md)。
 
+## 赞助者
+
+多谢这些朋友的支持（按加入顺序）：
+
+- [chenshi723](https://github.com/chenshi723)
+
 ## License
 
 MIT —— 见 [LICENSE](LICENSE)。大肥鱼互动挂件移植自
