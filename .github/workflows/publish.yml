@@ -27,7 +27,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write # v1.5.0 起：正式版发完 npm 顺带建 GitHub Release（用内置 GITHUB_TOKEN，不引入额外 secrets）
   id-token: write # 可信发布必需：没有它 npm 拿不到 OIDC 身份
 
 jobs:
@@ -163,3 +163,18 @@ jobs:
           echo "npm 认证配置（应为空）:"
           npm config get //registry.npmjs.org/:_authToken || true
           npm publish --provenance --access public --registry=https://registry.npmjs.org
+
+      # v1.5.0 起：正式版发完 npm 之后**顺带建 GitHub Release**。
+      # 此前从未建过 —— 「发行版」页面永远停在最后一个手工建的版本（实测 v1.4.4），
+      # 而 tag 与 npm 其实都已到位：v1.4.5（09-22）与 v1.5.0（09-27）两版都栽在这。
+      # 用 runner 自带的 gh CLI + 内置 GITHUB_TOKEN，不需要任何额外 secrets；
+      # 预发行 tag 走同一条短路（只校验，不建 Release、不发 npm）。
+      - name: 创建 GitHub Release（仅正式版）
+        if: steps.prerelease_guard.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag
