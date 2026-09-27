@@ -174,7 +174,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --title "$GITHUB_REF_NAME" \
-            --generate-notes \
-            --verify-tag
+          V="$GITHUB_REF_NAME"; VV="${V#v}"
+          # 正文取 CHANGELOG 里该版本的段落 —— 我们的 CHANGELOG 是"一版一行"的真源。
+          # 不用 --generate-notes：本项目直接推 main、没有 PR，gh 只能生成一行 compare
+          # 链接（实测 v1.5.0 的自动正文仅 95 字符、没有任何改动内容）。
+          node -e 'const fs=require("fs");const v=process.argv[1];const L=fs.readFileSync("CHANGELOG.md","utf8").split("\n");const o=[];let on=false;for(const l of L){const h=/^- \*\*v[\d.]+/.test(l);if(h){if(on)break;if(l.startsWith("- **v"+v+"**")){on=true;o.push(l.replace(/^- \*\*/,"**"));continue}}if(on)o.push(l)}fs.writeFileSync("/tmp/notes.md",o.join("\n").trim())' "$VV"
+          if [ -s /tmp/notes.md ]; then
+            gh release create "$V" --title "$V" --notes-file /tmp/notes.md --verify-tag
+          else
+            echo "::warning::CHANGELOG 里没有 v$VV 的段落，退回自动生成"
+            gh release create "$V" --title "$V" --generate-notes --verify-tag
+          fi
