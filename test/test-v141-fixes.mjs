@@ -270,7 +270,12 @@ a('H4b clampRefreshSec 下限 1 / 上限 60', (() => {
 // UI v1.4.1（按维护者反馈定稿）：余额条恢复独立药丸 + 整块水平居中
 // ==========================================================================
 {
-  a('UI 整块水平居中（fit-content + margin auto）', /\.dshadb_barwrap\{display:flex;flex-direction:column;align-items:center;gap:0;width:fit-content;max-width:100%;min-width:0;margin:0 auto\}/.test(cli))
+  // v1.6.4: 上边距从 0 改成 -8px（收紧与 DSH 用量统计行之间的空白, 维护者截图反馈）。
+  // 这里继续钉两件事: ①仍是 fit-content 且**水平**居中(margin 的左右必须是 auto);
+  // ②上边距只允许是收紧用的负值, 不许变成正数又把空白加回来。
+  a('UI 整块水平居中（fit-content + margin 左右 auto）',
+    /\.dshadb_barwrap\{[^}]*width:fit-content[^}]*margin:(-\d+px|0) auto( 0)?\}/.test(cli) &&
+    !/\.dshadb_barwrap\{[^}]*margin:\d+px auto/.test(cli))
   a('UI 不再有容器化底色/边框', !/\.dshadb_barwrap\{[^}]*border-radius:12px/.test(cli))
   a('UI 余额条恢复独立药丸（圆角+底色+边框）', /\.dshadb_bar\{display:inline-flex[^}]*border-radius:10px;background:#f5f6f8;border:1px solid #e7e8ec/.test(cli))
   a('UI 余额条不再是 flex:1 填充', !/\.dshadb_bar\{[^}]*flex:1 1 auto/.test(cli))

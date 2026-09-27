@@ -528,7 +528,13 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
 /* UI v1.4.1（按维护者反馈改）：**不再把两行塞进一个容器** —— 余额条恢复成独立的药丸，
    整块（余额条 + 子代理行）**水平居中**：wrap 用 fit-content + margin:auto，
    子项 align-items:center，于是窄的时候两行都居中，宽的时候 wrap 撑到 100% 子代理行在内部横滑。 */
-.dshadb_barwrap{display:flex;flex-direction:column;align-items:center;gap:0;width:fit-content;max-width:100%;min-width:0;margin:0 auto}
+/* v1.6.4: 吃掉宿主 stack 给的那 6px gap。
+   状态条上面紧挨的是 DSH 自己的用量统计行(「1 轮 1 步 · 148 tok/s」那一行), 两行之间原本空一截
+   (维护者截图反馈「中间那个空白间隔有点多」)。间距来自宿主 composer stack 的
+  宿主变量 --dsh-composer-stack-gap(实测 6px), 改它会连带影响宿主自己的排版 ——
+   所以只把我们这一份退回去: 负 margin-top = -(6px) - 2px, 净留 2px 呼吸。
+   ⚠️ 想再紧/再松就只调这个值, 别动 28px 的 min-height(那是冷启动 LayoutShift 的钉子)。 */
+.dshadb_barwrap{display:flex;flex-direction:column;align-items:center;gap:0;width:fit-content;max-width:100%;min-width:0;margin:-8px auto 0}
 .dshadb_barrow{display:inline-flex;align-items:center;gap:2px;max-width:100%;min-width:0}
 .dshadb_subs{display:flex;flex-wrap:nowrap;align-items:center;gap:4px;margin:3px 0 0 0;max-width:100%;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-ms-overflow-style:none;-webkit-overflow-scrolling:touch}
 /* UI v1.4.1: 子代理行只在**真的溢出**时右侧渐隐(由 syncSubsOverflow 打类名),
