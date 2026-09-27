@@ -134,9 +134,29 @@ jobs:
       - name: 确认 package.json / lock 未被改动
         run: git diff --exit-code -- package.json package-lock.json
 
+      # v1.5.0-desktop-preview.1 起：**预发行 tag 不发 npm**。
+      # 预发行版本号推 tag 同样会触发本流程，而 npm 对没有 --tag 的预发行版本默认仍会挂到
+      # latest 上 —— 一次误推就把预览版变成了所有人的安装源。这里显式短路：
+      # 预发行 tag 只跑校验（版本一致性 / 零依赖 / 语法 / 全套测试 / 打包预演），发布步骤跳过。
+      - name: 预发行版本只校验、不发布
+        id: prerelease_guard
+        run: |
+          PKG="$(node -p "require('./package.json').version")"
+          case "$PKG" in
+            *-*)
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "预发行版本 $PKG —— 跳过 npm 发布（本流程只做校验）"
+              ;;
+            *)
+              echo "skip=false" >> "$GITHUB_OUTPUT"
+              echo "正式版本 $PKG —— 继续发布"
+              ;;
+          esac
+
       # 无 token：npm CLI 用 GitHub 签发的 OIDC 身份向 registry 换取发布权限，并附带 provenance 溯源。
       # 失败时先看下面这行诊断 —— 若 _authToken 非空说明又被什么东西注入了凭据（见「准备 Node」的注释）。
       - name: 发布到 npm
+        if: steps.prerelease_guard.outputs.skip != 'true'
         run: |
           echo "OIDC 可用: ${ACTIONS_ID_TOKEN_REQUEST_URL:+是}${ACTIONS_ID_TOKEN_REQUEST_URL:-否}"
           echo "userconfig: ${NPM_CONFIG_USERCONFIG:-(未设置)}"

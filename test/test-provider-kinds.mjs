@@ -75,19 +75,29 @@ a('无 baseURL 的 vendor-a 不表态', !('vendor-a' in realUrls))
 a('无 baseURL 的 vendor-b 不表态', !('vendor-b' in realUrls))
 a('compat 更深缩进不干扰后续 provider', realUrls['relay-three'] === 'https://relay-three.example.net/v1')
 const realKinds = m.computeProviderKinds(real)
-eq('夹具 kinds', realKinds, {
-  zhipu: 'official',
-  'relay-one': 'relay', 'relay-two': 'relay', 'relay-three': 'relay', 'relay-four': 'relay',
-})
+// v1.4.6: 判定改成白名单制后, 没写 baseURL 的 vendor-a / vendor-b 也进结果(默认 relay)。
+// 用排序后的 entries 比, 不依赖夹具里的出现顺序。
+eq('夹具 kinds', Object.entries(realKinds).sort(), [
+  ['relay-four', 'relay'], ['relay-one', 'relay'], ['relay-three', 'relay'], ['relay-two', 'relay'],
+  ['vendor-a', 'relay'], ['vendor-b', 'relay'], ['zhipu', 'official'],
+])
 
 // ==== v1.4.0 回归: 禁止「按 provider 名字猜官方」====
 // 旧代码有个兜底: 名字恰好等于某个预设 id 且没写 baseURL → 判 official。这与 AGENTS.md 铁律 9
 // (「没写 baseURL 的 provider 是不表态、交 -official 后缀兜底」)直接冲突, 会把同名的中转站会话
 // 顶上官方余额。xiaomi 就是「内置目录指向官方域名、但 key 来自中转站」的反例。
-eq('无 baseURL 的 deepseek 不再被名字兜底成 official',
-  m.computeProviderKinds('llm-pi-ai:\n  providers:\n    deepseek:\n      apiKeyEnv: DS_KEY\n'), {})
-eq('无 baseURL 的 zhipu 同样不表态',
-  m.computeProviderKinds('llm-pi-ai:\n  providers:\n    zhipu:\n      apiKeyEnv: Z_KEY\n'), {})
+// v1.4.6: 结论不变(不被名字兜底成 official), 但从"不表态"改成**明确判中转站** ——
+// 维护者要求「固定官方的, 只要是识别不到官方的就是中转站」。
+// ⚠️ 这几条**必须显式传 catalog**: 本机装了 @earendil-works/pi-ai(目录里有 deepseek/zhipu 的官方域名),
+//    CI 里没有 —— 不传第二个参数就会测出两种结果。下面钉的是"目录给不出素材"时的保守行为。
+eq('无 baseURL + 目录给不出素材 → 判中转站(不按名字兜底成 official)',
+  m.computeProviderKinds('llm-pi-ai:\n  providers:\n    deepseek:\n      apiKeyEnv: DS_KEY\n', {}), { deepseek: 'relay' })
+eq('无 baseURL + 目录给不出素材(zhipu 同理)',
+  m.computeProviderKinds('llm-pi-ai:\n  providers:\n    zhipu:\n      apiKeyEnv: Z_KEY\n', {}), { zhipu: 'relay' })
+// 同一个 provider, 目录给得出官方域名时就是 official —— 这正是不按名字猜的证明: 结论随**域名素材**变。
+eq('无 baseURL + 目录给得出官方域名 → official',
+  m.computeProviderKinds('llm-pi-ai:\n  providers:\n    deepseek:\n      apiKeyEnv: DS_KEY\n', { deepseek: 'https://api.deepseek.com' }),
+  { deepseek: 'official' })
 eq('写了官方 baseURL 才判 official',
   m.computeProviderKinds('llm-pi-ai:\n  providers:\n    deepseek:\n      baseURL: https://api.deepseek.com/v1\n'), { deepseek: 'official' })
 
@@ -123,14 +133,89 @@ const y2 = `llm-pi-ai:
     s:
       apiKeyEnv: FOO_KEY
 `
-eq('引号/行内注释/无 baseURL', m.computeProviderKinds(y2), { q: 'official', r: 'relay' })
+eq('引号/行内注释/无 baseURL', m.computeProviderKinds(y2), { q: 'official', r: 'relay', s: 'relay' })
 
 eq('空输入', m.parseProviderBaseURLs(''), {})
 eq('非字符串输入', m.parseProviderBaseURLs(null), {})
 eq('没有 llm-pi-ai 段', m.computeProviderKinds('foo:\n  bar: 1\n'), {})
 eq('baseUrl 小写 u 也认', m.parseProviderBaseURLs('llm-pi-ai:\n  providers:\n    z:\n      baseUrl: https://api.x.ai/v1\n'), { z: 'https://api.x.ai/v1' })
 eq('baseURL 值为空不入表', m.parseProviderBaseURLs('llm-pi-ai:\n  providers:\n    z:\n      baseURL:\n'), {})
-eq('URL 解析失败不入 kinds', m.computeProviderKinds('llm-pi-ai:\n  providers:\n    z:\n      baseURL: not-a-url\n'), {})
+eq('URL 解析失败 → 中转站(解析不出主机名就不可能是官方)',
+  m.computeProviderKinds('llm-pi-ai:\n  providers:\n    z:\n      baseURL: not-a-url\n'), { z: 'relay' })
+
+// ==== v1.4.6: ≥0.1.7 把 provider 段落搬进了 profile 的 patch 层 ====
+// 宿主把 settings.yaml 的段落迁进 profiles/<name>/cordis.patch.yml 之后, 形状从
+//   llm-pi-ai:\n  providers: ...
+// 变成 loader patch 数组里的
+//   - id: llm-pi-ai\n  config:\n    providers: ...
+// (老文件随后写成 settings.yaml.imported。) 多包了一层 config, 且 llm-pi-ai 是**列表项** ——
+// 旧解析器两者都不认, 加上旧代码只读 ~/.dsh/settings.yaml 一个路径, 迁移后"自动判定结果"
+// 整个空掉: 维护者实测"一个都没识别到中转站"。
+const patchYaml = [
+  '- id: llm-pi-ai',
+  '  config:',
+  '    providers:',
+  '      zhipu:',
+  '        apiKeyEnv: ZAI_CODING_CN_API_KEY',
+  '        api: openai-completions',
+  '        baseURL: https://open.bigmodel.cn/api/paas/v4',
+  '        models:',
+  '          - id: glm-5.3',
+  '      xiaomi:',
+  '        apiKeyEnv: XIAOMI_API_KEY',
+  '      relayx:',
+  '        baseURL: https://relay.example.com/v1',
+  '- id: ui-settings-general',
+  '  config:',
+  '    providers:',
+  '      shouldnotappear:',
+  '        baseURL: https://api.openai.com/v1',
+].join('\n')
+eq('patch 格式: provider 名齐全(含没写 baseURL 的 xiaomi)', m.parseProviderNames(patchYaml), ['zhipu', 'xiaomi', 'relayx'])
+eq('patch 格式: 抓到 baseURL', m.parseProviderBaseURLs(patchYaml), {
+  zhipu: 'https://open.bigmodel.cn/api/paas/v4', relayx: 'https://relay.example.com/v1',
+})
+eq('patch 格式: 判定(显式传空目录以隔离环境; 命中官方白名单才算 official)',
+  m.computeProviderKinds(patchYaml, {}), { zhipu: 'official', xiaomi: 'relay', relayx: 'relay' })
+a('patch 格式: 下一个条目(- id: ui-settings-general)里的 providers 不被吃进来',
+  !('shouldnotappear' in m.parseProviderBaseURLs(patchYaml)))
+eq('patch 格式: 没写 baseURL 的 provider 也进 entries(值留空)',
+  m.parseProviderEntries(patchYaml).xiaomi, { baseURL: '', apiKeyEnv: 'XIAOMI_API_KEY' })
+a('老格式(≤0.1.6 的 llm-pi-ai: 顶层键)依然可用',
+  m.computeProviderKinds('llm-pi-ai:\n  providers:\n    a:\n      baseURL: https://api.deepseek.com/v1\n').a === 'official')
+
+// ==== v1.4.6: 自动去查余额的过滤规则不变 ====
+// 只有「写了 baseURL」且「非官方」的才合成查询条目 —— 没 URL 的没有查询地址, 分类改不了可达性
+const patchEntries = m.parseProviderEntries(patchYaml)
+const patchKinds = m.computeProviderKinds(patchYaml)
+eq('无 baseURL 的 provider 不进自动查询列表',
+  m.selectDshProviders(patchEntries, patchKinds, []).map((x) => x.name), ['relayx'])
+eq('判成 official 的也不进(归预设平台管)',
+  m.selectDshProviders(patchEntries, patchKinds, []).some((x) => x.name === 'zhipu'), false)
+
+// ==== v1.4.6: 「官方但没开放余额接口」不该被当中转站 (维护者反馈) ====
+// provider 省略 baseURL 时, 宿主是拿 @earendil-works/pi-ai 内置目录里的 baseUrl 去请求的 ——
+// 所以判定素材应当是**域名**(显式写的, 或目录给的), 而不是"没写就当中转站"。
+// 目录读取做成可注入参数: CI 里没装 pi-ai(宿主提供的 peer), 但判定逻辑必须可测。
+const onlyKey = (name) => 'llm-pi-ai:\n  providers:\n    ' + name + ':\n      apiKeyEnv: K\n'
+eq('没写 baseURL + 目录给官方域名 → official (维护者本机的 xiaomi → api.xiaomimimo.com)',
+  m.computeProviderKinds(onlyKey('xiaomi'), { xiaomi: 'https://api.xiaomimimo.com/v1' }), { xiaomi: 'official' })
+eq('没写 baseURL + 目录给官方域名(海外) → official',
+  m.computeProviderKinds(onlyKey('anthropic'), { anthropic: 'https://api.anthropic.com/v1' }), { anthropic: 'official' })
+eq('没写 baseURL + 目录给中转域名 → relay',
+  m.computeProviderKinds(onlyKey('foo'), { foo: 'https://relay.example.com/v1' }), { foo: 'relay' })
+eq('没写 baseURL + 目录里也查不到 → relay (保守默认)',
+  m.computeProviderKinds(onlyKey('bar'), {}), { bar: 'relay' })
+eq('显式 baseURL 优先于目录(目录说官方、显式写的是中转 → 听显式的)',
+  m.computeProviderKinds('llm-pi-ai:\n  providers:\n    xiaomi:\n      baseURL: https://relay.example.com/v1\n',
+    { xiaomi: 'https://api.xiaomimimo.com/v1' }), { xiaomi: 'relay' })
+eq('目录参数非法时降级(不抛)', m.computeProviderKinds(onlyKey('baz'), null), { baz: 'relay' })
+a('真实 pi-ai 目录可读时: xiaomi 的域名命中官方白名单 (CI 无目录则跳过)',
+  (() => {
+    const cat = m.catalogBaseURLs()
+    if (!cat || cat.xiaomi === undefined) return true
+    return m.isOfficialHost(m.hostOfUrl(cat.xiaomi)) === true
+  })())
 
 // ==== normalizeOfficialProviders ====
 eq('逗号/换行/空格混合分隔', m.normalizeOfficialProviders('deepseek, zhipu\nfoo  bar,,deepseek'), ['deepseek', 'zhipu', 'foo', 'bar'])

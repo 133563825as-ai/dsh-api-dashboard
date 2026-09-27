@@ -70,9 +70,7 @@ export const name = 'dsh-api-dashboard'
 // ============================================================
 const REPO_OWNER = '133563825as-ai'
 const REPO_NAME = 'dsh-api-dashboard'
-const REPO_BRANCH = 'main'
-const MANIFEST_API = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/package.json?ref=${REPO_BRANCH}`
-const TARBALL_URL = `https://codeload.github.com/${REPO_OWNER}/${REPO_NAME}/tar.gz/refs/heads/${REPO_BRANCH}`
+// MANIFEST_API / TARBALL_URL 在下面 —— 它们依赖 UPDATE_REF(来自 SELF_ROOT 的 package.json)
 
 /** 插件运行实体的安装根目录 (src/index.js 上两级; ESM 默认按 realpath 加载) */
 /**
@@ -111,19 +109,93 @@ const readVersionAt = (dir) => {
   } catch { return null }
 }
 
-/** 轻量 semver 比较: a>b 返回 1, a<b 返回 -1, 相等返回 0 (忽略预发布后缀) */
+/**
+ * v1.5.0-desktop-preview 系列: 预发行(预览版)标识。
+ * 判定只看版本号本身 —— semver 预发布后缀(`1.5.0-desktop-preview.4` 里 `-` 之后那一段)
+ * 就是"这不是正式版"的唯一事实来源, 不额外加配置项(加配置项 = 两处真相, 迟早漂移)。
+ * 用途: ① 下发给客户端, 前端据此显示「预览版」横幅; ② 配合 UPDATE_REF 决定能不能自更新。
+ */
+const PLUGIN_VERSION = readVersionAt(SELF_ROOT) || '0.0.0'
+const IS_PREVIEW = PLUGIN_VERSION.includes('-')
+
+/**
+ * 更新频道 (v1.5.0-desktop-preview.4)。
+ *
+ * 需求: 预览版**要能在预览频道内更新自己**(否则每发一版预览都得让用户重跑 install.sh),
+ * 但**绝不能被 main 上的正式版覆盖**(否则桌面布局会无声消失、用户莫名回退)。
+ * 这两个要求合起来只有一种干净做法: 频道 = 「这份代码自己是从哪个 ref 装来的」。
+ *
+ * 它写在 **package.json 的 `dsh.updateRef`** 里, 跟着 tarball 一起走 ——
+ * 不用状态文件(用户手动装、或换机器时状态文件可能不在), 也不用去猜版本号命名规则
+ * (`1.5.0-desktop-preview.4` 与分支名 `preview/desktop` 之间没有可推导关系)。
+ * 正式版没有这个字段 → 默认 main, 与 v1.4.2 行为完全一致。
+ */
+export const UPDATE_REF = (() => {
+  try {
+    const pkg = JSON.parse(readFileSync(join(SELF_ROOT, 'package.json'), 'utf8'))
+    const ref = pkg?.dsh?.updateRef
+    if (typeof ref !== 'string') return 'main'
+    // 这个值会被拼进 URL 和 codeload 路径, 必须严格白名单: 只允许普通 ref 字符, 且不许出现 `..`
+    return /^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$/.test(ref) && !ref.includes('..') ? ref : 'main'
+  } catch { return 'main' }
+})()
+/** 预览频道 = 版本号带预发布后缀 **且** 频道不是 main —— 只有这种情况才允许自更新 */
+export const PREVIEW_CHANNEL = IS_PREVIEW && UPDATE_REF !== 'main'
+const MANIFEST_API = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/package.json?ref=${UPDATE_REF}`
+const TARBALL_URL = `https://codeload.github.com/${REPO_OWNER}/${REPO_NAME}/tar.gz/refs/heads/${UPDATE_REF}`
+
+/**
+ * semver 比较: a>b 返回 1, a<b 返回 -1, 相等返回 0。
+ *
+ * ⚠️ v1.5.0-desktop-preview.4 起**带预发布后缀的优先级**(之前是直接 `split('-')[0]`,
+ * 于是 `…-preview.3` 与 `…-preview.2` 比出来是 0 → 预览频道里永远显示「已是最新」,
+ * 这正是「预览版没法更新到新预览版」的第二半原因)。规则同 semver 2.0.0 §11:
+ *   1.5.0-preview.2 < 1.5.0-preview.3 < 1.5.0-preview.10 < 1.5.0
+ *   数字标识符按数值比, 字母数字按字典序, 数字 < 字母数字, 短的那串更小。
+ * 解析不出来的(缺失段)按 0 处理, 与旧实现一致, 免得对垃圾输入产生新的行为差异。
+ */
 export function semverCompare(a, b) {
-  const pa = String(a).split('-')[0].split('.').map(Number)
-  const pb = String(b).split('-')[0].split('.').map(Number)
+  const parse = (v) => {
+    // v1.5.0-desktop-preview.5 (报告 §2.7): 剥掉前导 `v`。
+    // semver.valid('v1.5.0') 为真, 而本函数原正则 /^(\d+)\.(\d+)\.(\d+)/ 会把 'v1.5.0' 当成 0.0.0 ——
+    // 当前不可达(远端版本取自 package.json.version, 不带 v), 但本仓库的 release tag 是带 v 的
+    // (App 侧更新器就专门做了 removeprefix('v'))。将来若有人把 tag 名喂进来, 会静默判成"没有更新"。
+    // 只认小写 v: 与 semver 包本身一致(它的正则就是 ^v?...), 大写 V 仍按非法处理。
+    const m = String(v ?? '').trim().replace(/^v/, '').match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?/)
+    if (!m) return null
+    return { main: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] ? m[4].split('.') : null }
+  }
+  const na = parse(a), nb = parse(b)
+  const pa = na ? na.main : []
+  const pb = nb ? nb.main : []
   for (let i = 0; i < 3; i++) {
     const x = Number.isFinite(pa[i]) ? pa[i] : 0
     const y = Number.isFinite(pb[i]) ? pb[i] : 0
     if (x !== y) return x > y ? 1 : -1
   }
+  const xa = na ? na.pre : null
+  const xb = nb ? nb.pre : null
+  if (!xa && !xb) return 0
+  if (!xa) return 1    // 有预发布后缀 < 同版本号无后缀
+  if (!xb) return -1
+  const n = Math.max(xa.length, xb.length)
+  for (let i = 0; i < n; i++) {
+    const x = xa[i], y = xb[i]
+    if (x === undefined) return -1
+    if (y === undefined) return 1
+    const xn = /^\d+$/.test(x), yn = /^\d+$/.test(y)
+    if (xn && yn) {
+      const d = Number(x) - Number(y)
+      if (d !== 0) return d > 0 ? 1 : -1
+      continue
+    }
+    if (xn !== yn) return xn ? -1 : 1   // 数字标识符 < 字母数字标识符
+    if (x !== y) return x > y ? 1 : -1
+  }
   return 0
 }
 
-/** 经 api.github.com Contents API 读取远端 main 分支的 package.json version */
+/** 经 api.github.com Contents API 读取**当前频道**(UPDATE_REF) 的 package.json version */
 async function fetchRemoteVersion(timeoutMs = 8000) {
   const res = await fetch(MANIFEST_API, {
     headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'dsh-api-dashboard-updater' },
@@ -184,6 +256,8 @@ export async function applyUpdate({ targets = null, timeoutMs = 30000, remoteVer
       throw new Error(`refusing to update a symbolic-link target: ${dir} (use its real path instead)`)
     }
   }
+  // 报告 §2.6: 与宿主插件管理器抢同一个目录时的互斥 —— **尽力而为**, 见 assertHostLockFree 的说明。
+  assertHostLockFree()
 
   // 1) 下载 tarball 到临时文件
   const tmpBase = join(tmpdir(), `dshadb-update-${Date.now()}`)
@@ -251,6 +325,47 @@ export async function applyUpdate({ targets = null, timeoutMs = 30000, remoteVer
 /** 安全取真实路径: 不存在返回 null */
 function realPathSafe(p) {
   try { return realpathSync(p) } catch { return null }
+}
+
+/**
+ * 宿主插件管理器的互斥锁文件路径。
+ * 宿主(DSHA 的 plugin-manager / startup-recovery / register-builtin)所有「插件清单写入」都走
+ * register-builtin-plugins.py 的 operation_lock() —— 那把锁是 Python 的
+ * `fcntl.flock(<数据根>/.dsha-data.lock)`, 而数据根是 DSH_HOME 的**父目录**
+ * (源码注释: "锁放在 .dsh 外, 恢复整个 .dsh 时不会换掉正在使用的锁 inode")。
+ * @returns {string}
+ */
+function hostLockPath() {
+  const dshHome = process.env.DSH_HOME || join(homedir(), '.dsh')
+  return join(dirname(dshHome), '.dsha-data.lock')
+}
+
+/**
+ * 交换前探一次宿主锁, 探测到被占就中止 —— 报告 §2.6「两套更新器没有互斥」。
+ *
+ * ⚠️ 这是**尽力而为**, 不是真互斥, 别把它当锁用:
+ *   · Node 没有 flock API(只有 fs 的句柄, 没有 flock), 插件**无法持有**宿主那把 fcntl 锁 ——
+ *     报告建议的"复用宿主锁"在纯 Node 里做不到, 除非 spawn 一个长期持有锁的子进程。
+ *   · 所以只能"探一次": 把窗口从**整个交换过程**(下载 + 解压 + 备份 + 删旧 + 拷新, 数秒)
+ *     缩到"探测到动手"之间的毫秒级。真撞上了仍然可能互相踩。
+ *   · 反向的误报也存在: 宿主保存"版本检查结果"时也会短暂持锁, 那一刻点更新会被拒。
+ *     这种误报是可接受的(提示用户稍后重试), 比目录被写坏好。
+ * 探测用 flock(1): `flock -n <file> true` → exit 0 = 空闲, exit 1 = 被占。
+ * flock 不存在 / 锁文件不存在(非 DSHA 环境) → 直接放行, 绝不因为探测失败挡住更新。
+ * @param {string} [lockPath] 测试注入口
+ */
+export function assertHostLockFree(lockPath = null) {
+  if (process.platform === 'win32') return
+  const file = lockPath || hostLockPath()
+  if (!existsSync(file)) return
+  try {
+    execFileSync('flock', ['-n', file, 'true'], { timeout: 3000, stdio: 'ignore' })
+  } catch (err) {
+    // 只有"锁被别人占着"(exit 1)才拦截; ENOENT(没有 flock 命令)/超时/其它一律放行
+    if (err && err.status === 1) {
+      throw new Error('宿主的插件管理器正在操作(清单锁被占用), 请稍后重试')
+    }
+  }
 }
 
 /** 安全列目录: 不存在/不可读返回空数组 */
@@ -487,16 +602,25 @@ const collectProviderFields = (text, wanted) => {
       if (kv !== null && kv.key !== 'llm-pi-ai') { sectionIndent = -1; sectionChildIndent = -1 }
     }
     const kv = keyOf(trimmed)
-    if (kv === null) continue                    // 列表项 (`- id: x`) 等一概跳过
+    if (kv === null) {
+      // v1.4.6: ≥0.1.7 的 patch 层里 llm-pi-ai 是**列表项** (`- id: llm-pi-ai`), keyOf 会跳过 `-` 开头的行,
+      //   这里单独认一次; 其下的 config: / providers: 都比它深, 后续缩进判定照旧有效。
+      const item = /^-\s*id:\s*(\S+)\s*$/.exec(trimmed)
+      if (item !== null) {
+        if (item[1] === 'llm-pi-ai' && sectionIndent < 0) { sectionIndent = indent; sectionChildIndent = -1 }
+        else if (sectionIndent >= 0 && indent <= sectionIndent) { sectionIndent = -1; sectionChildIndent = -1 }
+      }
+      continue
+    }
     if (sectionIndent < 0) {
       if (kv.key === 'llm-pi-ai' && kv.value === '') { sectionIndent = indent; sectionChildIndent = -1 }
       continue
     }
     if (providersIndent < 0) {
       if (indent <= sectionIndent) continue
-      if (sectionChildIndent < 0) sectionChildIndent = indent
-      // 只认 llm-pi-ai 的直接子键 providers, 不误吃更深层同名键
-      if (indent === sectionChildIndent && kv.key === 'providers' && kv.value === '') providersIndent = indent
+      // v1.4.6: 不再要求 providers 是 llm-pi-ai 的**直接**子键 —— patch 格式里它被包在 config: 之下(多一层),
+      //   而"该段内第一个 value 为空的 providers 键"在两种格式下都唯一。
+      if (kv.key === 'providers' && kv.value === '') providersIndent = indent
       continue
     }
     if (current === '') {
@@ -659,15 +783,22 @@ export function parseProviderNames(text) {
       if (kv !== null && kv.key !== 'llm-pi-ai') { sectionIndent = -1; sectionChildIndent = -1 }
     }
     const kv = keyOf(trimmed)
-    if (kv === null) continue
+    if (kv === null) {
+      // v1.4.6: 同 collectProviderFields —— 认 `- id: llm-pi-ai` 这种列表项写法(≥0.1.7 的 patch 层)
+      const item = /^-\s*id:\s*(\S+)\s*$/.exec(trimmed)
+      if (item !== null) {
+        if (item[1] === 'llm-pi-ai' && sectionIndent < 0) { sectionIndent = indent; sectionChildIndent = -1 }
+        else if (sectionIndent >= 0 && indent <= sectionIndent) { sectionIndent = -1; sectionChildIndent = -1 }
+      }
+      continue
+    }
     if (sectionIndent < 0) {
       if (kv.key === 'llm-pi-ai' && kv.value === '') { sectionIndent = indent; sectionChildIndent = -1 }
       continue
     }
     if (providersIndent < 0) {
       if (indent <= sectionIndent) continue
-      if (sectionChildIndent < 0) sectionChildIndent = indent
-      if (indent === sectionChildIndent && kv.key === 'providers' && kv.value === '') providersIndent = indent
+      if (kv.key === 'providers' && kv.value === '') providersIndent = indent
       continue
     }
     if (indent > providersIndent && kv.value === '') {
@@ -682,18 +813,86 @@ export function parseProviderNames(text) {
  * 第 2 层判定结果: { providerName: 'official' | 'relay' }。
  * 没有 baseURL / baseURL 解析不出主机名的 provider **不写进结果** (不表态, 交第 3 层)。
  */
-export function computeProviderKinds(text) {
-  const kinds = {}
-  for (const [name, url] of Object.entries(parseProviderBaseURLs(text))) {
-    const host = hostOfUrl(url)
-    if (host === '') continue
-    kinds[name] = isOfficialHost(host) ? 'official' : 'relay'
+/**
+ * DSH 内置 provider 目录 (@earendil-works/pi-ai 的 dist/providers/data/*.json)。
+ *
+ * 为什么需要它: provider **省略 baseURL** 时, 宿主会拿内置目录里的 baseUrl 去请求 ——
+ * 所以"这个 provider 到底连的是官方还是中转站"其实是有据可查的, 不必靠名字猜。
+ * (实测 xiaomi.json: {"provider":"xiaomi","baseUrl":"https://api.xiaomimimo.com/v1"})
+ *
+ * 维护者反馈: "有些官方是没有开放余额接口, 这个不应该转入中转站" ——
+ * 此前没写 baseURL 的一律按中转站, 会把「官方直连但官方没开余额接口」的 provider
+ * (OpenAI / Claude / Gemini / MiMo / 豆包 / 混元 那类) 也标成中转站, 属于错分类。
+ * 现在改成: 显式 baseURL 优先, 没写就去目录里查它的默认 baseUrl, 再走官方域名白名单。
+ *
+ * ⚠️ 铁律 9 仍然成立, 只是不再用"名字"下结论: 判定素材是**域名**(显式的或目录给的),
+ *   名字只在"目录里有没有这条"的意义上被用到。目录里查不到的, 依旧按中转站(保守默认)。
+ */
+let catalogCache = null
+
+const catalogDataDir = () => {
+  const tries = []
+  try {
+    const req = createRequire(import.meta.url)
+    let dir = dirname(req.resolve('@earendil-works/pi-ai'))
+    for (let i = 0; i < 4 && dir !== dirname(dir); i++) {
+      tries.push(join(dir, 'providers', 'data'), join(dir, 'dist', 'providers', 'data'))
+      dir = dirname(dir)
+    }
+  } catch { /* 解析不到就只试兜底路径 */ }
+  tries.push(join(DSH_HOME_DIR, 'node_modules', '@earendil-works', 'pi-ai', 'dist', 'providers', 'data'))
+  for (const t of tries) { try { if (statSync(t).isDirectory()) return t } catch { /* 下一个 */ } }
+  return null
+}
+
+/** { providerName: 内置 baseUrl } —— 进程内缓存一次 (目录随宿主安装, 运行期不变) */
+export const catalogBaseURLs = () => {
+  if (catalogCache !== null) return catalogCache
+  const out = {}
+  const dir = catalogDataDir()
+  if (dir !== null) {
+    try {
+      for (const file of readdirSync(dir)) {
+        if (!file.endsWith('.json')) continue
+        let json = null
+        try { json = JSON.parse(readFileSync(join(dir, file), 'utf8')) } catch { continue }
+        if (json === null || typeof json !== 'object') continue
+        // 结构: { <apiKind>: { <modelId>: { provider, baseUrl, ... } } }
+        for (const group of Object.values(json)) {
+          if (group === null || typeof group !== 'object') continue
+          for (const model of Object.values(group)) {
+            if (model === null || typeof model !== 'object') continue
+            const p = model.provider, u = model.baseUrl
+            if (typeof p === 'string' && typeof u === 'string' && p !== '' && u !== '' && out[p] === undefined) out[p] = u
+          }
+        }
+      }
+    } catch { /* 目录读不动就当没有 */ }
   }
-  // v1.4.0 移除「按 provider 名字猜官方」的兜底。
-  // 旧代码把「名字恰好等于某个预设 id 且没写 baseURL」判成 official —— 这与本文件 232-240 行的政策
-  // 和 AGENTS.md 铁律 9 直接冲突:「没写 baseURL 的 provider 是不表态、交 `-official` 后缀兜底」。
-  // 理由(AGENTS.md 原话): 内置目录指向官方域名 ≠ 用户的 key 来自官方(`xiaomi` 就是反例)。
-  // 只看名字会把「恰好同名的中转站会话」顶上官方余额 —— 不表态比猜错安全。
+  catalogCache = out
+  return out
+}
+
+export function computeProviderKinds(text, catalog = catalogBaseURLs()) {
+  const kinds = {}
+  // catalog 可注入: CI 里没装 @earendil-works/pi-ai(宿主提供的 peer), 目录读不到,
+  // 但判定逻辑本身必须可测 —— 测试直接传一份 { provider: baseURL } 进来。
+  // v1.4.6 (维护者要求「固定官方的, 识别不到官方的一律当中转站」):
+  //   判定素材是**域名** —— 显式 baseURL 优先, 没写就用内置目录给的默认 baseUrl(见 catalogBaseURLs),
+  //   只有主机名明确命中官方域名白名单才算 official, 其余一律 relay。
+  //   旧实现是"没写 baseURL 就整个不写进结果(不表态)", 后果是设置面板的「自动判定结果」对这类
+  //   provider 一片空白 —— 维护者实测"一个都没识别到中转站"。
+  //   ⚠️ 这里**不按 provider 名字下结论**(铁律 9: 恰好同名的中转站会被顶上官方余额) ——
+  //   名字只用来"在目录里查有没有这条", 结论始终来自域名。
+  const explicit = parseProviderBaseURLs(text)
+  const cat = (catalog !== null && typeof catalog === 'object') ? catalog : {}
+  for (const name of parseProviderNames(text)) {
+    // 判定素材三级: ① provider 自己写的 baseURL ② 没写 → 内置目录里的默认 baseUrl
+    //   (宿主就是这么解析的) ③ 都没有 → 空, 落中转站。
+    const url = explicit[name] !== undefined ? explicit[name] : (cat[name] !== undefined ? cat[name] : '')
+    const host = hostOfUrl(url)
+    kinds[name] = (host !== '' && isOfficialHost(host)) ? 'official' : 'relay'
+  }
   return kinds
 }
 
@@ -716,28 +915,65 @@ export const normalizeOfficialProviders = (input) => {
   return out
 }
 
-const SETTINGS_FILE = join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'settings.yaml')
+const DSH_HOME_DIR = process.env.DSH_HOME || join(homedir(), '.dsh')
+
+/**
+ * provider 配置的候选文件 (按优先级)。两代存放位置:
+ *   ≤ 0.1.6 —— `~/.dsh/settings.yaml` 顶层的 `llm-pi-ai:` 段落;
+ *   ≥ 0.1.7 —— provider 段落被宿主**迁进 profile 的 patch 层**:
+ *     `~/.dsh/profiles/<profile>/cordis.patch.yml`, 形状是 loader patch 数组里的
+ *     `- id: llm-pi-ai` + `config: { providers: ... }`; 老文件随后被写成 settings.yaml.imported。
+ *     (据 dsh-settings 源码里的 "removed settings.yaml sections" 迁移逻辑。)
+ * 新位置优先: 迁移之后老文件即使还在, 也已是"导入过的存档", 不该盖住活配置。
+ */
+const settingsCandidateFiles = () => {
+  const out = []
+  try {
+    for (const name of readdirSync(join(DSH_HOME_DIR, 'profiles')).sort()) {
+      const f = join(DSH_HOME_DIR, 'profiles', name, 'cordis.patch.yml')
+      if (existsSync(f)) out.push(f)
+    }
+  } catch { /* 没有 profiles 目录: 老版本 */ }
+  out.push(join(DSH_HOME_DIR, 'settings.yaml'))
+  return out
+}
 /**
  * settings.yaml 派生数据缓存, 按 mtime 失效 (轮询每 5s 一次, 别每次都解析)。
  *   kinds   = 第 2 层官方/中转判定素材
  *   entries = v1.4.0「真自动」: 各 provider 的 baseURL / apiKeyEnv,
  *             用来把 DSH 里配好的中转站合成可查余额的条目
  */
-let settingsDerivedCache = { mtimeMs: -1, kinds: {}, entries: {} }
+let settingsDerivedCache = { stamp: '', kinds: {}, entries: {}, source: '' }
 
-/** 读 settings.yaml 并算出全部派生数据 (mtime 缓存) */
+/**
+ * 读 provider 配置并算出全部派生数据。
+ * v1.4.6: 从"只读一个 settings.yaml"改成**扫全部候选位置再合并** —— 0.1.7 把段落迁进
+ *   profile 的 cordis.patch.yml 之后, 老路径已经没有文件, 旧实现返回空表,
+ *   设置面板的「自动判定结果」于是一条都列不出来(维护者实测"一个都没识别到中转站")。
+ * 缓存用「各候选文件的路径 + mtime」拼成指纹 —— 任一文件变动才重算(轮询 5s 一次, 别反复解析百 KB YAML)。
+ */
 const readSettingsDerived = () => {
-  try {
-    const mtimeMs = statSync(SETTINGS_FILE).mtimeMs
-    if (mtimeMs === settingsDerivedCache.mtimeMs) return settingsDerivedCache
-    const text = readFileSync(SETTINGS_FILE, 'utf8')
-    settingsDerivedCache = { mtimeMs, kinds: computeProviderKinds(text), entries: parseProviderEntries(text) }
-    return settingsDerivedCache
-  } catch {
-    // settings.yaml 不存在/读不动: 不表态, 全交给第 1、3 层, 也没有可自动发现的中转站
-    settingsDerivedCache = { mtimeMs: -1, kinds: {}, entries: {} }
-    return settingsDerivedCache
+  const files = settingsCandidateFiles()
+  const stamp = files
+    .map((f) => { try { return f + '@' + statSync(f).mtimeMs } catch { return f + '@-' } })
+    .join('|')
+  if (stamp === settingsDerivedCache.stamp) return settingsDerivedCache
+
+  const kinds = {}
+  const entries = {}
+  let source = ''
+  for (const f of files) {
+    let text = ''
+    try { text = readFileSync(f, 'utf8') } catch { continue }
+    const e = parseProviderEntries(text)
+    if (Object.keys(e).length === 0) continue
+    if (source === '') source = f
+    // 先到先得: 新位置(profiles/*/cordis.patch.yml)排在前面
+    for (const [name, v] of Object.entries(e)) if (!(name in entries)) entries[name] = v
+    for (const [name, v] of Object.entries(computeProviderKinds(text))) if (!(name in kinds)) kinds[name] = v
   }
+  settingsDerivedCache = { stamp, kinds, entries, source }
+  return settingsDerivedCache
 }
 
 /** 读 settings.yaml 算第 2 层判定 */
@@ -1369,7 +1605,48 @@ export const Config = Schema.object({
 // ============================================================
 let lastAlertState = {}
 
+// --- 余额告警通道 (v1.4.6, 修 issue #2 问题 3) ------------------------------
+// 旧实现的两条通道在 DSH >= 0.1.5 上都不存在:
+//   ① ctx.notify —— cordis 的 notify 挂在 ctx.reflect 上, 语义是"重估依赖某服务的 fiber",
+//      不是通知 API; ctx 上根本没有 notify 方法。
+//   ② ctx.get('webServer').notify —— dsh-host-webserver 的服务面只有
+//      register / registerUpgrade / registerFallback / tapIndex / renderIndex, **没有 notify**
+//      (0.1.5 起如此, 0.1.7-rc.2 复核仍如此)。
+// → 两个分支都落空, 告警被 try/catch 静默吞掉: 作者以为会通知, 用户从未收到。
+//
+// 现改走 DSHA App 桥 —— 与 dsh-task-notifier 同一条链路, 是当前真正能弹通知的通道:
+//   GET http://127.0.0.1:3090/app/notify?title=&text=&token=
+// token 读 $DSH_HOME/.bridge_token。拿不到通道时不再只"静默": alertStatus.channel 记 'none',
+// 由 /api-dashboard/alerts 暴露给设置面板做可见降级 (issue #2 点名要求这一点)。
+const ALERT_BRIDGE_URL = 'http://127.0.0.1:3090/app/notify'
+const alertStatus = { channel: 'unknown', checkedAt: 0, last: null, sent: 0, failed: 0 }
+
+/** 通过 3090 桥发一条 App 通知; 只记录结果, 不抛。 */
+async function notifyViaAppBridge(title, text) {
+  try {
+    const fsp = await import('node:fs/promises')
+    const home = process.env.DSH_HOME || join(homedir(), '.dsh')
+    let token = ''
+    try { token = (await fsp.readFile(join(home, '.bridge_token'), 'utf-8')).trim() } catch { /* 无 token */ }
+    if (!token) { alertStatus.channel = 'none'; alertStatus.checkedAt = Date.now(); alertStatus.failed++; return false }
+    const url = ALERT_BRIDGE_URL
+      + '?title=' + encodeURIComponent(title)
+      + '&text=' + encodeURIComponent(text)
+      + '&token=' + encodeURIComponent(token)
+    const resp = await fetch(url, { signal: AbortSignal.timeout(5000) })
+    await resp.text()
+    alertStatus.channel = resp.ok ? 'app-bridge' : 'none'
+    alertStatus.checkedAt = Date.now()
+    if (resp.ok) alertStatus.sent++; else alertStatus.failed++
+    return resp.ok
+  } catch {
+    alertStatus.channel = 'none'; alertStatus.checkedAt = Date.now(); alertStatus.failed++
+    return false
+  }
+}
+
 function checkAlerts(balances, config, ctx) {
+  void ctx // 旧通知通道参数保留: 调用方签名不变, 但已不再使用 (见上方说明)
   const safe = config.safeThreshold ?? 50
   const warn = config.warnThreshold ?? 10
   const newState = {}
@@ -1379,30 +1656,17 @@ function checkAlerts(balances, config, ctx) {
     const id = b.platform
     const val = b.percent != null ? b.percent : b.total
     const prev = lastAlertState[id]
-    let level = val > safe ? 'ok' : val > warn ? 'warn' : 'err'
+    const level = val > safe ? 'ok' : val > warn ? 'warn' : 'err'
     newState[id] = level
+    if (level === prev || level === 'ok') continue // 只在跨档(且非回到正常)时告警, 与旧行为一致
 
-    if (level === 'warn' && prev !== 'warn') {
-      try {
-        const name = b.name || id
-        const msg = `🔔 ${name} 余额偏低: ${val}${b.percent != null ? '%' : (b.currency || '')}`
-        if (ctx && typeof ctx.notify === 'function') {
-          ctx.notify({ title: '哦鲸鲸', message: msg, level: 'warning' })
-        } else if (ctx && ctx.get && typeof ctx.get('webServer')?.notify === 'function') {
-          ctx.get('webServer').notify({ title: '哦鲸鲸', message: msg, level: 'warning' })
-        }
-      } catch { /* 静默 */ }
-    } else if (level === 'err' && prev !== 'err') {
-      try {
-        const name = b.name || id
-        const msg = `🚨 ${name} 余额不足: ${val}${b.percent != null ? '%' : (b.currency || '')}`
-        if (ctx && typeof ctx.notify === 'function') {
-          ctx.notify({ title: '哦鲸鲸', message: msg, level: 'error' })
-        } else if (ctx && ctx.get && typeof ctx.get('webServer')?.notify === 'function') {
-          ctx.get('webServer').notify({ title: '哦鲸鲸', message: msg, level: 'error' })
-        }
-      } catch { /* 静默 */ }
-    }
+    const name = b.name || id
+    const unit = b.percent != null ? '%' : (b.currency || '')
+    const msg = level === 'warn'
+      ? `🔔 ${name} 余额偏低: ${val}${unit}`
+      : `🚨 ${name} 余额不足: ${val}${unit}`
+    alertStatus.last = { at: Date.now(), level, platform: id, text: msg }
+    void notifyViaAppBridge('哦鲸鲸', msg)
   }
   lastAlertState = newState
 }
@@ -2470,13 +2734,15 @@ export function apply(ctx, config) {
     const on = new Set(selectDshProviders(entries, kinds, runtimeConfig.dshProviderOptOut).map((p) => p.name))
     return Object.keys(entries).sort().map((name) => {
       const e = entries[name]
-      const kind = e.baseURL ? (kinds[name] || 'unknown') : 'no-base-url'
+      // v1.4.6: 一律给 official | relay —— 认不出官方即中转站(维护者要求)。
+      // 有没有写 baseURL 单独用 hasBaseURL 标出来: 没 URL 的自动查不了余额, 但仍按中转站归类。
+      const kind = kinds[name] === 'official' ? 'official' : 'relay'
       return {
         name,
         baseURL: e.baseURL,
         apiKeyEnv: e.apiKeyEnv,
-        // official | relay | unknown(主机名解析不出) | no-base-url(没写 baseURL, 不表态)
         kind,
+        hasBaseURL: !!e.baseURL,
         enabled: on.has(name),
       }
     })
@@ -2538,6 +2804,12 @@ export function apply(ctx, config) {
           providerKinds: readProviderKinds(),
           // v1.4.0「真自动」: DSH provider 发现结果 (只读, 不含 key)
           dshProviders: readDshProviderStatus(),
+          // v1.5.0-desktop-preview: 版本与预发行标识 —— 客户端据此显示「预览版」横幅, 并停用一键更新
+          version: PLUGIN_VERSION,
+          preview: IS_PREVIEW,
+          // v1.5.0-desktop-preview.4: 更新频道 —— 客户端据此决定「一键更新」能不能点
+          updateRef: UPDATE_REF,
+          previewChannel: PREVIEW_CHANNEL,
         },
       }
       cache.etag = '"' + fnv1a(JSON.stringify(cache.balances) + '|' + JSON.stringify(cache.config)) + '"'
@@ -2791,11 +3063,22 @@ export function apply(ctx, config) {
         if (!allowRequest(req, res)) return
           if (req.method !== 'GET') { res.writeHead(405, { Allow: 'GET' }); res.end(); return }
           try {
-            const set = new URL(req.url ?? '/', 'http://127.0.0.1').searchParams.get('set') === 'fx1' ? 'fx1' : 'duck'
-            const table = { duck: { press: 'Ya1.mp3', release: 'Ya2.mp3' }, fx1: { press: 'D1.mp3', release: 'D2.mp3' } }
-            const data = readFileSync(whaleAsset(table[set][kind]))
+            // v1.5.0: 音效组 2 → 4。后两组是**交叉配对**(把现有两组的按下/松开互换组合),
+            // 不动任何素材就能多出两种手感 —— 上游自 0.3.1(2026-09-16) 起把 assets 划出 MIT 范围
+            // (其 PROVENANCE.md: 素材不授予再许可), 所以这里刻意**不引入上游新增音效**。
+            // 素材许可与来源见 assets/whale/LICENSE-whale-widget.txt。
+            const WHALE_SOUND_SETS = {
+              duck: { press: 'Ya1.mp3', release: 'Ya2.mp3' },
+              fx1: { press: 'D1.mp3', release: 'D2.mp3' },
+              fx2: { press: 'D1.mp3', release: 'Ya2.mp3' },
+              fx3: { press: 'Ya1.mp3', release: 'D2.mp3' },
+            }
+            const wanted = new URL(req.url ?? '/', 'http://127.0.0.1').searchParams.get('set')
+            const set = Object.prototype.hasOwnProperty.call(WHALE_SOUND_SETS, wanted) ? wanted : 'duck'
+            const file = WHALE_SOUND_SETS[set][kind]
+            const data = readFileSync(whaleAsset(file))
             res.writeHead(200, {
-              'Content-Type': 'audio/mpeg',
+              'Content-Type': file.endsWith('.wav') ? 'audio/wav' : 'audio/mpeg',
               'Cache-Control': 'no-store',
               'Content-Length': data.length,
             })
@@ -2884,6 +3167,10 @@ export function apply(ctx, config) {
             // v1.4.0「真自动」: 从 settings.yaml 自动发现的 provider 及启用状态 (不含 key)
             dshProviders: readDshProviderStatus(),
             dshProviderOptOut: runtimeConfig.dshProviderOptOut,
+            version: PLUGIN_VERSION,
+            preview: IS_PREVIEW,
+            updateRef: UPDATE_REF,
+            previewChannel: PREVIEW_CHANNEL,
           })
           return
         }
@@ -2974,6 +3261,10 @@ export function apply(ctx, config) {
               providerKinds: readProviderKinds(),
               dshProviders: readDshProviderStatus(),
               dshProviderOptOut: runtimeConfig.dshProviderOptOut,
+              version: PLUGIN_VERSION,
+              preview: IS_PREVIEW,
+              updateRef: UPDATE_REF,
+              previewChannel: PREVIEW_CHANNEL,
             })
           } catch (err) {
             const code = err && err.statusCode === 413 ? 413 : 400
@@ -2985,6 +3276,27 @@ export function apply(ctx, config) {
         res.end()
       },
     }), 'dsh-api-dashboard: config route')
+
+    // v1.4.6: 告警通道状态 —— 供界面做"可见降级" (issue #2 问题 3)。
+    // 通道不可用(拿不到 3090 桥 token / 桥拒绝)时, 用户至少能在设置面板看到"通知发不出去",
+    // 而不是继续以为会收到 —— 这正是 issue 里点名的那个错位。
+    webCtx.effect(() => webCtx.webServer.register({
+      kind: 'exact', path: '/api-dashboard/alerts',
+      async handler(req, res) {
+        if (!allowRequest(req, res)) return
+        if (req.method !== 'GET') { res.writeHead(405, { Allow: 'GET' }); res.end(); return }
+        sendJson(res, 200, {
+          ok: true,
+          channel: alertStatus.channel,   // 'unknown' | 'app-bridge' | 'none'
+          checkedAt: alertStatus.checkedAt,
+          sent: alertStatus.sent,
+          failed: alertStatus.failed,
+          last: alertStatus.last,
+          safeThreshold: runtimeConfig.safeThreshold,
+          warnThreshold: runtimeConfig.warnThreshold,
+        })
+      },
+    }), 'dsh-api-dashboard: alerts route')
   })
 
   // 会话消耗投影

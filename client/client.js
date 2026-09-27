@@ -171,6 +171,77 @@ window.__ModuleLoader__.load({
     }
     //#endregion
 
+    //#region 软键盘避让 (v1.5.0-desktop-preview.5)
+    /**
+     * 键盘占掉的高度(px) —— 纯函数, 可单测。
+     *
+     * 背景(第三方验证报告 §2.2 真机实测): 宿主 viewport meta 是
+     * `width=device-width, initial-scale=1, viewport-fit=cover`, **没有** interactive-widget=resizes-content,
+     * 所以键盘弹出时收缩的是 **visual viewport**, layout viewport(100vh / position:fixed) 纹丝不动 ——
+     * 面板原地不动, 底部 26%(242px 键盘 / 630px 面板)被盖住。这一半只能插件自己算。
+     *
+     * 三个守卫, 少一个都会误伤:
+     *   ① scale ≠ 1 → 那是双指缩放, visualViewport 同样会变小, 但不是键盘, 返回 0;
+     *   ② 差值 < 80px → 地址栏/工具条收缩、亚像素抖动, 不动布局(免得面板无端上下跳);
+     *   ③ innerHeight 取布局视口高度, 再减 offsetTop(visual viewport 相对布局视口的偏移)。
+     * @param {{innerHeight:number, vvHeight:number, vvOffsetTop?:number, vvScale?:number}} m
+     * @returns {number} 0 = 没有键盘
+     */
+    function keyboardInset(m) {
+      const innerHeight = m && Number(m.innerHeight);
+      const vvHeight = m && Number(m.vvHeight);
+      if (!Number.isFinite(innerHeight) || !Number.isFinite(vvHeight)) return 0;
+      const scale = Number(m.vvScale);
+      if (Number.isFinite(scale) && Math.abs(scale - 1) > 0.01) return 0;
+      const offsetTop = Number(m.vvOffsetTop);
+      const kb = innerHeight - vvHeight - (Number.isFinite(offsetTop) ? offsetTop : 0);
+      if (!Number.isFinite(kb) || kb < 80) return 0;
+      return Math.min(Math.round(kb), Math.max(0, Math.round(innerHeight)));
+    }
+
+    /**
+     * 把 keyboardInset() 写进 :root 的 --dshadb-kb, CSS 那边据此收窄 + 让位。
+     * 用 rAF 合并高频 resize(键盘动画期间 resize 每帧都来)。
+     * 失败一律静默 —— 没有 visualViewport 的环境(旧内核 / 测试夹具)就当没有键盘, 回到 v1.4.2 行为。
+     * @returns {() => void} dispose
+     */
+    function installKeyboardInsetVar() {
+      if (typeof window === "undefined" || !window.visualViewport || typeof document === "undefined") {
+        return () => {};
+      }
+      const vv = window.visualViewport;
+      const root = document.documentElement;
+      let raf = 0;
+      // 用独立的 pending 标记, 而不是靠 raf 的真假 —— requestAnimationFrame 在测试夹具里可能是
+      // **同步**执行的(调完就已经跑过 apply 了), 那时 `raf = rAF(apply)` 会把 apply 里清掉的 0
+      // 又写回成非 0, 标记就永久卡住、后续 resize 全被吞掉。pending 与 rAF 的同步/异步无关。
+      let pending = false;
+      const apply = () => {
+        pending = false;
+        raf = 0;
+        const kb = keyboardInset({ innerHeight: window.innerHeight, vvHeight: vv.height, vvOffsetTop: vv.offsetTop, vvScale: vv.scale });
+        try {
+          if (kb > 0) root.style.setProperty("--dshadb-kb", kb + "px");
+          else root.style.removeProperty("--dshadb-kb");
+        } catch (e) { /* 属性设置失败不影响功能, 只是退回旧行为 */ }
+      };
+      const schedule = () => {
+        if (pending) return;
+        pending = true;
+        raf = requestAnimationFrame(apply);
+      };
+      apply();
+      vv.addEventListener("resize", schedule);
+      vv.addEventListener("scroll", schedule);
+      return () => {
+        if (raf) cancelAnimationFrame(raf);
+        vv.removeEventListener("resize", schedule);
+        vv.removeEventListener("scroll", schedule);
+        try { root.style.removeProperty("--dshadb-kb"); } catch (e) { /* 忽略 */ }
+      };
+    }
+    //#endregion
+
     //#region styles (A 风格)
     const CSS_ID = "dsh-api-dashboard/styles.css";
     if (typeof document !== "undefined" && document.querySelector('style[data-plugin-css="' + CSS_ID + '"]') === null) {
@@ -219,7 +290,13 @@ window.__ModuleLoader__.load({
 .dshadb_swipeguard{display:block;width:calc(100% + 2px);height:0;pointer-events:none}
 
 /* ===== 抽屉 ===== */
-.dshadb_drawer{position:fixed;left:0;right:0;bottom:0;z-index:99999;max-height:85vh;background:#f5f6f8;border-radius:20px 20px 0 0;box-shadow:0 -8px 32px rgba(0,0,0,0.12);display:flex;flex-direction:column;animation:dshadb-slideup .22s cubic-bezier(.16,1,.3,1);overflow:hidden}
+/* 高度与位置都用 CSS 变量表达, 不再写内联 style:
+     --dshadb-max-h  各面板自己的高度上限(平台详情 70vh / 设置 86vh / 看板 85vh)
+     --dshadb-kb     软键盘占掉的高度(px), 由 client.js 的 keyboardInset() 写到 :root
+   为什么要变量化: 内联 style 优先级高于样式表, 桌面档想改 max-height 就得挂 !important,
+   而 !important 又会挡住「键盘弹出时动态收窄」—— 三个问题一起解决。
+   --dshadb-kb 未定义时回退 0px, 所以手机端(没有键盘事件、JS 也没跑)与 v1.4.2 完全一致。 */
+.dshadb_drawer{position:fixed;left:0;right:0;bottom:var(--dshadb-kb,0px);z-index:99999;max-height:min(var(--dshadb-max-h,85vh),calc(100vh - var(--dshadb-kb,0px) - 12px));background:#f5f6f8;border-radius:20px 20px 0 0;box-shadow:0 -8px 32px rgba(0,0,0,0.12);display:flex;flex-direction:column;animation:dshadb-slideup .22s cubic-bezier(.16,1,.3,1);overflow:hidden;transition:bottom .18s ease-out}
 .dshadb_handle{display:flex;align-items:center;justify-content:center;padding:10px 0 6px;flex:none}
 .dshadb_handle_bar{width:38px;height:4px;border-radius:9px;background:#c9cad0}
 
@@ -249,6 +326,66 @@ window.__ModuleLoader__.load({
 .dshadb_card{display:flex;align-items:center;gap:10px;padding:13px 14px;margin-bottom:9px;border-radius:18px;background:#ffffff;border:1px solid #e7e8ec;box-shadow:0 6px 20px rgba(0,0,0,0.03);cursor:pointer;position:relative;transition:transform .12s ease,box-shadow .2s ease,border-color .2s ease;-webkit-tap-highlight-color:transparent;animation:dshadb-fadein .2s ease-out}
 .dshadb_card:active{transform:scale(0.985);box-shadow:0 6px 20px rgba(0,0,0,0.05)}
 @media(hover:hover){.dshadb_card:hover{box-shadow:0 8px 25px rgba(0,0,0,0.06);border-color:#d0d2d8}}
+/* v1.5.0-desktop-preview: 桌面 / **平板**两档断点 —— 抽屉不再横铺整个窗口。
+   档位是照着宿主自己的手机壳划的 (dsh-web-mobile 的 MOBILE_QUERY = max-width:1023px)：
+     · <768px 或矮屏(高<600)  → 原样手机全宽抽屉, 与 v1.4.2 完全一致
+     · 768–1023px             → 居中 560px 的底部面板（平板竖屏 / 窄窗口）
+     · ≥1024px                → 居中对话框：四角圆角 + 上下留边 + 高度上限（桌面）
+   为什么第二个条件是 min-height 而不是只看宽度: 手机横屏(844×390 / 915×412)宽度也过 768,
+   一屏才 390px 高, 只按宽度判会在上面摆一个 560px 宽的居中面板 → 那一档必须再要高度。
+   ⚠️ v1.5.0-desktop-preview.5: min-height 后面补了 (pointer:fine) 的**并列分支** ——
+      只按高度会让「宽而矮的鼠标窗口」(1600×599、分屏、台前调度、拉矮的浏览器) 在 599→600 这一像素上
+      从 100vw 通栏直接跳成对话框, 是一道硬悬崖。有精确指针 = 一定不是手机横屏, 可以无条件放行。
+      安全性来自宿主自己的判据: dsh-web-mobile 用 (max-width:1023px) and (pointer: coarse) 认手机
+      (lib/client.js:853), coarse 与 fine 互斥 —— 真机 coarse 命中就说明 fine 不命中, 手机布局碰不到。
+   为什么 768 档不用 transform 居中: .dshadb_drawer 带 slideup 动画
+   (@keyframes dshadb-slideup: from{transform:translateY(100%)}), 动画会盖掉 transform,
+   那一瞬间会横向跳; 所以 768 档只用 margin:auto。
+   1024 档要竖着居中就必须用 transform, 所以那一档把动画换成**纯淡入**(dshadb-fadein, 关键帧里没有 transform)。
+   ⚠️ min() 里不用再套 calc() —— min(560px, 100vw - 48px) 就是合法写法(lightningcss 规范化后正是这个形态),
+      写成 calc(...) 只是冗余, 不是"不生效"。(键盘那条**必须**用 calc: 它要跟 var 相减。) */
+@media (min-width:768px) and (min-height:600px),(min-width:768px) and (pointer:fine){.dshadb_drawer{width:min(560px,100vw - 48px);margin:0 auto;border-radius:22px 22px 0 0}}
+/* 桌面档：居中对话框 + 卡片两列。
+   面板 560 → 720px，平台卡片在 ≥1024px 排成两列 —— 560px 单列在 10 寸以上的屏上左右全是空的。
+   卡片本体自带 margin-bottom:9px（手机上是纵向列表的间距），进网格后必须归零，否则行距翻倍。
+   ⚠️ v1.5.0-desktop-preview.5 三处修正（第三方验证报告 §2.4/§2.5）：
+     ① margin:0 auto 这一档自己写一份, 不再靠 768 档**跨规则承重** —— 两条同时命中时居中确实是对的,
+        但只要有人按文案给 768 档补个 max-width:1023px(看起来完全合理), 这里就只剩
+        left:0/right:0/width:720px 的过约束, right 被忽略 → 对话框贴左边缘。
+     ② 去掉 !important: 两个抽屉的内联 max-height 已改成 --dshadb-max-h 变量, 没有内联样式要压了。
+        留着它反而会挡住「键盘弹出时按 --dshadb-kb 动态收窄」。
+     ③ 高度/位置都按 --dshadb-kb 让位: 对话框原本在**布局视口**里居中, 键盘弹出后布局视口不变,
+        底部 26%(真机实测 242px 键盘 / 630px 面板)会被盖住。改成在「可视区」里重新居中。 */
+@media (min-width:1024px) and (min-height:600px),(min-width:1024px) and (pointer:fine){.dshadb_drawer{top:calc((100vh - var(--dshadb-kb,0px)) / 2);bottom:auto;transform:translateY(-50%);width:min(720px,100vw - 64px);margin:0 auto;max-height:min(720px,80vh,calc(100vh - var(--dshadb-kb,0px) - 12px));border-radius:22px;box-shadow:0 24px 64px rgba(0,0,0,0.22);animation:dshadb-fadein .16s ease-out}.dshadb_cards{display:grid;grid-template-columns:1fr 1fr;gap:9px;align-items:start}.dshadb_cards .dshadb_card{margin-bottom:0}}
+/* v1.5.0-desktop-preview.5 (报告 §2.8): 下滑把手是**底部抽屉的语汇**, 居中对话框里多余。
+   只在有精确指针时隐藏 —— iPad Pro 横屏(1366×1024)也落进对话框档, 而看板抽屉没有关闭按钮
+   (只有 Esc / 点遮罩), 触摸设备上把手是唯一看得见的关闭抓手, 不能一起收掉。 */
+@media (min-width:1024px) and (pointer:fine){.dshadb_handle{display:none}}
+/* preview.8：同一条竖线，去掉 preview.7 那两层多余条件。
+   现象（维护者确认，平板横屏）：打开看板/设置时面板偏左多出一条贯穿竖线，
+   **它能拖**，且**面板一关就没有**。
+   定位：宿主 .*sidebarCol 的 border-right:.5px solid var(--dsw-alias-border-l3)
+   （dpr 2.5 下正好占满 1 个物理像素）就是那条线。宿主框架里全高的竖向 1px 线只此一条。
+   它旁边正好压着 8px 全高、cursor:col-resize 的 DragHandle
+   （@deepseek-ai/dsh-client-ui-layout/lib/client.js 306 行，margin-left:-4px 骑在边上），
+   —— 所以「竖线」和「能拖」落在同一处，两个特征互相印证。
+   「只有面板开着才出现」= 我们的 .dshadb_scrim 是 position:fixed + inset:0 + fadein 动画，
+   会提升合成层、把整页重新栅格化：那 0.5px 本来是混合出来的淡线，重绘后被吸附成实心 1px。
+   （本插件打开面板时**不碰**宿主任何布局：不设 overflow、不动 data-sidebar-*、不加全局 class，
+     已逐条核对过 —— 所以这不是我们画上去的。）
+   preview.7 把它写成 (min-width:1024px) and (pointer:coarse)，想当 dsh-web-mobile 那条
+   (max-width:1023px) and (pointer:coarse) 的补集。但平板只要报 pointer:fine
+   （接了鼠标/触控板、或桌面模式），这条媒体条件就整段不匹配 —— 和当初漏掉宽屏触屏是同一个坑。
+   ✂ 这里不再设任何媒体条件：规则只挂在 body:has(.dshadb_scrim) 上，
+     **只有我们自己的遮罩打开时才动宿主**，平时一个像素都不碰。
+   ✂ 用 border-right-color:transparent 而不是 preview.7 的 border-right:none：
+     后者那个简写会连 0.5px 的边框宽度一起去掉，开关面板时侧栏与内容区会有 0.5px 位移；
+     只让颜色透明，几何完全不变，位移为零。
+   选择器用语义后缀 [class*="sidebarCol"]：宿主类名是 CSS Module 哈希（当前 pI_x6G_sidebarCol）。 */
+body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !important}
+.dshadb_preview_banner{display:flex;flex-direction:column;gap:2px;margin:0 0 10px;padding:9px 11px;border-radius:12px;background:#fff8e6;border:1px solid #f0d9a0;color:#7a5b12;font-size:11px;font-weight:600;line-height:1.5}
+.dshadb_preview_banner b{font-size:12px;font-weight:800;color:#6b4d06}
+@media (prefers-color-scheme:dark){.dshadb_preview_banner{background:#3a3016;border-color:#6b5a24;color:#f2dfae}.dshadb_preview_banner b{color:#ffe9b0}}
 .dshadb_card_active{background:#f0f4ff;border-color:rgba(79,124,255,0.25);box-shadow:0 6px 20px rgba(79,124,255,0.06);transition:all .2s ease}
 .dshadb_card_logo{width:35px;height:35px;border-radius:12px;background:#eef2ff;display:flex;align-items:center;justify-content:center;flex:none;font-size:16px;font-weight:800;color:#17181c;overflow:hidden}
 .dshadb_card_logo svg{width:22px;height:22px;display:block}
@@ -516,9 +653,11 @@ window.__ModuleLoader__.load({
     const zh = {
       "bar.hint": "点击切换", "title": "哦鲸鲸", "refresh": "刷新", "refreshing": "刷新中",
       "close": "关闭", "back": "返回", "status.ok": "正常", "status.warn": "偏低", "status.err": "异常",
+      // v1.4.6 (issue #2 问题 1): 余额低于预警线 ≠ 故障, 单开一档说人话 (颜色仍是红灯)
+      "status.insufficient": "不足",
       "status.nokey": "未配置", "status.loading": "查询中", "status.noBalance": "未开放",
       "status.auth": "认证失败", "status.local": "本地", "amount.free": "免费",
-      "all.ok": "{n} 正常", "domestic": "国内平台", "abroad": "海外平台", "local": "本地", "relay": "中转站", "custom": "自定义模型",
+      "all.ok": "{n} 正常", "all.attention": "{n} 需关注", "domestic": "国内平台", "abroad": "海外平台", "local": "本地", "relay": "中转站", "custom": "自定义模型",
       "selectedTag": "当前", "add.relay": "添加中转站", "add.custom": "添加自定义模型", "settings.title": "哦鲸鲸设置",
       "detail.total": "当前余额", "detail.topup": "总充值", "detail.used": "总使用", "detail.note": "类型",
       "detail.sessionCost": "本会话消耗", "detail.noBalance": "该平台未开放余额查询",
@@ -534,6 +673,10 @@ window.__ModuleLoader__.load({
       "update.install": "一键更新", "update.installing": "下载安装中…",
       "update.done": "已更新, 重启 Web GUI 生效", "update.fail": "更新失败, 已保持原版本",
       "update.checkfail": "检查失败 (网络异常)",
+      "preview.title": "桌面 / 平板适配预览版 · 预发行",
+      "preview.body": "供电脑与平板试用：≥1024px 宽时面板变成居中对话框（卡片两列），768~1023px 收成居中 560px 面板；手机与手机横屏保持原样。预览版只在预览分支内自更新，不会被正式版覆盖。",
+      "update.previewHint": "预览版不参与一键更新（避免被 main 上的正式版覆盖）",
+      "update.previewChannelHint": "预览频道自更新：只会更新到该分支上的新预览版，不会被 main 的正式版覆盖 ·",
       "settings.section.basic": "基础设置", "settings.section.relays": "中转站", "settings.section.models": "自定义模型",
       "settings.section.whale": "大肥鱼",
       "whale.enable": "收养大肥鱼", "whale.enableHint": "在屏幕边缘养一只会探头的大肥鱼（纯互动，不显示余额）",
@@ -542,20 +685,20 @@ window.__ModuleLoader__.load({
       "whale.bubble": "台词气泡", "whale.peakMode": "峰谷文案", "whale.snap": "自动靠边",
       "whale.snapHint": "松手后吸附到最近的屏幕边缘；关掉就停在你放的位置",
       "whale.on": "开", "whale.off": "关",
-      "whale.duck": "小黄鸭", "whale.fx1": "音效1",
+      "whale.duck": "小黄鸭", "whale.fx1": "音效1", "whale.fx2": "音效2", "whale.fx3": "音效3",
       "whale.peak.default": "默认", "whale.peak.liangwen": "梁文峰谷", "whale.peak.qiangqiang": "!?强强?!",
       "whale.tip": "拖着大肥鱼可以在屏幕上随意移动；点一下弹全身和台词，再点一下收回。",
       "whale.offTip": "先打开上面的「收养大肥鱼」，才能调下面这些。",
       "brands": "模型品牌",
       "settings.showBrands": "显示模型品牌", "settings.showBrandsHint": "在看板中显示 OpenAI / Claude / Gemini / Qwen / 豆包 / 混元 / MiMo 等无余额接口的品牌",
       "settings.official": "官方直连 provider",
-      "settings.officialHint": "逗号或换行分隔。写在这里的 provider 名一律按官方直连处理，状态条显示官方余额；留空则自动判定（按 settings.yaml 里 baseURL 的域名，识别不出按中转站显示「—」）",
+      "settings.officialHint": "逗号或换行分隔。写在这里的 provider 名一律按官方直连处理，状态条显示官方余额；留空则自动判定 —— 拿 baseURL 域名比对官方白名单，命中才算官方，其余一律按中转站（含没写 baseURL 的）",
       "settings.officialAuto": "自动判定结果",
       "settings.officialKindOfficial": "官方", "settings.officialKindRelay": "中转",
       "settings.officialAutoEmpty": "settings.yaml 里没有写 baseURL 的 provider，无法自动判定",
       "settings.dshProviders": "来自 DSH 的中转站（自动）",
-      "settings.dshProvidersHint": "直接读 settings.yaml 的 provider 列表，默认全部自动查询余额。用右侧开关单独关掉某个；关过的不再自动打开。官方直连与没写 baseURL 的 provider 不在此列。",
-      "settings.dshNoBaseUrl": "没写 baseURL（不表态）",
+      "settings.dshProvidersHint": "读 DSH 里的 provider 列表（0.1.7 起在 profile 的 cordis.patch.yml，旧版在 settings.yaml），默认全部自动查询余额。用右侧开关单独关掉某个；关过的不再自动打开。官方直连、以及没写 baseURL 的 provider 不在这里 —— 后者没有查询地址。",
+      "settings.dshNoBaseUrl": "未写 baseURL",
       "settings.modelName": "模型名称", "settings.apiUrl": "余额接口 URL", "settings.queryType": "解析方式",
       "settings.totalPath": "总余额字段(可选)", "settings.usedPath": "已用字段(可选)",
       "settings.modelHint": "填你的余额接口(返回 JSON)，可选填 API Key 与字段路径，如 data.balance",
@@ -574,9 +717,10 @@ window.__ModuleLoader__.load({
     const en = {
       "bar.hint": "Tap to switch", "title": "哦鲸鲸", "refresh": "Refresh", "refreshing": "Refreshing",
       "close": "Close", "back": "Back", "status.ok": "OK", "status.warn": "Low", "status.err": "Error",
+      "status.insufficient": "Insufficient",
       "status.nokey": "No Key", "status.loading": "Loading", "status.noBalance": "No API",
       "status.auth": "Auth", "status.local": "Local", "amount.free": "Free",
-      "all.ok": "{n} OK", "domestic": "Domestic", "abroad": "Global", "local": "Local", "relay": "Relay", "custom": "Custom",
+      "all.ok": "{n} OK", "all.attention": "{n} need attention", "domestic": "Domestic", "abroad": "Global", "local": "Local", "relay": "Relay", "custom": "Custom",
       "selectedTag": "Now", "add.relay": "Add Relay", "add.custom": "Add Custom", "settings.title": "哦鲸鲸 Settings",
       "detail.total": "Balance", "detail.topup": "Top-up", "detail.used": "Used", "detail.note": "Type",
       "detail.sessionCost": "Session cost", "detail.noBalance": "No balance API",
@@ -592,6 +736,10 @@ window.__ModuleLoader__.load({
       "update.install": "Update now", "update.installing": "Installing…",
       "update.done": "Updated. Restart Web GUI to apply", "update.fail": "Update failed, version unchanged",
       "update.checkfail": "Check failed (network)",
+      "preview.title": "Desktop / tablet preview — pre-release",
+      "preview.body": "For desktop and tablet: at 1024px and wider the panel becomes a centred dialog with a two-column card grid, at 768-1023px a centred 560px sheet. Phones and phone-landscape keep the original layout. Preview builds update only within the preview branch, never to the stable release.",
+      "update.previewHint": "Preview build: one-click update is off, so the stable line on main cannot overwrite it.",
+      "update.previewChannelHint": "Preview-channel update: only newer previews on this branch, never the stable release on main ·",
       "settings.section.basic": "Basic", "settings.section.relays": "Relays", "settings.section.models": "Custom Models",
       "settings.section.whale": "Whale",
       "whale.enable": "Adopt Big Whale", "whale.enableHint": "Keep a peeking whale on the screen edge (interactive only)",
@@ -600,20 +748,20 @@ window.__ModuleLoader__.load({
       "whale.bubble": "Speech bubble", "whale.peakMode": "Peak wording", "whale.snap": "Snap to edge",
       "whale.snapHint": "Snaps to the nearest edge on release; turn off to keep it where you drop it",
       "whale.on": "On", "whale.off": "Off",
-      "whale.duck": "Duck", "whale.fx1": "FX 1",
+      "whale.duck": "Duck", "whale.fx1": "FX 1", "whale.fx2": "FX 2", "whale.fx3": "FX 3",
       "whale.peak.default": "Default", "whale.peak.liangwen": "Liangwen", "whale.peak.qiangqiang": "!?Qiang?!",
       "whale.tip": "Drag the whale anywhere on screen; tap once for full body and a line, tap again to tuck it back.",
       "whale.offTip": "Turn on \"Adopt Big Whale\" above to edit these.",
       "brands": "Model Brands",
       "settings.showBrands": "Show model brands", "settings.showBrandsHint": "Show OpenAI / Claude / Gemini / Qwen / Doubao / Hunyuan / MiMo etc. (no balance API) in dashboard",
       "settings.official": "Official-direct providers",
-      "settings.officialHint": "Comma or newline separated. Providers listed here always count as official direct connections and show their official balance; leave empty to auto-detect from the baseURL host in settings.yaml (undetected ones are treated as relays and show \"—\")",
+      "settings.officialHint": "Comma or newline separated. Providers listed here always count as official direct connections and show their official balance; leave empty to auto-detect against the official host allowlist — only an allowlist hit counts as official, everything else is treated as a relay (including providers with no baseURL)",
       "settings.officialAuto": "Auto-detected",
       "settings.officialKindOfficial": "official", "settings.officialKindRelay": "relay",
       "settings.officialAutoEmpty": "No provider in settings.yaml declares a baseURL, so nothing can be auto-detected",
       "settings.dshProviders": "Relays from DSH (automatic)",
-      "settings.dshProvidersHint": "Reads the provider list straight from settings.yaml and queries balances automatically. Use the switch to turn one off; switched-off ones stay off. Official-direct providers and ones without a baseURL are not listed here.",
-      "settings.dshNoBaseUrl": "no baseURL (stays neutral)",
+      "settings.dshProvidersHint": "Reads the provider list from DSH (profile cordis.patch.yml on 0.1.7+, settings.yaml on older builds) and queries balances automatically. Use the switch to turn one off; switched-off ones stay off. Official-direct providers, and providers without a baseURL, are not listed here — the latter have no endpoint to query.",
+      "settings.dshNoBaseUrl": "no baseURL",
       "settings.modelName": "Model name", "settings.apiUrl": "Balance API URL", "settings.queryType": "Parse type",
       "settings.totalPath": "Total field (opt)", "settings.usedPath": "Used field (opt)",
       "settings.modelHint": "A JSON endpoint for your balance; optional API key & field paths like data.balance",
@@ -982,6 +1130,18 @@ window.__ModuleLoader__.load({
       return v > safe ? "ok" : v > warn ? "warn" : "err";
     }
     function statusLabel(level, t) { return t({ ok:"status.ok", warn:"status.warn", err:"status.err", nokey:"status.nokey", loading:"status.loading", local:"status.local", auth:"status.auth" }[level] || "status.err"); }
+
+    /** v1.4.6 (issue #2 问题 1): 拆开 err 档的措辞 ——
+     *  余额查询本身正常(status==="ok")、只是金额低于预警线 → "不足";
+     *  真故障(接口 / 解析 / 认证失败) → "异常"。
+     *  红灯不变, 只让文案不再把"余额低"说成"插件或接口坏了"。 */
+    function statusTextFor(b, level, t) {
+      if (level === "err" && b && b.status === "ok") {
+        const v = typeof b.percent === "number" ? b.percent : b.total;
+        if (typeof v === "number" && v > 0) return t("status.insufficient");
+      }
+      return statusLabel(level, t);
+    }
     //#endregion
 
 
@@ -1090,7 +1250,7 @@ window.__ModuleLoader__.load({
         ]),
         react.createElement("div", { className: "dshadb_group_body" + (open ? " dshadb_group_body_open" : ""), key: "body" }, [
           react.createElement("div", { className: "dshadb_group_body_inner", key: "inner" }, [
-            react.createElement("div", { key: "cards" }, children),
+            react.createElement("div", { className: "dshadb_cards", key: "cards" }, children),
           ]),
         ]),
       ]);
@@ -1119,7 +1279,12 @@ window.__ModuleLoader__.load({
         const timer = setTimeout(() => setSlowLoad(true), 4000);
         return () => clearTimeout(timer);
       }, [isLoading]);
-      const okCount = balances.filter(b => b.status === "ok").length;
+      // v1.4.6 (issue #2 问题 2): 标题原本数「服务端 status==="ok"」(接口通就算正常), 卡片却走
+      // getLevel 的阈值分级 —— 同屏两个口径, 于是出现「标题 1 正常 / 卡片 异常」的矛盾。
+      // 现在标题与卡片**同源**(都走 getLevel), 并额外汇总一个「需关注」数。
+      const countByLevel = (lv) => balances.filter(b => getLevel(b, config) === lv).length;
+      const okCount = countByLevel("ok");
+      const attentionCount = countByLevel("err");
 
       const groups = { domestic: [], abroad: [], relay: [], custom: [] };
       const noBalanceBrands = [];
@@ -1152,15 +1317,15 @@ window.__ModuleLoader__.load({
         if (b.status === "ok" && b.sessionCost != null) {
           descText = (b.modelId || "—") + " · 会话消耗 " + (typeof b.sessionCost === "number" ? b.sessionCost.toFixed(2) : b.sessionCost);
         } else if (b.status === "ok" && b.note) {
-          descText = b.note + " · " + statusLabel(level, t);
+          descText = b.note + " · " + statusTextFor(b, level, t);
         } else if (b.status === "ok") {
-          descText = statusLabel(level, t);
+          descText = statusTextFor(b, level, t);
         } else if (b.status === "local") {
           descText = "本地模型";
         } else if (b.status === "noBalance" || b.status === "no-balance-api") {
           descText = "按价格表估算消耗";
         } else {
-          descText = statusLabel(level, t);
+          descText = statusTextFor(b, level, t);
         }
         let amount;
         let amtClass = "";
@@ -1176,7 +1341,7 @@ window.__ModuleLoader__.load({
         else { amount = b.error || t("error.unknown"); amtClass = "dshadb_card_status_err"; }
         const isNoBalance = b.status === "no-balance-api";
         const stClass = isNoBalance ? "dshadb_card_amount_sub" : (level === "ok" ? "dshadb_card_status_ok" : level === "warn" ? "dshadb_card_status_warn" : "dshadb_card_status_err");
-        const statusText = isNoBalance ? "—" : statusLabel(level, t);
+        const statusText = isNoBalance ? "—" : statusTextFor(b, level, t);
         const rightNode = react.createElement("div", { className: "dshadb_card_right", key: "right" }, [
           react.createElement("span", { className: "dshadb_card_amount" + (amtClass ? " " + amtClass : ""), key: "amt" }, amount),
           react.createElement("span", { className: "dshadb_card_status " + stClass, key: "st" }, [
@@ -1228,6 +1393,13 @@ window.__ModuleLoader__.load({
       } else {
         bodyContent = [
           // ⑤ 选中模型置顶 (原deepseek位置)
+          // ⚠️ v1.5.0-desktop-preview.5: 置顶卡**故意**不进 .dshadb_cards 网格 ——
+          //   桌面档下它是满宽 hero(≈692px), 下面分组里的卡是两列(≈336px)。
+          //   这是 2026-09-11 第三方验证报告 §2.1 提的"同一面板并存两种卡片宽度", 经复核判定为**设计**而非缺陷:
+          //     · 报告建议的修法(包进 .dshadb_cards + grid-column:1/-1)跨两列后宽度还是 692px,
+          //       现象一条都没消掉, 只是多了个 wrapper;
+          //     · 真要"一致"就得把它压成 336px 的普通格子, 720px 对话框里的余额卡反而更挤。
+          //   所以这里保持满宽, 并把结论写死: 后人别把它当 bug 反复"修"。
           selectedBalance ? card(selectedBalance) : null,
           selectedBalance ? react.createElement("div", { className: "dshadb_group_divider", key: "div" }) : null,
           // 国内平台 (含deepseek)
@@ -1250,7 +1422,7 @@ window.__ModuleLoader__.load({
       return react.createElement("div", { className: "dshadb_scrim", onClick: (e) => { if (e.target === e.currentTarget) onClose(); } }, [
         // v1.4.0: 侧滑守卫 —— 让手机壳的「左边缘开侧边栏」手势层放弃识别 (CSS 与 AGENTS.md ① 有详解)
         react.createElement("div", { className: "dshadb_swipeguard", "aria-hidden": "true", key: "swipeguard" }),
-        react.createElement("div", { className: "dshadb_drawer", onClick: (e) => e.stopPropagation(), key: "drawer" }, [
+        react.createElement("div", { className: "dshadb_drawer", role: "dialog", "aria-label": t("title"), onClick: (e) => e.stopPropagation(), key: "drawer" }, [
           react.createElement(SwipeHandle, { onClose, key: "handle" }),
           react.createElement("div", { className: "dshadb_header", key: "header" }, [
             react.createElement("div", { className: "dshadb_header_left", key: "left" }, [
@@ -1275,7 +1447,9 @@ window.__ModuleLoader__.load({
                 t("title"),
               ]),
               react.createElement("div", { className: "dshadb_header_sub", key: "sub" },
-                t("all.ok", { n: okCount }) + (isRefreshing ? " · " + t("refreshing") : "")
+                t("all.ok", { n: okCount })
+                  + (attentionCount ? " · " + t("all.attention", { n: attentionCount }) : "")
+                  + (isRefreshing ? " · " + t("refreshing") : "")
               ),
             ]),
             react.createElement("button", {
@@ -1371,7 +1545,7 @@ window.__ModuleLoader__.load({
       // v0.5.3: 回退为底部抽屉样式 (全屏卡片观感不佳, 复用看板同款 scrim+drawer)
       return react.createElement("div", { className: "dshadb_scrim", onClick: (e) => { if (e.target === e.currentTarget) onClose(); } }, [
         react.createElement("div", { className: "dshadb_swipeguard", "aria-hidden": "true", key: "swipeguard" }),
-        react.createElement("div", { className: "dshadb_drawer", style: { maxHeight: "70vh" }, onClick: (e) => e.stopPropagation(), key: "drawer" }, [
+        react.createElement("div", { className: "dshadb_drawer", role: "dialog", "aria-label": meta.name, style: { "--dshadb-max-h": "70vh" }, onClick: (e) => e.stopPropagation(), key: "drawer" }, [
           react.createElement(SwipeHandle, { onClose, key: "handle" }),
           react.createElement("div", { className: "dshadb_header", key: "header" }, [
             react.createElement("div", { className: "dshadb_header_left", key: "left" }, [
@@ -1386,7 +1560,7 @@ window.__ModuleLoader__.load({
                 react.createElement("span", { className: "dshadb_detail_logo", key: "logo" }, renderLogo(b)),
                 react.createElement("div", { key: "who" }, [
                   react.createElement("div", { className: "dshadb_detail_name", key: "name" }, meta.name),
-                  react.createElement("div", { className: "dshadb_detail_name_sub", key: "sub" }, statusLabel(level, t)),
+                  react.createElement("div", { className: "dshadb_detail_name_sub", key: "sub" }, statusTextFor(b, level, t)),
                 ]),
               ]),
               // v0.5.9: 大号余额数字 + 当前余额标签（支持百分比、token数、真实货币）
@@ -1463,6 +1637,13 @@ window.__ModuleLoader__.load({
       // 服务端按 baseURL 域名自动判定的结果 (只读, 供用户判断还需不需要手填)
       const [providerKinds, setProviderKinds] = react.useState(
         (config && config.providerKinds) || {});
+      /**
+       * v1.5.0-desktop-preview.4: 预览版**只有在「拿不到预览频道」时**才禁用一键更新。
+       * 频道由服务端从自身 package.json 的 `dsh.updateRef` 读出来下发 —— 更新源就是那条分支,
+       * 所以「被 main 的正式版覆盖」在结构上就不可能发生, 不需要靠禁用按钮来防。
+       * 预览版但没有频道字段(手动安装 / 字段缺失) → 维持旧的禁用兜底。
+       */
+      const previewUpdateLocked = !!(config && config.preview && !config.previewChannel);
       // v1.4.0「真自动」: 从 settings.yaml 自动发现的 DSH provider + 用户关掉的名单。
       // 服务端只下发「名字/baseURL/是否官方」, **不下发 key**。
       const [dshProviders, setDshProviders] = react.useState(
@@ -1731,7 +1912,8 @@ window.__ModuleLoader__.load({
           }, [
             react.createElement("span", { className: "dshadb_kinds_empty", key: "dp_h", style: { marginBottom: "6px" } }, t("settings.dshProvidersHint")),
             react.createElement("div", { key: "dp_list" }, dshProviders.map((p) => {
-              const locked = p.kind === "official" || p.kind === "no-base-url";
+              // v1.4.6: kind 只剩 official / relay；"能否自动查余额"取决于有没有 baseURL
+              const locked = p.kind === "official" || p.hasBaseURL === false;
               const name = String(p.name || "");
               const off = dshOff.some((n) => String(n).toLowerCase() === name.toLowerCase());
               return react.createElement("div", { className: "dshadb_settings_row", key: name, style: { margin: "6px 0" } }, [
@@ -1741,7 +1923,7 @@ window.__ModuleLoader__.load({
                 ]),
                 locked
                   ? react.createElement("span", { className: "dshadb_refresh_badge", key: "lock" },
-                    t(p.kind === "official" ? "settings.officialKindOfficial" : "settings.dshNoBaseUrl"))
+                    t(p.kind === "official" ? "settings.officialKindOfficial" : (p.hasBaseURL === false ? "settings.dshNoBaseUrl" : "settings.officialKindRelay")))
                   : react.createElement(Switch, {
                     checked: !off, key: "sw",
                     // 关掉 = 加进 optOut; 打开 = 从 optOut 移除 (大小写不敏感, 与后端一致)
@@ -1898,7 +2080,7 @@ window.__ModuleLoader__.load({
           ], wf.peakMode, (v) => patchWf({ peakMode: v })),
           wfSeg("sound", t("whale.sound"), [[true, t("whale.on")], [false, t("whale.off")]], wf.soundOn,
             (v) => patchWf({ soundOn: v })),
-          wfSeg("soundset", t("whale.soundSet"), [["duck", t("whale.duck")], ["fx1", t("whale.fx1")]], wf.soundSet,
+          wfSeg("soundset", t("whale.soundSet"), [["duck", t("whale.duck")], ["fx1", t("whale.fx1")], ["fx2", t("whale.fx2")], ["fx3", t("whale.fx3")]], wf.soundSet,
             (v) => patchWf({ soundSet: v })),
           wfSlider("vol", t("whale.volume"), Math.round(wf.volume * 100) + "%", 0, 1, 0.05, wf.volume,
             (v) => patchWf({ volume: v })),
@@ -1906,7 +2088,14 @@ window.__ModuleLoader__.load({
         ]),
       ]);
 
-      const output = react.createElement("div", { className: "dshadb_drawer", style: { maxHeight: "86vh" }, onClick: (e) => e.stopPropagation(), key: "drawer" }, [
+      // ⚠️ 无障碍只加 role="dialog" + aria-label, **绝不加 aria-modal="true"**：
+      //    手机壳 dsh-web-mobile 把 [aria-modal="true"] 当自家对话框, 有 **46 条**以它为前缀的
+      //    结构性 CSS（[class*="_header"] / _row / _card … 子串选择器）会把我们的
+      //    dshadb_header / dshadb_settings_row / dshadb_card 一起重排; 它的 settings-toolbar-reparent
+      //    任务还会把 [aria-modal="true"] 里的 [class*="_header"] 搬进 _nav。
+      //    （只加 role="dialog" 是安全的：全仓只有 3 处提到 role="dialog"，且唯一条结构规则
+      //      `[role="dialog"]:has([data-dsh-market-root]) > nav` 只对插件市场自己的根生效。）
+      const output = react.createElement("div", { className: "dshadb_drawer", role: "dialog", "aria-label": t("settings.title"), style: { "--dshadb-max-h": "86vh" }, onClick: (e) => e.stopPropagation(), key: "drawer" }, [
         react.createElement(SwipeHandle, { onClose: onBack || onClose, key: "handle" }),
         react.createElement("div", { className: "dshadb_header", key: "header" }, [
           react.createElement("div", { style: { display: "flex", alignItems: "center", gap: "10px", flex: "1", minWidth: 0 }, key: "leftwrap" }, [
@@ -1918,6 +2107,15 @@ window.__ModuleLoader__.load({
           react.createElement("button", { type: "button", className: "dshadb_header_settings", onClick: onClose, key: "close" }, react.createElement(IconClose, null)),
         ]),
         react.createElement("div", { className: "dshadb_body", key: "body" }, [
+          // v1.5.0-desktop-preview: 预览版横幅 —— 只在版本号带预发布后缀(服务端 config.preview)时渲染,
+          // 正式版上这段返回 null, 界面与 v1.4.2 一模一样。
+          (config && config.preview)
+            ? react.createElement("div", { className: "dshadb_preview_banner", key: "preview" }, [
+                react.createElement("b", { key: "t" }, t("preview.title")),
+                react.createElement("span", { key: "v" }, "v" + (config.version || "")),
+                react.createElement("span", { key: "b" }, t("preview.body")),
+              ])
+            : null,
           tabsNode,
           section === "basic" ? basicSection : section === "relays" ? relaySection : section === "whale" ? whaleSection : modelSection,
           // 大肥鱼页全部即改即存, 不需要保存按钮
@@ -1931,11 +2129,20 @@ window.__ModuleLoader__.load({
               upd.info?.hasUpdate ? react.createElement("span", { key: "upd_badge", style: { color: "#35b56b", fontSize: "12px", fontWeight: "700" } }, "→ v" + upd.info.remote) : null,
             ]),
             react.createElement("div", { key: "upd_btns", style: { display: "flex", gap: "8px", marginTop: "8px" } }, [
-              react.createElement("button", { type: "button", className: "dshadb_add_btn", onClick: () => checkUpdate(true), disabled: upd.phase === "checking" || upd.phase === "installing", key: "upd_chk", style: { flex: 1, padding: "8px", fontSize: "12px" } },
+              react.createElement("button", { type: "button", className: "dshadb_add_btn", onClick: () => checkUpdate(true), disabled: upd.phase === "checking" || upd.phase === "installing" || previewUpdateLocked, key: "upd_chk", style: { flex: 1, padding: "8px", fontSize: "12px" } },
                 upd.phase === "checking" ? t("update.checking") : t("update.check")),
-              upd.info?.hasUpdate ? react.createElement("button", { type: "button", className: "dshadb_save_btn", onClick: installUpdate, disabled: upd.phase === "installing", key: "upd_go", style: { flex: 1, padding: "8px", fontSize: "12px" } },
+              upd.info?.hasUpdate && !previewUpdateLocked ? react.createElement("button", { type: "button", className: "dshadb_save_btn", onClick: installUpdate, disabled: upd.phase === "installing", key: "upd_go", style: { flex: 1, padding: "8px", fontSize: "12px" } },
                 upd.phase === "installing" ? t("update.installing") : t("update.install") + " v" + upd.info.remote) : null,
             ]),
+            // v1.5.0-desktop-preview 系列: 预览版分两种情形, 别一刀切禁掉更新 ——
+            //   · **有预览频道**(package.json 的 dsh.updateRef, 例如 preview/desktop): 允许一键更新,
+            //     因为更新源就是它自己那条分支 → 结构上不可能被 main 的正式版覆盖。
+            //     (v1.5.0-desktop-preview.1~.3 是直接禁用按钮, 结果每发一版预览都得让用户重跑 install.sh。)
+            //   · 预览版但**没有**频道字段(手动装的、或字段被删): 维持禁用兜底。
+            (config && config.preview) ? react.createElement("div", { key: "upd_preview", style: { color: "#7a5b12", background: "#fff8e6", border: "1px solid #f0d9a0", borderRadius: "6px", padding: "6px 8px", fontSize: "11px", fontWeight: "600", marginTop: "8px", lineHeight: "1.4" } },
+              previewUpdateLocked
+                ? t("update.previewHint")
+                : t("update.previewChannelHint") + " " + (config.updateRef || "main")) : null,
             // v1.3.3: 更新结果改为醒目横幅 —— 原来的 11px 灰色字在移动端几乎看不到,
             // 用户点完「一键更新」后以为没反应。成功=绿色底, 失败=红色底, 检查有新版=原来的灰色。
             // 2026-09-22: 外面这层是**固定高度槽位**。原来结果行是条件渲染, 打开面板时它还不存在,
@@ -2096,19 +2303,98 @@ window.__ModuleLoader__.load({
       // v1.4.1: 拿到保存的设置之前**先不显示** —— 见下面 reveal() 的注释。
       root.style.visibility = "hidden";
       document.body.appendChild(root);
-      // ---------- 音效 ----------
-      var audio = { press: null, release: null };
-      function reloadAudio() {
-        audio.press = new Audio("/api-dashboard/whale/sound/press.mp3?set=" + st.soundSet);
-        audio.release = new Audio("/api-dashboard/whale/sound/release.mp3?set=" + st.soundSet);
-        audio.press.volume = st.volume; audio.release.volume = st.volume;
+      // ---------- 音效 (v1.5.0: 换成 Web Audio) ----------
+      // 旧实现是 new Audio(url) 走 media element + HTTP, 三处代价:
+      //   ① media element 会注册进系统「正在播放」—— macOS 上弹出 Touch Bar 播放条;
+      //   ② 起播要等 play() 的 Promise 与解码, 点按不跟手;
+      //   ③ 部分机器的网络层(下载管理器 / IDM 之类)会拦 media 请求 → 静默无声。
+      // 现在: 预取 + 预解码到 AudioBuffer, 命中缓存时在 pointerdown 的**同一个任务**里 start();
+      //   松手音按 RELEASE_LEAD_MS 排到"按压音结束前"起播, 衔接更自然。
+      //   Web Audio 不可用 / 还没解码完 → **回退** media element(保留旧路径, 不会没声)。
+      //   口径参照上游 v0.3.8 / v0.3.10 的两轮重做; 素材仍只用我们已有的 4 个 mp3
+      //   (上游自 0.3.1 起把 assets 划出 MIT 范围, 不引入其新增音效)。
+      var RELEASE_LEAD_MS = 40;
+      var sound = { ctx: null, buf: {}, fetching: {}, el: { press: null, release: null }, pressAt: 0, pressDur: 0 };
+
+      function whaleSoundUrl(which) {
+        return "/api-dashboard/whale/sound/" + which + ".mp3?set=" + encodeURIComponent(st.soundSet);
       }
-      reloadAudio();
+
+      /** 惰性建 AudioContext; 建不出来(老浏览器 / 被策略挡)记 false, 后面一律走回退 */
+      function soundCtx() {
+        if (sound.ctx !== null) return sound.ctx;
+        try {
+          var AC = window.AudioContext || window.webkitAudioContext;
+          sound.ctx = AC ? new AC() : false;
+        } catch (e) { sound.ctx = false; }
+        return sound.ctx;
+      }
+
+      /** 预取 + 预解码 (URL 级缓存, 只解一次; 失败不写缓存, 下次还会重试) */
+      function warmSound(urls) {
+        var ctx = soundCtx();
+        if (!ctx) return;
+        for (var i = 0; i < urls.length; i++) {
+          (function (url) {
+            if (!url || sound.buf[url] || sound.fetching[url]) return;
+            sound.fetching[url] = true;
+            fetch(url, { credentials: "same-origin" })
+              .then(function (r) { return r.ok ? r.arrayBuffer() : null; })
+              .then(function (ab) {
+                if (!ab) throw new Error("fetch failed");
+                return new Promise(function (res, rej) { ctx.decodeAudioData(ab, res, rej); });
+              })
+              .then(function (b) { sound.buf[url] = b; })
+              .catch(function () {})
+              .then(function () { sound.fetching[url] = false; });
+          })(urls[i]);
+        }
+      }
+
+      /** 切音效组 / 首次启动: 重建回退元素 + 预热缓冲区 (调用点与原实现同名, 不改调用方) */
+      function reloadAudio() {
+        sound.buf = {}; sound.fetching = {};
+        var pu = whaleSoundUrl("press"), ru = whaleSoundUrl("release");
+        try {
+          sound.el.press = new Audio(pu);
+          sound.el.release = new Audio(ru);
+          sound.el.press.volume = st.volume; sound.el.release.volume = st.volume;
+        } catch (e) { sound.el.press = null; sound.el.release = null; }
+        warmSound([pu, ru]);
+      }
+
       function playSound(which) {
         if (!st.soundOn || st.volume <= 0) return;
-        var a = audio[which]; if (!a) return;
-        try { a.volume = st.volume; a.currentTime = 0; var p = a.play(); if (p && p.catch) p.catch(function () {}); } catch (e) {}
+        var vol = Math.max(0, Math.min(1, st.volume));
+        var ctx = soundCtx();
+        var url = whaleSoundUrl(which);
+        var buf = (ctx && sound.buf[url]) ? sound.buf[url] : null;
+        if (ctx && buf) {
+          try {
+            if (ctx.state === "suspended") { try { ctx.resume(); } catch (e) {} }
+            var src = ctx.createBufferSource();
+            var gain = ctx.createGain();
+            gain.gain.value = vol;
+            src.buffer = buf;
+            src.connect(gain); gain.connect(ctx.destination);
+            var when = 0;
+            if (which === "press") {
+              sound.pressAt = ctx.currentTime; sound.pressDur = buf.duration;
+            } else if (sound.pressAt > 0) {
+              // 松手音排到"按压音结束前 RELEASE_LEAD_MS 毫秒"(0 = 正好接上)
+              var target = sound.pressAt + Math.max(0, sound.pressDur - RELEASE_LEAD_MS / 1000);
+              when = Math.max(0, target - ctx.currentTime);
+            }
+            src.start(ctx.currentTime + when);
+            return;
+          } catch (e) { /* 落到回退 */ }
+        }
+        // 回退: media element(还没解码完 / Web Audio 不可用)
+        var el = sound.el[which];
+        if (!el) return;
+        try { el.volume = vol; el.currentTime = 0; var p = el.play(); if (p && p.catch) p.catch(function () {}); } catch (e) {}
       }
+      reloadAudio();
 
       // ---------- 状态 ----------
       var full = false;          // 是否整只露出
@@ -2380,8 +2666,8 @@ window.__ModuleLoader__.load({
         }
         if (soundTouched) {
           if (patch.soundSet !== undefined) reloadAudio();
-          if (audio.press) audio.press.volume = st.volume;
-          if (audio.release) audio.release.volume = st.volume;
+          if (sound.el.press) sound.el.press.volume = st.volume;
+          if (sound.el.release) sound.el.release.volume = st.volume;
         }
         if (patch.bubbleOn === false) closeBubble();
         if (patch.snapOn !== undefined) {
@@ -2684,6 +2970,11 @@ const openSettings = (section) => { setSettingsSection(section || "basic"); setS
         document.addEventListener("visibilitychange", onVisibility);
         return () => document.removeEventListener("visibilitychange", onVisibility);
       }, "dsh-api-dashboard: visibility resume");
+
+      // v1.5.0-desktop-preview.5: 软键盘避让 —— 把键盘高度写进 :root 的 --dshadb-kb,
+      // 面板据此收窄并在可视区里重新居中/上移(报告 §2.2 真机实测: 键盘 242px, 盖住面板 26%)。
+      // 注册在插件级而不是某个抽屉里: 三个抽屉共用同一个变量, 也免得抽屉开关时反复装卸监听。
+      ctx.effect(() => installKeyboardInsetVar(), "dsh-api-dashboard: 软键盘避让");
     }
     //#endregion
 

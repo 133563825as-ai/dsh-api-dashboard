@@ -4,6 +4,63 @@
 
 ## v1.x
 
+- **v1.5.0** — 🐋 大肥鱼挂件音效引擎重做 + **桌面/平板适配并入主线**（原 `preview/desktop` 分支，10 个预览提交）—— 两件事合并为**同一个正式版**。
+
+  **桌面 / 平板适配**（原预览分支的成果）：
+  - **三档形态**：手机全宽 / 平板（768×1024）居中面板 / 桌面居中对话框；断点带 `(pointer:fine)` 分支，
+    并用 `min-height` 兜底（平板全覆盖，手机横屏不误伤）。
+  - **桌面档面板 720px + 平台卡片两列**；无障碍补 `role="dialog"` + `aria-label`，
+    但**绝不加 `aria-modal`**（手机壳有 46 条以它为前缀的结构性 CSS 会重排我们的面板）。
+  - **宿主侧栏竖线抑制**（宽屏触屏档），以及第三方验证报告逐条处理：键盘避让 / 断点悬崖 / 内联高度退场。
+  - `install.sh` 支持 `DSH_DASHBOARD_REF` 装指定分支；CI 增加**预发行 tag 不发 npm** 的短路保护
+    （这正是此前 `v1.5.0-desktop-preview.*` 的 CI 全绿却查不到 npm 版本的原因）。
+  - **合并方式**：两条线分叉于 `v1.4.2`，而 `preview/desktop` **缺**主线后来做的 v1.4.5 口径修正 ——
+    所以没有直接 merge（那会把节假日/峰谷分相一起回退），改用**三方合并**（base = 分叉点）只吸收其净增量。
+    `client.js` 与 `src/index.js` 均**零冲突**，主线改动逐项复核未被回退（`CN_HOLIDAY_RANGES` / `phaseBuckets` /
+    Web Audio / provider 白名单 / 告警桥全部在位），23 个测试文件全绿。
+
+  **音效引擎重做**（对齐上游 v0.3.8 / v0.3.10 的两轮打磨）。
+  旧实现是 `new Audio(url)` 走 media element + HTTP，有三个通病：**①** 注册进系统「正在播放」—— macOS 上弹 Touch Bar 播放条；
+  **②** 起播要等 `play()` 的 Promise 与解码，点按不跟手；**③** 部分机器的网络层（下载管理器 / IDM 之类）会拦 media 请求 → 静默无声。
+  现在主路径换成 **Web Audio**：预取 + 预解码到 `AudioBuffer`，命中缓存时在 `pointerdown` 的**同一个任务**里 `start()`；
+  松手音按 `RELEASE_LEAD_MS = 40` 排到「按压音结束前」起播。Web Audio 不可用、或还没解码完时**回退** media element —— 不会没声。
+  音效组 **2 → 4**（后两组是现有两组的按下/松开**交叉配对**，不动任何素材），未知音效组名回落 `duck`，`Content-Type` 按实际文件推导。
+  ⚠️ **素材边界（重要）**：上游自 **0.3.1（2026-09-16）** 起补了 `PROVENANCE.md` —— `assets/**` **不在 MIT 覆盖内**、明确「不授予再许可」。
+  我们 v1.1.0 移植早于该日期（当时仓库 MIT 覆盖全部内容），**既有素材无过失**；但**此后上游新增的素材一个都没引入**
+  （`DSH2.png` / `DSniang02.png` / `bubble-petpet.gif` / `minecraft-exp-orb.wav` / `task-end-a.wav` 等），
+  音效组扩展靠重新组合已有音效实现。这条边界已钉进回归测试 `test-v150-whale.mjs`。
+
+- **v1.4.6** — 修 **issue #2** 的三个问题（Qinruiy 报，2026-09-17）。
+  ① **余额低于预警线不再叫「异常」** —— 旧实现把"余额低"与"接口/解析/认证失败"挤在同一个 err 档、共用"异常"两字，
+  于是 ¥4.64 的 DeepSeek 卡片看上去像插件坏了（复现环境 safe=50 / warn=10）。
+  现在分档：**查询正常但金额低于预警线 → 「不足」**，真故障才叫「异常」（红灯不变，只让措辞说人话）。
+  ② **标题与卡片口径统一** —— 标题原本数服务端 `status === "ok"`（接口通就算正常），卡片却按阈值分级，
+  于是同屏出现「标题 1 正常 / 卡片 异常」的矛盾。现在标题与卡片**同源**（都走 `getLevel`），并补一个「需关注」汇总。
+  ③ **余额告警真的能弹出来了** —— 旧的 `ctx.notify` 与 `ctx.get('webServer').notify` 两条通道在 DSH ≥ 0.1.5 上**都不存在**
+  （cordis 的 `notify` 挂在 `ctx.reflect` 上，语义是"重估依赖某服务的 fiber"，不是通知 API；`dsh-host-webserver` 的服务面里没有 `notify`），
+  告警被 try/catch 静默吞掉 —— 作者以为会通知、用户从未收到。现改走 **DSHA App 桥** `127.0.0.1:3090/app/notify`
+  （与 `dsh-task-notifier` 同一条链路；token 读 `$DSH_HOME/.bridge_token`，不再硬编码 `/root`）；
+  拿不到通道时**不再静默**：新增 `/api-dashboard/alerts` 暴露通道状态与最近一条告警，供界面做**可见降级**。
+  ④ **provider 判定的两处适配**（维护者实测"设置里的自动判定结果，一个都没识别到中转站"）：
+  **一是 0.1.7 把 provider 段落搬了家** —— 宿主会把 `settings.yaml` 的段落迁进 profile 的 `cordis.patch.yml`
+  （形状从顶层 `llm-pi-ai:` 变成 loader patch 数组里的 `- id: llm-pi-ai` + `config: { providers: ... }`，
+  老文件随后写成 `settings.yaml.imported`），而插件只读 `~/.dsh/settings.yaml` 一个路径、解析器也只认顶层键
+  → 迁移后读到的是一张**空表**。现在扫全部候选位置（`profiles/*/cordis.patch.yml` 优先、老路径回落）并合并，
+  解析器两种形状都认。
+  **二是判定改成白名单制**：默认按**中转站**，只有 baseURL 主机名命中官方域名白名单才升为官方 ——
+  含"写了但解析不出主机名"和"干脆没写 baseURL"两种。旧实现对后者是"不表态"（连结果都不写进 kinds），
+  这正是面板里一片空白的原因。过滤规则不变：自动去查余额仍只收**写了 baseURL 且非官方**的（没地址查不了）。
+  **三是「官方但没开放余额接口」不再被当中转站**（维护者补充反馈）：provider 省略 baseURL 时，
+  宿主是拿 `@earendil-works/pi-ai` **内置目录**里的 baseUrl 去请求的 —— 所以判定素材应当是**域名**
+  （显式写的，或目录给的），而不是"没写 URL 就当中转站"。现在接入该目录做兜底：本机 `xiaomi` 虽没写 baseURL，
+  经目录解析到 `api.xiaomimimo.com`（官方）→ 判 official，不再因为"没写 URL"被错分成中转站 ——
+  OpenAI / Claude / Gemini / MiMo / 豆包 / 混元 这类"官方本来就没开余额接口"的都在此列。
+  目录读取做成 `computeProviderKinds(text, catalog)` 的**可注入参数**：CI 里没装 pi-ai 也能测判定逻辑
+  （否则同一份断言会随环境给出两种结果 —— 本轮就踩到了）。
+  实测维护者本机配置：`zhipu` / `xiaomi` → official，`jiyuan` / `jiyuanlvdong` / `new` / `mimov` → relay。
+  另：`dsh.client` 的 inject 去掉已废弃的 `@deepseek-ai/dsh-client-runtime`（该包停更于 0.1.1-rc.2，宿主已无此模块）。
+  回归钉子 `test-v146-fixes.mjs` 20 条（分档逻辑是从 `client.js` **抠出来实跑**的，不是正则匹配）。
+
 - **v1.4.5** — 消耗估算口径**三处修正** + 价格表按官方原文重核。
   ① **峰谷按「事件发生时刻」计价**：旧实现只在出数那一刻用 `Date.now()`，等于把整段历史消耗都按「打开面板那一刻」的时段算 ——
   谷时跑的 token 在峰时查看会被**翻倍**（DeepSeek 峰谷差恰好 2 倍，也是本插件的主力模型）。现在按每条事件自带的 `time` 分相累积，

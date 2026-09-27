@@ -182,7 +182,8 @@ a('H4b clampRefreshSec 下限 1 / 上限 60', (() => {
 // ==========================================================================
 {
   const gateCount = (src.match(/if \(!allowRequest\(req, res\)\) return/g) || []).length
-  a('H3 11 个路由全部过闸门', gateCount === 11, 'got ' + gateCount)
+  // v1.4.6: 11 → 12 —— 新增 /api-dashboard/alerts(告警通道状态), 同样带闸门
+  a('H3 12 个路由全部过闸门', gateCount === 12, 'got ' + gateCount)
   a('H3 用 connection.requestRejection（与 dsh-web-mobile 同一个闸门）', /requestRejection\(req\)/.test(src))
   // 只看代码行, 注释里提到这个坑不算（第一版断言就栽在这: 注释里写了这句, 断言直接假红）
   const codeOnly = src.split('\n').filter((l) => { const t = l.trim(); return !t.startsWith('*') && !t.startsWith('//') && !t.startsWith('/*') }).join('\n')

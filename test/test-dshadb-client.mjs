@@ -23,13 +23,29 @@ globalThis.Audio = class { constructor(){ this.volume=0 } play(){ return Promise
 globalThis.requestAnimationFrame = (fn) => { fn(0); return 1 }
 globalThis.cancelAnimationFrame = () => {}
 
+// v1.5.0-desktop-preview.5: 软键盘避让要用 visualViewport + :root 上的 CSS 变量。
+// 夹具给 window.visualViewport, document.documentElement.style 记下 setProperty/removeProperty,
+// rAF 上面已经做成同步执行 —— 于是 schedule() 一调就能立刻观察结果。
+const vvListeners = {}
+const fakeVV = {
+  height: 892, offsetTop: 0, scale: 1,
+  addEventListener(t, f){ (vvListeners[t] = vvListeners[t] || []).push(f) },
+  removeEventListener(t, f){ vvListeners[t] = (vvListeners[t] || []).filter((x) => x !== f) },
+}
+const rootStyleProps = {}
+doc.documentElement.style = {
+  setProperty(k, v){ rootStyleProps[k] = v },
+  removeProperty(k){ delete rootStyleProps[k] },
+}
+globalThis.window.visualViewport = fakeVV
+
 let captured = null
 globalThis.window.__ModuleLoader__ = { load({factory}){ captured = factory((name)=>{ if(name==='react') return react; if(name==='@deepseek-ai/dsh-client-ui-primitives') return {}; throw new Error('未知依赖 '+name) }) } }
 
 let src = readFileSync(new URL('../client/client.js', import.meta.url).pathname, 'utf8')
 const marker = '    exports.apply = apply;'
 if (!src.includes(marker)) throw new Error('找不到导出锚点')
-src = src.replace(marker, `    exports.__test = { formatMoney, formatSessionCost, getLevel, acquireWhaleWidget, releaseWhaleWidget, getWhaleRefs: () => whaleRefs, getWidget: () => whaleWidget };
+src = src.replace(marker, `    exports.__test = { formatMoney, formatSessionCost, getLevel, acquireWhaleWidget, releaseWhaleWidget, getWhaleRefs: () => whaleRefs, getWidget: () => whaleWidget, keyboardInset, installKeyboardInsetVar };
 ` + marker)
 new Function('window','document','navigator','localStorage',src)(globalThis.window, doc, nav, globalThis.localStorage)
 
@@ -92,6 +108,38 @@ assert('C13 纯海外会话 hasValue=true (主货币段为0)', F({ cost: 0, curr
 assert('C13 纯海外会话文案就是 $14.03', F({ cost: 0, currency: 'CNY', costByCurrency: { USD: 14.03 } }).text === '$14.03')
 assert('C13 全零 hasValue=false', F({ cost: 0, currency: 'CNY', costByCurrency: {} }).hasValue === false)
 assert('C13 单币种非零 hasValue=true', F({ cost: 3.4, currency: 'CNY', costByCurrency: { CNY: 3.4 } }).hasValue === true)
+
+// ==========================================================================
+// C15 软键盘避让 (v1.5.0-desktop-preview.5, 报告 §2.2)
+// 真机实测: 键盘 242px, 布局视口 787.2, 键盘后可视 545 —— 面板底部 26% 被盖住。
+// keyboardInset() 是纯函数, 这里把三个守卫(缩放 / 阈值 / 正常)都钉住;
+// installKeyboardInsetVar() 再用夹具的 visualViewport 验证"真的写进了 --dshadb-kb"。
+// ==========================================================================
+const KI = T.keyboardInset
+assert('C15 没有键盘(可视区==布局视口) → 0', KI({ innerHeight: 892, vvHeight: 892 }) === 0)
+assert('C15 真机数据 787.2 → 545 得 242', KI({ innerHeight: 787.2, vvHeight: 545, vvOffsetTop: 0, vvScale: 1 }) === 242)
+assert('C15 差值 <80px 当噪声(地址栏收缩), 不动布局', KI({ innerHeight: 892, vvHeight: 892 - 79 }) === 0)
+assert('C15 差值正好 80px 算键盘', KI({ innerHeight: 892, vvHeight: 892 - 80 }) === 80)
+assert('C15 双指缩放(scale≠1) → 0 (visualViewport 也会变小, 但那不是键盘)',
+  KI({ innerHeight: 892, vvHeight: 500, vvScale: 1.6 }) === 0)
+assert('C15 缩放来回抖动(scale 1.005) 仍按 1 处理', KI({ innerHeight: 892, vvHeight: 892 - 242, vvScale: 1.005 }) === 242)
+assert('C15 offsetTop 参与计算(可视区被顶上去了要减掉)',
+  KI({ innerHeight: 892, vvHeight: 892 - 242 - 30, vvOffsetTop: 30 }) === 242)
+assert('C15 输入非法/缺失 → 0, 不抛异常',
+  KI(undefined) === 0 && KI({}) === 0 && KI({ innerHeight: NaN, vvHeight: 100 }) === 0)
+assert('C15 键盘高度被夹在 [0, 布局视口] 之间(异常值不把面板顶到屏幕外)',
+  KI({ innerHeight: 500, vvHeight: -400 }) === 500)
+
+const dispose = T.installKeyboardInsetVar()
+assert('C15 初始无键盘时不留 --dshadb-kb', rootStyleProps['--dshadb-kb'] === undefined)
+fakeVV.height = 892 - 242
+;(vvListeners.resize || []).forEach((f) => f())
+assert('C15 键盘弹出后写入 --dshadb-kb=242px', rootStyleProps['--dshadb-kb'] === '242px')
+fakeVV.height = 892
+;(vvListeners.resize || []).forEach((f) => f())
+assert('C15 键盘收起后移除变量(回到 v1.4.2 行为)', rootStyleProps['--dshadb-kb'] === undefined)
+dispose()
+assert('C15 dispose 摘掉监听', (vvListeners.resize || []).length === 0 && (vvListeners.scroll || []).length === 0)
 
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`)
 // v1.3.2: 断言失败时以非 0 退出, 否则 CI(GitHub Actions)拦不住回归 —— 原来一律 exit 0
