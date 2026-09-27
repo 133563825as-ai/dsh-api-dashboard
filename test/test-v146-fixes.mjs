@@ -81,6 +81,40 @@ a('#2-3 告警状态端点同样过鉴权闸门', /path: '\/api-dashboard\/alert
 a('#2-3 只在跨档且非回到正常时告警(与旧行为一致)',
   /if \(level === prev \|\| level === 'ok'\) continue/.test(src))
 
+// ===== ③b 可见降级必须真的落到界面上 (v1.5.1) =====
+// 端点存在 ≠ 用户看得见。v1.5.0 只注册了 /api-dashboard/alerts, 客户端一次都没引用 ——
+// 于是一个"能查到通道状态"的接口, 在用户眼里等同于没有。这里钉住界面那一格。
+const A = new Function([grab('alertChannelState'), 'return { alertChannelState }'].join('\n'))()
+a('#2-3 UI: 还没拉到/拉取失败 → checking, 不误报「通知不可用」',
+  A.alertChannelState(null) === 'checking' && A.alertChannelState(undefined) === 'checking')
+a('#2-3 UI: 桥可用 → bridge', A.alertChannelState({ channel: 'app-bridge' }) === 'bridge')
+a('#2-3 UI: 桥不可用 → none', A.alertChannelState({ channel: 'none' }) === 'none')
+a('#2-3 UI: 服务端初始的 unknown → idle(尚未触发过告警, 不等于坏了)',
+  A.alertChannelState({ channel: 'unknown' }) === 'idle' && A.alertChannelState({}) === 'idle')
+a('#2-3 UI: 客户端真的去拉 /api-dashboard/alerts 了', /fetchT\("\/api-dashboard\/alerts"/.test(cli))
+a('#2-3 UI: 设置面板真的渲染了这一行', /t\("settings\.alertChannel"\)/.test(cli) && /ALERT_SUB_KEY\[alertState\]/.test(cli))
+a('#2-3 UI: 四档文案中英文齐全',
+  ['alertChannelChecking', 'alertChannelBridge', 'alertChannelNone', 'alertChannelIdle']
+    .every(k => (cli.match(new RegExp('"settings\\.' + k + '":', 'g')) || []).length === 2))
+a('#2-3 UI: 不可用时是红点、桥可用是绿点',
+  /none: " dshadb_bar_dot_err"/.test(cli) && /bridge: " dshadb_bar_dot_ok"/.test(cli))
+a('#2-3 UI: 拉取失败不写进 alertInfo(保持 null → checking)',
+  /if \(d && d\.ok\) setAlertInfo\(d\)/.test(cli))
+
+// v1.5.1: 光有 channel 字段还不够 —— 旧行为要**真发过一次告警**才知道通道有没有,
+// 在那之前恒为 'unknown', 面板只能说"待首次告警确认"。改成懒探测: 面板一问就有结论。
+const pStart = src.indexOf('async function probeAlertChannel')
+const pBody = pStart < 0 ? '' : src.slice(pStart, src.indexOf('\n}', pStart))
+a('#2-3 通道可主动探测, 用只读的 /app/version',
+  /const ALERT_BRIDGE_PROBE = 'http:\/\/127\.0\.0\.1:3090\/app\/version'/.test(src) && pBody.length > 0)
+a('#2-3 探测不拿 /app/notify 去试通知(那会在用户手机上真弹一条)', !/ALERT_BRIDGE_URL/.test(pBody))
+a('#2-3 探测不污染 sent/failed(那是告警统计, 探测不是告警)', pBody.length > 0 && !/alertStatus\.(sent|failed)/.test(pBody))
+a('#2-3 探测有超时兜底', /AbortSignal\.timeout\(\d+\)/.test(pBody))
+a('#2-3 /alerts 端点第一次被问到时懒探测', /await probeAlertChannel\(\)/.test(src))
+a('#2-3 已发过告警时探测不覆盖真实结果', /alertStatus\.channel !== 'unknown'/.test(src))
+a('#2-3 探测只做一次(失败不重试, 别拿面板开启时机做重试循环)',
+  /let alertChannelProbed = false/.test(src) && /if \(alertChannelProbed \|\|/.test(src))
+
 console.log('\n结果: ' + pass + ' 通过, ' + fail + ' 失败')
 // v1.3.2: 断言失败时以非 0 退出, 否则 CI 拦不住回归
 if (fail > 0) process.exitCode = 1

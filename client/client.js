@@ -660,6 +660,7 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
       "all.ok": "{n} 正常", "all.attention": "{n} 需关注", "domestic": "国内平台", "abroad": "海外平台", "local": "本地", "relay": "中转站", "custom": "自定义模型",
       "selectedTag": "当前", "add.relay": "添加中转站", "add.custom": "添加自定义模型", "settings.title": "哦鲸鲸设置",
       "detail.total": "当前余额", "detail.topup": "总充值", "detail.used": "总使用", "detail.note": "类型",
+      "detail.recharge": "去充值 ↗",
       "detail.sessionCost": "本会话消耗", "detail.noBalance": "该平台未开放余额查询",
       "settings.safe": "安全阈值(绿)", "settings.warn": "预警阈值(黄)", "settings.currency": "计价货币",
       "settings.overseasCurrency": "海外模型计价", "settings.overseasFollow": "跟随主货币", "settings.overseasHint": "海外厂商官方价本就是美元, 选美元可免去 ×7 折算误差",
@@ -691,6 +692,12 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
       "whale.offTip": "先打开上面的「收养大肥鱼」，才能调下面这些。",
       "brands": "模型品牌",
       "settings.showBrands": "显示模型品牌", "settings.showBrandsHint": "在看板中显示 OpenAI / Claude / Gemini / Qwen / 豆包 / 混元 / MiMo 等无余额接口的品牌",
+      // v1.5.1: 告警通道可见降级 (issue #2) —— 通知发不出去时必须说出来
+      "settings.alertChannel": "余额告警通知",
+      "settings.alertChannelChecking": "正在检查通知通道…",
+      "settings.alertChannelBridge": "App 桥可用，余额低于阈值时会弹通知",
+      "settings.alertChannelNone": "通知发不出去 —— 当前平台没有可用的通知通道（手机版 DSHA 才提供），余额只会在看板上变红",
+      "settings.alertChannelIdle": "尚未触发过告警，通道状态将在第一次告警时确认",
       "settings.official": "官方直连 provider",
       "settings.officialHint": "逗号或换行分隔。写在这里的 provider 名一律按官方直连处理，状态条显示官方余额；留空则自动判定 —— 拿 baseURL 域名比对官方白名单，命中才算官方，其余一律按中转站（含没写 baseURL 的）",
       "settings.officialAuto": "自动判定结果",
@@ -723,6 +730,7 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
       "all.ok": "{n} OK", "all.attention": "{n} need attention", "domestic": "Domestic", "abroad": "Global", "local": "Local", "relay": "Relay", "custom": "Custom",
       "selectedTag": "Now", "add.relay": "Add Relay", "add.custom": "Add Custom", "settings.title": "哦鲸鲸 Settings",
       "detail.total": "Balance", "detail.topup": "Top-up", "detail.used": "Used", "detail.note": "Type",
+      "detail.recharge": "Recharge ↗",
       "detail.sessionCost": "Session cost", "detail.noBalance": "No balance API",
       "settings.safe": "Safe (green)", "settings.warn": "Warn (yellow)", "settings.currency": "Currency",
       "settings.overseasCurrency": "Overseas models", "settings.overseasFollow": "Follow main", "settings.overseasHint": "Overseas vendors price in USD; picking USD avoids the x7 conversion error",
@@ -754,6 +762,11 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
       "whale.offTip": "Turn on \"Adopt Big Whale\" above to edit these.",
       "brands": "Model Brands",
       "settings.showBrands": "Show model brands", "settings.showBrandsHint": "Show OpenAI / Claude / Gemini / Qwen / Doubao / Hunyuan / MiMo etc. (no balance API) in dashboard",
+      "settings.alertChannel": "Balance alerts",
+      "settings.alertChannelChecking": "Checking notification channel…",
+      "settings.alertChannelBridge": "App bridge available — an alert pops up when balance drops below the threshold",
+      "settings.alertChannelNone": "Alerts cannot be delivered — no notification channel on this platform (only the mobile DSHA provides one); balances just turn red on the dashboard",
+      "settings.alertChannelIdle": "No alert has fired yet — the channel is confirmed on the first alert",
       "settings.official": "Official-direct providers",
       "settings.officialHint": "Comma or newline separated. Providers listed here always count as official direct connections and show their official balance; leave empty to auto-detect against the official host allowlist — only an allowlist hit counts as official, everything else is treated as a relay (including providers with no baseURL)",
       "settings.officialAuto": "Auto-detected",
@@ -813,6 +826,32 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
       try { return fetch(url, { ...(opts || {}), signal: AbortSignal.timeout(timeout) }); }
       catch (e) { return fetch(url, opts); }
     };
+    async function openConsole(fetchT, platform, url, win) {
+      const w = win || (typeof window !== "undefined" ? window : null);
+      /**
+       * v1.6.0: 打开平台的开放平台/充值页。
+       *
+       * 为什么不能直接 window.open：手机 DSHA 的 GUI 跑在 webview 里，
+       * `window.open(..., '_blank')` 开不出系统浏览器（被 webview 吃掉）。
+       * 所以先请服务端用 App 桥 `/app/open` 去开 —— 桥不在（桌面/浏览器）时才自己开。
+       *
+       * ⚠️ 这里**不接受任意 URL**：platform 键交给服务端查表，我们只负责"怎么开"。
+       * 兜底的 url 参数也是服务端下发的白名单地址，仅当 /open 端点整个不可用（老服务端）时才用。
+       * @returns {Promise<'app-bridge'|'browser'|'browser-fallback'|'none'>}
+       */
+      try {
+        const r = await fetchT("/api-dashboard/open", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ platform: platform }),
+        });
+        const d = await r.json();
+        if (d && d.ok && d.via === "app-bridge") return "app-bridge";
+        if (d && d.url) { if (w) w.open(d.url, "_blank", "noopener,noreferrer"); return "browser"; }
+      } catch { /* 老服务端没有这个端点 / 请求失败 → 下面兜底 */ }
+      if (url) { if (w) w.open(url, "_blank", "noopener,noreferrer"); return "browser-fallback"; }
+      return "none";
+    }
     async function refresh(force = false, peek = false) {
       if (inflight !== null && !force && !peek) return inflight;
       // C-4c (v1.4.1): 强刷节流 2s(AGENTS 里写了「强刷 2 秒节流」, 但代码里一直没有);
@@ -1141,6 +1180,21 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
         if (typeof v === "number" && v > 0) return t("status.insufficient");
       }
       return statusLabel(level, t);
+    }
+    /**
+     * v1.5.1: 告警通道状态判定 —— issue #2 点名要的「可见降级」(issue #2 问题 3)。
+     * 服务端的 channel 只有 unknown / app-bridge / none; 这里额外把「还没拉到」
+     * (info === null, 请求失败或面板刚开) 单列成 checking ——
+     * **拉取失败绝不能显示成「通知不可用」**, 那是把网络抖动说成功能坏了。
+     * 纯函数, 模块级: test-v146-fixes.mjs 会把它抠出来实跑。
+     * @param {null|{channel?: string}} info /api-dashboard/alerts 的响应体
+     * @returns {'checking'|'bridge'|'none'|'idle'}
+     */
+    function alertChannelState(info) {
+      if (info === null || info === undefined) return "checking";
+      if (info.channel === "app-bridge") return "bridge";
+      if (info.channel === "none") return "none";
+      return "idle";
     }
     //#endregion
 
@@ -1609,6 +1663,13 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
               // staleNote（暂存数据提示）
               b.staleNote ? react.createElement("div", { className: "dshadb_detail_info", key: "stale" }, b.staleNote) : null,
               b.status !== "ok" ? react.createElement("div", { className: "dshadb_detail_info", key: "err" }, b.error || "—") : null,
+              // v1.6.0: 去充值 —— 打开该平台的开放平台/充值页。
+              // 手机 DSHA 走 App 桥调系统浏览器; 桌面/浏览器回退 window.open。地址是服务端查表下发的。
+              b.consoleUrl ? react.createElement("button", {
+                key: "recharge", type: "button", className: "dshadb_add_btn",
+                style: { width: "100%" },
+                onClick: (e) => { e.stopPropagation(); openConsole(fetchT, b.platform, b.consoleUrl); },
+              }, t("detail.recharge")) : null,
               peakCard,
               priceCard,
             ]),
@@ -1653,6 +1714,13 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
       // v1.4.0: 来自 DSH 的中转站列表默认收起 (跟首页分组同一套折叠手法)。
       // 维护者原话「应该折叠的是来自 DSH 中转站下面的那一罗列」—— 「自动判定结果」保持平铺不折。
       const [showDsh, setShowDsh] = react.useState(false);
+      /**
+       * v1.5.1: 告警通道状态 —— issue #2 点名要的「可见降级」。
+       * 通知发不出去（拿不到 3090 桥 token / 桥拒绝 / 当前平台没有桥）时，
+       * 用户必须能在面板上看见，而不是继续以为「只是还没到阈值」。
+       * null = 还没拉到（服务端 /api-dashboard/alerts 一次都没查过）。
+       */
+      const [alertInfo, setAlertInfo] = react.useState(null);
       // v1.1.0: 大肥鱼细项 (独立页签, 走 /api-dashboard/whale/settings, 与看板主配置分开)
       const [wf, setWf] = react.useState({
         scale: 1, peekRatio: 0.5, soundOn: true, soundSet: "duck",
@@ -1751,9 +1819,32 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
             snapOn: typeof s.snapOn === "boolean" ? s.snapOn : prev.snapOn,
           }));
         }).catch(() => {});
+        // v1.5.1: 告警通道状态（与上面两个并行拉，失败就维持「尚未检测」）
+        fetchT("/api-dashboard/alerts", { cache: "no-store" }).then(r => r.json()).then(d => {
+          if (cancelled) return;
+          if (d && d.ok) setAlertInfo(d);
+        }).catch(() => {});
         return () => { cancelled = true; };
       }, [isOpen]);
       if (!isOpen) return null;
+      /**
+       * v1.5.1: 告警通道的四种表态 (issue #2 的「可见降级」)。
+       * 判定本身在模块级纯函数 alertChannelState() 里, 这里只负责选文案与圆点颜色。
+       */
+      const alertState = alertChannelState(alertInfo);
+      const ALERT_SUB_KEY = {
+        checking: "settings.alertChannelChecking",
+        bridge: "settings.alertChannelBridge",
+        none: "settings.alertChannelNone",
+        idle: "settings.alertChannelIdle",
+      };
+      const ALERT_DOT = {
+        checking: " dshadb_bar_dot_ok",   // 未检测 ≠ 不可用, 不吓人也不报错
+        bridge: " dshadb_bar_dot_ok",
+        none: " dshadb_bar_dot_err",
+        idle: " dshadb_bar_dot_warn",
+      };
+      const alertChannelDot = () => "dshadb_bar_dot" + (ALERT_DOT[alertState] ?? "");
       const save = async () => {
         // C-1 (v1.4.1): 原来这里夹的是 5 —— 输入框允许 1 秒、服务端 clampRefreshSec 也吃 1 秒,
         // 只有 save() 把它悄悄改回 5 秒(用户设 1 秒保存后变 5 秒)。四处下限现在一致。
@@ -1872,6 +1963,15 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
             react.createElement("input", { className: "dshadb_field", type: "number", min: 1, max: 60, step: 1, value: refreshSec, onChange: (e) => setRefreshSec(Math.min(Math.max(Number(e.target.value) || 1, 1), 60)), key: "rf_i" }),
             react.createElement("span", { style: { fontSize: "10px", color: "var(--dsw-alias-label-tertiary)" }, key: "rf_h" }, t("settings.refreshHint")),
           ]),
+        ]),
+        // v1.5.1: 告警通道状态 —— 可见降级 (issue #2 问题 3)。
+        // 通路不可用时把话说在面板上，别让用户继续等一条永远不会来的通知。
+        react.createElement("div", { className: "dshadb_settings_row", key: "alertch", style: { margin: "2px 0 10px" } }, [
+          react.createElement("div", { className: "dshadb_settings_row_main", key: "am" }, [
+            react.createElement("span", { className: "dshadb_settings_row_title", key: "at" }, t("settings.alertChannel")),
+            react.createElement("span", { className: "dshadb_settings_row_sub", key: "as" }, t(ALERT_SUB_KEY[alertState])),
+          ]),
+          react.createElement("span", { className: alertChannelDot(), key: "ad" }),
         ]),
         // 无余额模型品牌开关
         react.createElement("div", { className: "dshadb_settings_row", key: "brands", style: { margin: "2px 0 10px" } }, [

@@ -183,12 +183,28 @@ a('H4b clampRefreshSec 下限 1 / 上限 60', (() => {
 {
   const gateCount = (src.match(/if \(!allowRequest\(req, res\)\) return/g) || []).length
   // v1.4.6: 11 → 12 —— 新增 /api-dashboard/alerts(告警通道状态), 同样带闸门
-  a('H3 12 个路由全部过闸门', gateCount === 12, 'got ' + gateCount)
+  // v1.6.0: 12 → 13 —— 新增 /api-dashboard/open(打开开放平台/充值页), 同样带闸门
+  a('H3 13 个路由全部过闸门', gateCount === 13, 'got ' + gateCount)
   a('H3 用 connection.requestRejection（与 dsh-web-mobile 同一个闸门）', /requestRejection\(req\)/.test(src))
   // 只看代码行, 注释里提到这个坑不算（第一版断言就栽在这: 注释里写了这句, 断言直接假红）
   const codeOnly = src.split('\n').filter((l) => { const t = l.trim(); return !t.startsWith('*') && !t.startsWith('//') && !t.startsWith('/*') }).join('\n')
   a('H3 不再用取不到的 ctx.get 取 connection 服务', !/ctx\.get\('connection'\)/.test(codeOnly))
   a('H3 通过嵌套 inject 拿服务', /ctx\.inject\(\['connection'\]/.test(src))
+
+  // v1.6.0: /api-dashboard/open（「去充值」）—— 安全属性: 只认平台键, 不认任意 URL。
+  // 一旦接受客户端传 url, 这个端点就是现成的开放重定向跳板。
+  const openStart = src.indexOf("path: '/api-dashboard/open'")
+  const openBlock = openStart < 0 ? '' : src.slice(openStart, src.indexOf("dsh-api-dashboard: open route", openStart))
+  a('H3 open 路由存在且过闸门', openBlock.length > 0 && /if \(!allowRequest\(req, res\)\) return/.test(openBlock))
+  a('H3 open 路由只按平台键查表(不接受客户端传 URL)',
+    /PLATFORM_PRESETS\.find\(p => p\.id === id\)/.test(openBlock) && !/JSON\.parse\(body \|\| '\{\}'\)\.url/.test(openBlock))
+  a('H3 open 地址只来自预设表的 consoleUrl(单一出处)',
+    /const url = preset\.consoleUrl/.test(openBlock))
+  a('H3 open 只收 POST(不做成 GET 直链, 免得被 <img>/预取打中)', /req\.method !== 'POST'/.test(openBlock))
+  a('H3 open 未知平台直接 400, 不带着任意串去查表',
+    /if \(!preset\) return sendJson\(res, 400, \{ ok: false, error: 'unknown-platform' \}\)/.test(openBlock))
+  a('H3 open 桥调不通时回退给客户端的地址仍是服务端查表得来',
+    /via: 'browser', url/.test(openBlock))
 }
 
 // ==========================================================================

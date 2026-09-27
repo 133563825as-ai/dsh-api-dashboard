@@ -1501,37 +1501,58 @@ const cleanUrl = (value) => {
  */
 const PLATFORM_PRESETS = [
   // ===== 国内平台（有公开余额/配额查询接口）=====
+  // ⚠️ consoleUrl = 「去充值」跳的地址。证据等级写在行尾注释里, 三种, **不要混着说**:
+  //    已核实 = 官方 FAQ/帮助页正文直链该 URL 且实测可达
+  //    未核实 = 无官方直链, 但实测该路径被系统接受(302 到登录页并把路径留在 redirect 里)
+  //    仅首页 = 拿不到充值路径, 只填一级域名/控制台首页; 再差就留空(宁缺毋滥, 别联想路径)
   { id: 'deepseek', label: 'DeepSeek', icon: 'deepseek', color: '#4D6BFE', category: '国内',
-    baseUrl: 'https://api.deepseek.com', queryType: 'deepseek', envKeys: ['DEEPSEEK_API_KEY'] },
+    baseUrl: 'https://api.deepseek.com', queryType: 'deepseek', envKeys: ['DEEPSEEK_API_KEY'],
+    consoleUrl: 'https://platform.deepseek.com/top_up' },                    // 已核实
   { id: 'zhipu', label: '智谱 GLM', icon: 'zhipu', color: '#3859FF', category: '国内',
     // v0.5.5: 实测余额监控接口在 open.bigmodel.cn (api.z.ai 同路径 401); 补 ZAI_CODING_CN 等 key 别名
-    baseUrl: 'https://open.bigmodel.cn', queryType: 'glm', envKeys: ['ZHIPU_API_KEY', 'GLM_API_KEY', 'BIGMODEL_API_KEY', 'ZAI_CODING_CN_API_KEY', 'ZAI_API_KEY'] },
+    baseUrl: 'https://open.bigmodel.cn', queryType: 'glm', envKeys: ['ZHIPU_API_KEY', 'GLM_API_KEY', 'BIGMODEL_API_KEY', 'ZAI_CODING_CN_API_KEY', 'ZAI_API_KEY'],
+    consoleUrl: 'https://open.bigmodel.cn/finance/overview' },               // 已核实(官方 FAQ「财务总览」直链)
   { id: 'moonshot', label: 'Kimi Moonshot', icon: 'moonshot', color: '#000000', category: '国内',
-    baseUrl: 'https://api.moonshot.cn', queryType: 'kimi', envKeys: ['MOONSHOT_API_KEY', 'KIMI_API_KEY'] },
+    baseUrl: 'https://api.moonshot.cn', queryType: 'kimi', envKeys: ['MOONSHOT_API_KEY', 'KIMI_API_KEY'],
+    consoleUrl: 'https://platform.kimi.com/console/pay' },                   // 未核实(/console/recharge 是 404, 这个 200)
   { id: 'stepfun', label: '阶跃星辰 StepFun', icon: 'mistral', color: '#FA520F', category: '国内',
-    baseUrl: 'https://api.stepfun.com', queryType: 'stepfun', envKeys: ['STEPFUN_API_KEY'] },
+    baseUrl: 'https://api.stepfun.com', queryType: 'stepfun', envKeys: ['STEPFUN_API_KEY'],
+    consoleUrl: 'https://platform.stepfun.com/' },                           // 仅首页(/finance /account 全 404)
   { id: 'siliconflow', label: '硅基流动', icon: 'siliconflow', color: '#6E29F6', category: '国内',
-    baseUrl: 'https://api.siliconflow.cn', queryType: 'siliconflow', envKeys: ['SILICONFLOW_API_KEY', 'SILICON_API_KEY'] },
+    baseUrl: 'https://api.siliconflow.cn', queryType: 'siliconflow', envKeys: ['SILICONFLOW_API_KEY', 'SILICON_API_KEY'],
+    consoleUrl: 'https://cloud.siliconflow.cn/account/charge' },             // 未核实(302 到登录页且保留该路径)
   { id: 'minimax', label: 'MiniMax', icon: 'minimax', color: '#E73562', category: '国内',
-    baseUrl: 'https://api.minimaxi.com', queryType: 'minimax', envKeys: ['MINIMAX_API_KEY'] },
+    baseUrl: 'https://api.minimaxi.com', queryType: 'minimax', envKeys: ['MINIMAX_API_KEY'],
+    consoleUrl: 'https://platform.minimaxi.com/user-center/payment/balance' }, // 已核实(官方账号文档同路径)
 
   // ===== 海外平台（有公开余额/配额查询接口）=====
   { id: 'openrouter', label: 'OpenRouter', icon: 'openrouter', color: '#6469FF', category: '海外',
-    baseUrl: 'https://openrouter.ai', queryType: 'openrouter', envKeys: ['OPENROUTER_API_KEY'] },
+    baseUrl: 'https://openrouter.ai', queryType: 'openrouter', envKeys: ['OPENROUTER_API_KEY'],
+    consoleUrl: 'https://openrouter.ai/settings/credits' },                  // 已核实(官方 FAQ 直链)
   { id: 'novita', label: 'Novita AI', icon: 'together', color: '#FA520F', category: '海外',
-    baseUrl: 'https://api.novita.ai', queryType: 'novita', envKeys: ['NOVITA_API_KEY'] },
+    baseUrl: 'https://api.novita.ai', queryType: 'novita', envKeys: ['NOVITA_API_KEY'],
+    consoleUrl: 'https://novita.ai/billing/payment-methods' },               // 已核实(官方 Payment Methods 文档直链)
   { id: 'xai', label: 'xAI Grok', icon: 'xai', color: '#000000', category: '海外',
-    baseUrl: 'https://api.x.ai', queryType: 'openai', envKeys: ['XAI_API_KEY'] },
+    baseUrl: 'https://api.x.ai', queryType: 'openai', envKeys: ['XAI_API_KEY'],
+    consoleUrl: 'https://console.x.ai/' },                                   // 仅首页(本机 x.ai 只解析 IPv6, 未实测)
 
   // ===== 著名模型品牌 (无公开余额接口, 仅显示模型 + 按价格表估算消耗) =====
-  { id: 'openai', label: 'OpenAI', icon: 'openai', color: '#10A37F', category: '海外', noBalance: true },
-  { id: 'claude', label: 'Anthropic Claude', icon: 'claude', color: '#D97757', category: '海外', noBalance: true },
-  { id: 'gemini', label: 'Google Gemini', icon: 'gemini', color: '#4285F4', category: '海外', noBalance: true },
-  { id: 'qwen', label: '通义千问 Qwen', icon: 'qwen', color: '#623AE7', category: '国内', noBalance: true },
-  { id: 'mimo', label: '小米 MiMo', icon: 'mimo', color: '#FF6900', category: '国内', noBalance: true },
+  // 这些平台查不到余额, 但更要紧的是让用户点得到充值页 —— 余额红着脸却找不到入口最难受。
+  { id: 'openai', label: 'OpenAI', icon: 'openai', color: '#10A37F', category: '海外', noBalance: true,
+    consoleUrl: 'https://platform.openai.com/settings/organization/billing' }, // 未核实(官方页 403, 路径来自同类插件)
+  { id: 'claude', label: 'Anthropic Claude', icon: 'claude', color: '#D97757', category: '海外', noBalance: true,
+    consoleUrl: 'https://platform.claude.com/settings/billing' },              // 已核实(support.claude.com 帮助文直链)
+  { id: 'gemini', label: 'Google Gemini', icon: 'gemini', color: '#4285F4', category: '海外', noBalance: true,
+    consoleUrl: 'https://aistudio.google.com/' },                              // 仅首页(本机不可达, 未实测)
+  { id: 'qwen', label: '通义千问 Qwen', icon: 'qwen', color: '#623AE7', category: '国内', noBalance: true,
+    consoleUrl: 'https://billing-cost.console.aliyun.com/fortune/fund-management/recharge' }, // 已核实(阿里云官方帮助文直链)
+  { id: 'mimo', label: '小米 MiMo', icon: 'mimo', color: '#FF6900', category: '国内', noBalance: true,
+    consoleUrl: 'https://platform.xiaomimimo.com/#/console/recharge' },        // 已核实(官方 recharge 公告页)
   // v1.2.1: 豆包/混元入列模型品牌分组 (价格表 v1.2.0 已覆盖, 此前只算价不显示)
-  { id: 'doubao', label: '豆包 Seed', icon: 'doubao', color: '#3C8CFF', category: '国内', noBalance: true },
-  { id: 'hunyuan', label: '腾讯混元', icon: 'hunyuan', color: '#0052D9', category: '国内', noBalance: true },
+  { id: 'doubao', label: '豆包 Seed', icon: 'doubao', color: '#3C8CFF', category: '国内', noBalance: true,
+    consoleUrl: 'https://console.volcengine.com/finance/recharge/' },          // 未核实(302 到登录页且保留该路径)
+  { id: 'hunyuan', label: '腾讯混元', icon: 'hunyuan', color: '#0052D9', category: '国内', noBalance: true,
+    consoleUrl: 'https://console.cloud.tencent.com/account/recharge' },        // 未核实(302 到登录页且保留该路径)
 ]
 
 // ============================================================
@@ -1619,7 +1640,47 @@ let lastAlertState = {}
 // token 读 $DSH_HOME/.bridge_token。拿不到通道时不再只"静默": alertStatus.channel 记 'none',
 // 由 /api-dashboard/alerts 暴露给设置面板做可见降级 (issue #2 点名要求这一点)。
 const ALERT_BRIDGE_URL = 'http://127.0.0.1:3090/app/notify'
+// v1.5.1: 探测通道只用**只读**的 /app/version —— 不拿 /app/notify 去试,
+// 那会在用户手机上真弹一条通知来"测通知", 很讨嫌。
+const ALERT_BRIDGE_PROBE = 'http://127.0.0.1:3090/app/version'
 const alertStatus = { channel: 'unknown', checkedAt: 0, last: null, sent: 0, failed: 0 }
+// 探测只做一次(通道在进程生命周期内不会变), 失败也不重试 —— 别拿用户的面板开启时机做重试循环
+let alertChannelProbed = false
+
+/**
+ * v1.5.1: 主动探测一次通知通道 (issue #2 的"可见降级"补完)。
+ *
+ * 旧行为: channel 只在**真的发过一次告警**之后才有结论, 在那之前恒为 'unknown' ——
+ * 设置面板只能显示"待首次告警确认", 等于用户最需要知道的时候偏偏查不到。
+ * 现在懒探测(第一次被 /api-dashboard/alerts 问到时才跑):
+ * 读 .bridge_token + GET /app/version, 通 → 'app-bridge', 不通/没 token → 'none'。
+ *
+ * ⚠️ 探测**不碰 sent / failed 计数** —— 那两个是"告警发送"的统计, 探测不是告警。
+ * @returns {Promise<string>} 探测后的 channel
+ */
+async function probeAlertChannel() {
+  // 已经发过告警 → channel 早有定论, 别用探测覆盖真实结果
+  if (alertChannelProbed || alertStatus.channel !== 'unknown') {
+    alertChannelProbed = true
+    return alertStatus.channel
+  }
+  alertChannelProbed = true
+  try {
+    const fsp = await import('node:fs/promises')
+    const home = process.env.DSH_HOME || join(homedir(), '.dsh')
+    let token = ''
+    try { token = (await fsp.readFile(join(home, '.bridge_token'), 'utf-8')).trim() } catch { /* 无 token */ }
+    if (!token) { alertStatus.channel = 'none'; alertStatus.checkedAt = Date.now(); return alertStatus.channel }
+    const resp = await fetch(ALERT_BRIDGE_PROBE + '?token=' + encodeURIComponent(token),
+      { signal: AbortSignal.timeout(2000) })
+    await resp.text()
+    alertStatus.channel = resp.ok ? 'app-bridge' : 'none'
+  } catch {
+    alertStatus.channel = 'none'
+  }
+  alertStatus.checkedAt = Date.now()
+  return alertStatus.channel
+}
 
 /** 通过 3090 桥发一条 App 通知; 只记录结果, 不抛。 */
 async function notifyViaAppBridge(title, text) {
@@ -2786,6 +2847,14 @@ export function apply(ctx, config) {
         }
         return cur
       })
+      // v1.6.0: 给每个平台挂上「去充值」地址, 客户端卡片直接读 —— 省掉再拉一次 /platforms。
+      // 地址**只**来自服务端预设表; 自定义中转站没有"开放平台"可言, 查不到就不挂字段,
+      // 卡片上自然不出现按钮 (宁缺毋滥, 不给一个点了会 404 的入口)。
+      const consoleUrlOf = new Map(PLATFORM_PRESETS.filter(p => p.consoleUrl).map(p => [p.id, p.consoleUrl]))
+      for (const b of balances) {
+        const u = consoleUrlOf.get(b.platform)
+        if (u) b.consoleUrl = u
+      }
       cache = {
         balances, fetchedAt: Date.now(), error: null,
         config: {
@@ -2952,6 +3021,8 @@ export function apply(ctx, config) {
         if (req.method !== 'GET') { res.writeHead(405, { Allow: 'GET' }); res.end(); return }
         const presets = PLATFORM_PRESETS.filter(p => runtimeConfig.presets.includes(p.id)).map(p => ({
           id: p.id, name: p.label, icon: p.icon, color: p.color, category: p.category, queryType: p.queryType,
+          // v1.6.0: 开放平台/充值入口 (空串 = 拿不到可靠地址, 客户端据此不渲染按钮)
+          consoleUrl: p.consoleUrl || '',
         }))
         sendJson(res, 200, { ok: true, presets })
       },
@@ -3285,6 +3356,9 @@ export function apply(ctx, config) {
       async handler(req, res) {
         if (!allowRequest(req, res)) return
         if (req.method !== 'GET') { res.writeHead(405, { Allow: 'GET' }); res.end(); return }
+        // v1.5.1: 第一次被问到时懒探测一次通道 (只读 /app/version, 不弹通知)。
+        // 之后 alertChannelProbed 置位, 不再产生任何额外请求。
+        await probeAlertChannel()
         sendJson(res, 200, {
           ok: true,
           channel: alertStatus.channel,   // 'unknown' | 'app-bridge' | 'none'
@@ -3297,6 +3371,46 @@ export function apply(ctx, config) {
         })
       },
     }), 'dsh-api-dashboard: alerts route')
+
+    /**
+     * v1.6.0: 打开某平台的开放平台 / 充值页 (「去充值」按钮)。
+     *
+     * 🔴 安全要点: **只认平台键, 不认任意 URL**。客户端传的 url 一律忽略,
+     * 地址由服务端从 PLATFORM_PRESETS 查表 —— 否则这个端点就是现成的开放重定向跳板
+     * (任何人都能拿它当「从你机器上打开任意链接」的接口, 顺手配合 file:// 之类还能再进一步)。
+     *
+     * 打开方式两档:
+     *  - 手机 DSHA: 走 App 桥 /app/open (webview 里 window.open 开不出外部浏览器)
+     *  - 桌面/浏览器: 桥调不通 → 回 { via: 'browser' } 并带上白名单地址, 由客户端 window.open
+     */
+    webCtx.effect(() => webCtx.webServer.register({
+      kind: 'exact', path: '/api-dashboard/open',
+      async handler(req, res) {
+        if (!allowRequest(req, res)) return
+        if (req.method !== 'POST') { res.writeHead(405, { Allow: 'POST' }); res.end(); return }
+        let id = ''
+        try {
+          const body = await readBody(req)
+          id = String(JSON.parse(body || '{}').platform || '').trim()
+        } catch { /* 坏 body 走下面统一的 400 */ }
+        const preset = PLATFORM_PRESETS.find(p => p.id === id)
+        if (!preset) return sendJson(res, 400, { ok: false, error: 'unknown-platform' })
+        const url = preset.consoleUrl
+        if (!url) return sendJson(res, 200, { ok: false, via: 'none', error: 'no-console-url', platform: preset.id })
+        try {
+          const fsp = await import('node:fs/promises')
+          const home = process.env.DSH_HOME || join(homedir(), '.dsh')
+          const token = (await fsp.readFile(join(home, '.bridge_token'), 'utf-8')).trim()
+          const resp = await fetch(
+            'http://127.0.0.1:3090/app/open?url=' + encodeURIComponent(url) + '&token=' + encodeURIComponent(token),
+            { signal: AbortSignal.timeout(3000) })
+          await resp.text()
+          if (resp.ok) return sendJson(res, 200, { ok: true, via: 'app-bridge', url, platform: preset.id })
+        } catch { /* 没桥(桌面/浏览器) → 回退给客户端开 */ }
+        // 回退: 地址仍是服务端查表得来的, 客户端只负责 window.open
+        sendJson(res, 200, { ok: false, via: 'browser', url, platform: preset.id })
+      },
+    }), 'dsh-api-dashboard: open route')
   })
 
   // 会话消耗投影
