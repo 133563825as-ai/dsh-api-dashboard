@@ -1119,6 +1119,19 @@ export const MODEL_PRICES = {
   //    (OpenAI / Anthropic 的价格藏在页面内嵌转义 JSON 里; Gemini 走 ai.google.dev 定价页的 Standard 档表),
   //    并**整段补录 xAI Grok** —— 此前表内没有任何 grok 键, 全部落 defaultPrices。
   //    下列海外条目现为官方现价; 有账单单据时仍以单据为准。
+  // ✅ 2026-09-27 复核: **Gemini / xAI / 智谱三家已全部用官方原文逐条比对**，现役主力**逐项一致**。
+  //    取证技巧(下次直接用): docs.bigmodel.cn 与 docs.x.ai 都支持在 URL 后加 **`.md`** 直接拿 markdown 正文
+  //    (`/cn/guide/start/pricing.md`、`/developers/pricing.md`)，SPA 抓不到正文的问题由此解决；
+  //    Gemini 走 devsite 生产后端 `googledevai-dot-devsite-v2-prod-3p.appspot.com`（ai.google.dev 直连会 302 到登录）。
+  //    ⚠️ 三条仍是记录在案的差异/取舍，**改之前先想清楚**：
+  //      ① `glm-4-flash`：官方 GLM-4-Flash-250414 是**免费**，本表留 ¥0.1/¥0.1 是维护者有意取的「宁高不低」
+  //         (防中转站仍计费)。代价是官方直连用户会被高估。
+  //      ② `gemini-omni-flash`：官方 Omni 系列**不给 context caching 价**，本表 cacheHit 填了与输入等值的 1.5
+  //         (表达「无缓存折扣」)。语义保守，但若官方实际有折扣就是高估。
+  //      ③ `gemini-3.1-pro`：官方页只列 `gemini-3.1-pro-preview`，本表用短名作键 —— 靠 SAFE_SUFFIX_RE
+  //         前缀兜底能覆盖 `-preview`，价格一致，故未改名。
+  //    已从官方定价页消失、仅作旧配置估算的: Gemini 2.0 / 1.5 全系、xAI `grok-code-fast-1` / `grok-code-fast`
+  //    (2026-05-15 退役, 现重定向到 grok-4.3 或 grok-build-0.1)。
   // OpenAI GPT-5.6 系列 (radar 报 sol 输出 $5 / terra $2.5 / luna $0.25, 均为输入×1.25 异常模式, 未采纳)
   // —— 2026-09-22 官方 API 定价页 (openai.com/api/pricing 的内嵌 JSON) 逐条核对 ——
   //    注: 该页 HTML 里的价格藏在 <script> 的双层转义 JSON 中, 不在 <table> 里; 本容器内 chromium 无网络渲染不了,
