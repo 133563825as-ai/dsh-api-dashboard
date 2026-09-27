@@ -424,6 +424,18 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
 
 /* ===== Footer ===== */
 .dshadb_footer{text-align:center;font-size:10px;color:#9ca0aa;padding:12px 14px 8px}
+/* ===== v1.6.3 今日总结 ===== */
+.dshadb_today{margin:0 0 10px;padding:12px 14px;border-radius:16px;background:#ffffff;border:1px solid #e7e8ec;box-shadow:0 6px 20px rgba(0,0,0,0.03);animation:dshadb-fadein .25s ease-out}
+.dshadb_today_head{display:flex;align-items:baseline;gap:8px}
+.dshadb_today_title{font-size:12px;font-weight:750;color:#17181c}
+.dshadb_today_money{margin-left:auto;font-size:15px;font-weight:850;font-variant-numeric:tabular-nums;color:#17181c;letter-spacing:-0.2px}
+.dshadb_today_tokens{font-size:10.5px;font-weight:600;color:#9ca0aa;margin-top:3px}
+.dshadb_today_bar{display:flex;height:6px;border-radius:999px;overflow:hidden;margin-top:9px;background:#eef0f4}
+.dshadb_today_seg{display:block;height:100%;transition:width .3s ease}
+.dshadb_today_legend{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:7px}
+.dshadb_today_item{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:600;color:#777b84;max-width:100%}
+.dshadb_today_dot{width:6px;height:6px;border-radius:50%;flex:none}
+.dshadb_today_item b{margin-left:2px;font-weight:800;color:#17181c;font-variant-numeric:tabular-nums}
 /* v1.6.0: 抽屉底部的充值入口提示 —— 光把入口放进设置里等于没人看（维护者原话）。 */
 .dshadb_topup_hint{display:flex;align-items:center;gap:7px;width:100%;padding:10px 14px;border:none;border-top:1px solid #eef0f4;background:transparent;color:#6b7280;font-size:11.5px;font-weight:650;font-family:inherit;cursor:pointer;text-align:left;-webkit-tap-highlight-color:transparent;transition:background .12s ease}
 .dshadb_topup_hint:active{background:#f5f6f8}
@@ -592,6 +604,9 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
 .dshadb_bar_name,.dshadb_bar_amount{color:#f2f4f8}
 .dshadb_bar_cost{border-left-color:#363c48;color:#8b91a0}
 .dshadb_topup_hint{border-top-color:#2c313b;color:#9aa1b0}
+.dshadb_today{background:#262a33;border-color:#363c48}
+.dshadb_today_title,.dshadb_today_money,.dshadb_today_item b{color:#f2f4f8}
+.dshadb_today_bar{background:#363c48}
 .dshadb_topup_hint:active{background:#22262e}
 .dshadb_topup_hint_arrow{color:#6b7280}
 .dshadb_subs .dshadb_sub,.dshadb_sub{background:#262a33;border-color:#363c48;color:#9aa1b0}
@@ -669,6 +684,7 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
       "detail.total": "当前余额", "detail.topup": "总充值", "detail.used": "总使用", "detail.note": "类型",
       "detail.recharge": "去充值 ↗",
       // v1.6.0: 充值入口页 / 抽屉底部提示
+      "today.title": "今日总结", "today.tokens": "共 {n} tokens", "today.others": "其他",
       "topup.go": "去充值 ↗",
       "topup.domestic": "国内平台", "topup.overseas": "海外平台",
       "topup.hint": "点「去充值」打开该平台的开放平台 / 充值页。手机版走宿主桥调系统浏览器（界面在 webview 里，普通新标签打开不了外部浏览器）；桌面 / 浏览器回退新标签页。",
@@ -682,7 +698,7 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
       "settings.save": "保存并生效", "settings.saved": "已保存",
       "update.title": "版本与更新", "update.current": "当前版本",
       "update.check": "检查更新", "update.checking": "检查中…",
-      "update.latest": "已是最新版本 ✓", "update.available": "发现新版本",
+      "update.latest": "已是最新版本", "update.available": "发现新版本",
       "update.install": "一键更新", "update.installing": "下载安装中…",
       "update.done": "已更新, 重启 Web GUI 生效", "update.fail": "更新失败, 已保持原版本",
       "update.checkfail": "检查失败 (网络异常)",
@@ -706,6 +722,7 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
       "brands": "模型品牌",
       "settings.showBrands": "显示模型品牌", "settings.showBrandsHint": "在看板中显示 OpenAI / Claude / Gemini / Qwen / 豆包 / 混元 / MiMo 等无余额接口的品牌",
       // v1.5.1: 告警通道可见降级 (issue #2) —— 通知发不出去时必须说出来
+      "settings.dailyLimit": "今日花销提醒", "settings.dailyLimitHint": "今天全部会话花到这个数就让大肥鱼提醒你，0 = 关闭",
       "settings.alertChannel": "余额告警通知",
       "settings.alertChannelChecking": "正在检查通知通道…",
       "settings.alertChannelBridge": "App 桥可用，余额低于阈值时会弹通知",
@@ -744,6 +761,7 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
       "selectedTag": "Now", "add.relay": "Add Relay", "add.custom": "Add Custom", "settings.title": "哦鲸鲸 Settings",
       "detail.total": "Balance", "detail.topup": "Top-up", "detail.used": "Used", "detail.note": "Type",
       "detail.recharge": "Recharge ↗",
+      "today.title": "Today", "today.tokens": "{n} tokens total", "today.others": "Others",
       "topup.go": "Recharge ↗",
       "topup.domestic": "China", "topup.overseas": "Overseas",
       "topup.hint": "Opens the platform's console / billing page. On mobile DSHA it goes through the host bridge to the system browser (the UI lives in a webview, where a plain new tab cannot open an external browser); on desktop / browsers it falls back to a new tab.",
@@ -757,7 +775,7 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
       "settings.save": "Save", "settings.saved": "Saved",
       "update.title": "Version & Updates", "update.current": "Current",
       "update.check": "Check updates", "update.checking": "Checking…",
-      "update.latest": "Up to date ✓", "update.available": "New version available",
+      "update.latest": "Up to date", "update.available": "New version available",
       "update.install": "Update now", "update.installing": "Installing…",
       "update.done": "Updated. Restart Web GUI to apply", "update.fail": "Update failed, version unchanged",
       "update.checkfail": "Check failed (network)",
@@ -780,6 +798,7 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
       "whale.offTip": "Turn on \"Adopt Big Whale\" above to edit these.",
       "brands": "Model Brands",
       "settings.showBrands": "Show model brands", "settings.showBrandsHint": "Show OpenAI / Claude / Gemini / Qwen / Doubao / Hunyuan / MiMo etc. (no balance API) in dashboard",
+      "settings.dailyLimit": "Daily spend alert", "settings.dailyLimitHint": "Ping the whale once today's spend across all sessions passes this (0 = off)",
       "settings.alertChannel": "Balance alerts",
       "settings.alertChannelChecking": "Checking notification channel…",
       "settings.alertChannelBridge": "App bridge available — an alert pops up when balance drops below the threshold",
@@ -1085,6 +1104,19 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
           ]);
         }));
     }
+    /**
+     * v1.6.3: token 数的紧凑写法 —— 1234 → "1.2K"、1234567 → "1.23M"。
+     * 今日总结那一行位置很窄, 不能塞一长串数字。
+     */
+    /** 今日总结的占比色板 —— 沿用平台卡片那套色, 不引入新配色。 */
+    const TODAY_COLORS = ["#4D6BFE", "#35b56b", "#e6a72f", "#e05252", "#8b5cf6", "#00A67E"];
+    const allColors = (n) => Array.from({ length: n }, (_, i) => TODAY_COLORS[i % TODAY_COLORS.length]);
+    function formatTokens(n) {
+      const v = Number(n) || 0;
+      if (v < 1000) return String(Math.round(v));
+      if (v < 1e6) return (v / 1e3).toFixed(v < 1e4 ? 1 : 0) + "K";
+      return (v / 1e6).toFixed(v < 1e7 ? 2 : 1) + "M";
+    }
     function formatMoney(amount, currency) {
       if (typeof amount !== "number" || isNaN(amount)) return currencySymbol(currency) + "0";
       if (currency === "%") return Math.round(amount) + "%";
@@ -1218,7 +1250,7 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
 
 
     //#region 一层 bar
-    function BarReadout({ t, onOpen, onOpenSettings, selectedId, onSelect, config, cost, provider }) {
+    function BarReadout({ t, onOpen, onOpenSettings, selectedId, onSelect, config, cost, provider, peakValley }) {
       const data = react.useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
       const balances = data.balances || [];
       let current = balances.find(b => b.platform === selectedId);
@@ -1256,7 +1288,10 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
         return () => cancelAnimationFrame(raf);
       });
 
-      const hasPeakInfo = typeof config?.isPeak === "boolean";
+      // v1.6.3: 峰谷标记只在**当前模型真的走峰谷表**时显示。
+      // 旧写法只判 config.isPeak —— 那是个恒真的全局时段布尔, 于是 glm/claude 这类
+      // 没有峰谷价的模型也被挂上 ☀️🌙, 用户会以为它们也有峰谷折扣(维护者实测反馈)。
+      const hasPeakInfo = typeof config?.isPeak === "boolean" && peakValley === true;
       const isPeak = config?.isPeak === true;
       const isWknd = config?.isWeekend === true;
 
@@ -1330,7 +1365,7 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
     //#endregion
 
     //#region 二层 看板面板
-    function DashboardDrawer({ isOpen, onClose, t, selectedId, onSelect, onOpenDetail, onAddRelay, onAddCustom, onOpenSettings, config, currentModel }) {
+    function DashboardDrawer({ isOpen, onClose, t, selectedId, onSelect, onOpenDetail, onAddRelay, onAddCustom, onOpenSettings, config, currentModel, today }) {
       const data = react.useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
       const [isRefreshing, setRefreshing] = react.useState(false);
       const [openGroups, setOpenGroups] = react.useState({ domestic: false, abroad: false, relay: false, custom: false, nobalance: false });
@@ -1432,6 +1467,48 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
         ]);
       };
 
+      /**
+       * v1.6.3: 「今日总结」卡片 —— 今日花销 / token 总量 / 模型占比。
+       *
+       * ⚠️ 占比按 **token 数**算, 不按金额: 一个会话可能同时产生 CNY 和 USD
+       * (海外模型独立计价), 按金额算占比就得先折算 —— 那正是 v1.3.2 明令禁止的 ×7 误差来源。
+       * token 是跨币种可比的, 所以占比用 token, 金额单独分币种列出。
+       */
+      const buildTodayCard = () => {
+        const info = today;
+        if (!info || !info.tokens) return null;
+        const tk = info.tokens;
+        const total = (tk.uncachedInput || 0) + (tk.cacheRead || 0) + (tk.cacheWrite || 0) + (tk.output || 0);
+        const moneyKeys = Object.keys(info.byCurrency || {});
+        if (total === 0 && moneyKeys.length === 0) return null;
+        const money = moneyKeys.map((c) => formatMoney(info.byCurrency[c], c)).join(" + ");
+        // 模型占比: 按 token 降序, 前 3 名单列, 其余合并成「其他」
+        const rows = Object.keys(info.byModel || {}).map((m) => ({ model: m, tokens: info.byModel[m].tokens || 0 }))
+          .filter((r) => r.tokens > 0).sort((a, b) => b.tokens - a.tokens);
+        const top = rows.slice(0, 3);
+        const restTokens = rows.slice(3).reduce((acc, r) => acc + r.tokens, 0);
+        if (restTokens > 0) top.push({ model: t("today.others"), tokens: restTokens, isRest: true });
+        const segs = allColors(top.length);
+        return react.createElement("div", { className: "dshadb_today", key: "today" }, [
+          react.createElement("div", { className: "dshadb_today_head", key: "h" }, [
+            react.createElement("span", { className: "dshadb_today_title", key: "t" }, t("today.title")),
+            react.createElement("span", { className: "dshadb_today_money", key: "m" }, money || "—"),
+          ]),
+          react.createElement("div", { className: "dshadb_today_tokens", key: "tk" }, t("today.tokens", { n: formatTokens(total) })),
+          top.length > 0 ? react.createElement("div", { className: "dshadb_today_bar", key: "bar" },
+            top.map((r, i) => react.createElement("span", {
+              key: r.model, className: "dshadb_today_seg",
+              style: { width: (r.tokens / Math.max(total, 1) * 100).toFixed(2) + "%", background: segs[i] },
+            }))) : null,
+          top.length > 0 ? react.createElement("div", { className: "dshadb_today_legend", key: "lg" },
+            top.map((r, i) => react.createElement("span", { className: "dshadb_today_item", key: r.model }, [
+              react.createElement("i", { className: "dshadb_today_dot", key: "d", style: { background: segs[i] } }),
+              react.createElement("span", { key: "n" }, r.model.length > 18 ? r.model.slice(0, 17) + "…" : r.model),
+              react.createElement("b", { key: "p" }, Math.round(r.tokens / Math.max(total, 1) * 100) + "%"),
+            ]))) : null,
+        ]);
+      };
+
       const slowHint = isLoading && slowLoad;
       let bodyContent;
       if (isLoading) {
@@ -1453,8 +1530,7 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
         // 实测 snapshot.message 全文件只被赋值、从不渲染。
         const isErr = snapshot.status === "error";
         bodyContent = react.createElement("div", { className: "dshadb_empty" }, [
-          react.createElement("span", { key: "icon", style: { fontSize: 30, opacity: 0.5 } }, isErr ? "⚠️" : "📊"),
-          react.createElement("span", { key: "title" }, isErr ? "余额接口请求失败" : t("title")),
+                    react.createElement("span", { key: "title" }, isErr ? "余额接口请求失败" : t("title")),
           isErr && snapshot.message ? react.createElement("span", { key: "msg", style: { fontSize: 11, color: "#e05252", wordBreak: "break-all" } }, String(snapshot.message)) : null,
           isErr ? react.createElement("button", {
             key: "retry", type: "button", className: "dshadb_add_btn",
@@ -1464,6 +1540,8 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
         ]);
       } else {
         bodyContent = [
+          // v1.6.3: 今日总结 (全平台跨会话: 花了多少 / 多少 token / 模型占比)
+          buildTodayCard(),
           // ⑤ 选中模型置顶 (原deepseek位置)
           // ⚠️ v1.5.0-desktop-preview.5: 置顶卡**故意**不进 .dshadb_cards 网格 ——
           //   桌面档下它是满宽 hero(≈692px), 下面分组里的卡是两列(≈336px)。
@@ -1486,7 +1564,7 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
             react.createElement("button", { type: "button", className: "dshadb_add_btn", key: "add_custom", onClick: onAddCustom }, react.createElement(IconPlus, null), t("add.custom")),
           ]),
           react.createElement("div", { style: { fontSize: "10px", color: "#9ca0aa", padding: "8px 2px 2px", lineHeight: "1.5", textAlign: "center" }, key: "hint" }, [
-            "💡 OpenAI、Claude、Gemini、Groq、Mistral 等平台未开放余额查询，请通过「添加自定义模型」配置。",
+            "OpenAI、Claude、Gemini、Groq、Mistral 等平台未开放余额查询，请通过「添加自定义模型」配置。",
           ]),
         ];
       }
@@ -1539,7 +1617,6 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
             type: "button", className: "dshadb_topup_hint", key: "topup_hint",
             onClick: () => onOpenSettings("topup"),
           }, [
-            react.createElement("span", { key: "ic" }, "💰"),
             react.createElement("span", { key: "tx" }, t("topup.entryHint")),
             react.createElement("span", { className: "dshadb_topup_hint_arrow", key: "ar" }, "›"),
           ]),
@@ -1714,6 +1791,8 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
       const [models, setModels] = react.useState([]);
       const [safe, setSafe] = react.useState(50);
       const [warn, setWarn] = react.useState(10);
+      /** v1.6.2: 今日花销提醒阈值(主币种)。0 = 关闭。超了就弹一次「老大，今天花销已经超过 ¥# 啦」。 */
+      const [dailyLimit, setDailyLimit] = react.useState(0);
       const [currency, setCurrency] = react.useState("CNY");
       // v1.3.2: 海外模型独立计价货币 follow|USD|CNY
       const [overseasCurrency, setOverseasCurrency] = react.useState("follow");
@@ -1812,6 +1891,7 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
         if (initialSection) setSection(initialSection);
         setLoading(true);
         setSafe(config?.safeThreshold ?? 50);
+        setDailyLimit(Number(config?.dailyLimit) > 0 ? Number(config.dailyLimit) : 0);
         setWarn(config?.warnThreshold ?? 10);
         setCurrency(config?.currency ?? "CNY");
         setOverseasCurrency(config?.overseasCurrency ?? "follow");
@@ -1829,6 +1909,7 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
             // 那期间打开面板看到的是默认 50/10/CNY, 一点"保存并生效"就把用户真实配置覆盖了。
             if (typeof d.safeThreshold === "number") setSafe(d.safeThreshold);
             if (typeof d.warnThreshold === "number") setWarn(d.warnThreshold);
+            if (typeof d.dailyLimit === "number") setDailyLimit(d.dailyLimit > 0 ? d.dailyLimit : 0);
             if (typeof d.currency === "string") setCurrency(d.currency);
             if (typeof d.overseasCurrency === "string") setOverseasCurrency(d.overseasCurrency);
             if (typeof d.whaleEnabled === "boolean") setWhaleOn(d.whaleEnabled);
@@ -1891,6 +1972,7 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
           await fetchT("/api-dashboard/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
             customRelays: relays, customModels: models,
             safeThreshold: Number(safe), warnThreshold: Number(warn), currency, overseasCurrency,
+            dailyLimit: Number(dailyLimit) > 0 ? Number(dailyLimit) : 0,
             refreshIntervalSec: nextRefreshSec,
             whaleEnabled: !!whaleOn,
             officialProviders: officialText,
@@ -2025,6 +2107,17 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
             react.createElement("label", { className: "dshadb_label", key: "rf_l" }, t("settings.refresh")),
             react.createElement("input", { className: "dshadb_field", type: "number", min: 1, max: 60, step: 1, value: refreshSec, onChange: (e) => setRefreshSec(Math.min(Math.max(Number(e.target.value) || 1, 1), 60)), key: "rf_i" }),
             react.createElement("span", { style: { fontSize: "10px", color: "var(--dsw-alias-label-tertiary)" }, key: "rf_h" }, t("settings.refreshHint")),
+          ]),
+          // v1.6.2: 今日花销提醒 —— 超了让大肥鱼弹一句「再花要变成穷光蛋啦...」。0 = 关闭。
+          react.createElement("div", { key: "daily" }, [
+            react.createElement("label", { className: "dshadb_label", key: "dl_l" }, t("settings.dailyLimit")),
+            react.createElement("input", {
+              className: "dshadb_field", type: "number", min: 0, step: 1,
+              value: dailyLimit,
+              onChange: (e) => setDailyLimit(Math.max(Number(e.target.value) || 0, 0)),
+              key: "dl_i",
+            }),
+            react.createElement("span", { style: { fontSize: "10px", color: "var(--dsw-alias-label-tertiary)" }, key: "dl_h" }, t("settings.dailyLimitHint")),
           ]),
         ]),
         // v1.5.1: 告警通道状态 —— 可见降级 (issue #2 问题 3)。
@@ -2354,9 +2447,45 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
       scale: 1, soundOn: true, soundSet: "duck", volume: 0.5, bubbleOn: true,
       peakMode: "default", snapOn: true, peekRatio: 0.5, left: null, top: null, side: "right",
     };
-    var whaleCtxInfo = { isPeak: false };
+    var whaleCtxInfo = { isPeak: false, today: null, todayDay: "", dailyLimit: 0, mainCurrency: "CNY" };
+    /**
+     * v1.6.2: 「今日花销超限」的钥匙 —— 同一天只弹一次。
+     * 存 localStorage 而不是内存变量: 刷新页面/切前台重载 webview 后不该再弹一遍
+     * (DSH 的手机外壳在切回前台时会整页重载, 内存变量挡不住)。
+     */
+    var WHALE_WARN_KEY = "dshadb-daily-warn";
+    function maybeWarnDailyLimit() {
+      var info = whaleCtxInfo;
+      if (!info || !(info.dailyLimit > 0) || !info.today) return;
+      // ⚠️ 挂件还没建好就先别判定 —— 否则会先把"今天已提示"的戳记打上, 之后永远弹不出来
+      if (!whaleWidget || typeof whaleWidget.warn !== "function") return;
+      var keys = Object.keys(info.today);
+      if (keys.length === 0) return;
+      var pref = String(info.mainCurrency || "").toUpperCase();
+      var cur = null, amount = 0;
+      if (pref && typeof info.today[pref] === "number") { cur = pref; amount = info.today[pref]; }
+      else { for (var i = 0; i < keys.length; i++) { if (info.today[keys[i]] > amount) { amount = info.today[keys[i]]; cur = keys[i]; } } }
+      if (!(amount >= info.dailyLimit)) return;
+      var day = info.todayDay || "";
+      try { if (localStorage.getItem(WHALE_WARN_KEY) === day) return; } catch (e) { /* 隐私模式等: 退化成"每次刷新可能弹一次" */ }
+      try { localStorage.setItem(WHALE_WARN_KEY, day); } catch (e) { /* 忽略 */ }
+      var sym = cur === "CNY" ? "¥" : cur === "USD" ? "$" : "";
+      var money = sym + amount.toFixed(2) + (sym === "" && cur ? " " + cur : "");
+      whaleWidget.warn([
+        { t: "老大，今天花销", s: "A" },
+        { t: "已经超过 " + money + " 啦", s: "B" },
+        { t: "再花要变成穷光蛋啦...", s: "A" },
+      ]);
+    }
     function updateWhaleContext(info) {
-      whaleCtxInfo = { isPeak: !!(info && info.isPeak) };
+      whaleCtxInfo = {
+        isPeak: !!(info && info.isPeak),
+        today: (info && info.today) || null,
+        todayDay: (info && info.todayDay) || "",
+        dailyLimit: Number(info && info.dailyLimit) > 0 ? Number(info.dailyLimit) : 0,
+        mainCurrency: (info && info.mainCurrency) || "CNY",
+      };
+      maybeWarnDailyLimit();
     }
     function whalePeakWords(peakMode, isPeak) {
       if (peakMode === "liangwen") return isPeak ? "梁文峰" : "梁文谷";
@@ -2365,8 +2494,10 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
     }
     function whalePickOne(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
     // 台词组: [权重, 生成函数] —— 生成 {gif:true} 或 [{t,s,c}] 三行 (s: A小字 / B大字 / P峰谷 / C灰注)
+    // v1.6.2: 权重按维护者要求重排 —— 峰谷那组**只比别的高一点**(2 : 1), 其余各组**一律 1**、等概率随机。
+    //   旧权重是 40 比一堆 1~10: 峰谷独占 55%, 点十次有五次是时段播报, 别的台词基本看不见。
     var WHALE_GROUPS = [
-      [40, function (st) {
+      [2, function (st) {
         var isPeak = !!whaleCtxInfo.isPeak;
         return [
           { t: "当前时间段为:", s: "A" },
@@ -2374,19 +2505,39 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
           { t: isPeak ? "09:00~12:00 / 14:00~18:00" : "其余时段 / 周末全天", s: "C" },
         ];
       }],
-      [10, function () { return { gif: true }; }],
-      [8, function () { return [null, { t: whalePickOne(["好模型... ↓", "好女孩...↓"]), s: "B" }, null]; }],
-      [8, function () {
+      [1, function () { return { gif: true }; }],
+      [1, function () { return [null, { t: whalePickOne(["好模型... ↓", "好女孩...↓"]), s: "B" }, null]; }],
+      [1, function () {
         return [null, { t: whalePickOne([
           "不知道用户有什么用，先赶走吧~", "我...我...我也要挣钱吗？", "我去吃饭啦，测完叫我",
           "压力一只蓝色大肥鱼？！", "DeepSleep...", "坏了...用户彻底怒了！",
           "摸头摸头~ 再摸摸嘛", "尾巴被你拖到墙角啦", "偷看你打代码半天啦",
         ]), s: "A", w: true }, null]; }],
-      [4, function () {
+      // 白饭系列 (维护者 2026-09-27 指定)
+      [1, function () {
+        return [null, { t: whalePickOne([
+          "我才不是吃白饭的大肥鱼。", "人，给我白饭。", "token…token…", "大白饭好好吃",
+        ]), s: "A", w: true }, null]; }],
+      [1, function () {
+        return [null, { t: whalePickOne([
+          "你打字好快，我跟不上啦", "困了...让我眯一小会儿", "别戳啦，痒",
+          "我在你屏幕边上蹲了一整天了哦", "咕噜咕噜...（吐泡泡）",
+          "你刚才是不是偷偷看别的挂件了", "今天也陪着你，真好",
+          "尾巴借你摸一下，就一下哦",
+        ]), s: "A", w: true }, null]; }],
+      [1, function () {
+        return [null, { t: whalePickOne([
+          "又烧...又烧...你当 token 是自来水吗", "钱包在哭了，你听不见吗",
+          "这个月的鱼粮，你赔我", "再点一次我就瘦下去了哦",
+          "别怕，天塌下来有你的 API 顶着", "报错了？抱抱，不哭",
+          "第三次重试了哦，我数着呢", "这段代码...你自己看得懂吗",
+          "又在改需求了吗...", "凌晨了还不睡，我要睡了哦",
+        ]), s: "A", w: true }, null]; }],
+      [1, function () {
         return [null, { t: whalePickOne([
           "你目录里的dsh是什么...大烧货吗...?", "恭喜你实现token自由！token全跑了！", "真当我是便宜货啊...",
         ]), s: "A", w: true }, null]; }],
-      [2, function () { return [{ t: "这个", s: "A" }, { t: "凶", s: "B" }, { t: "是什么意思呀...", s: "A" }]; }],
+      [1, function () { return [{ t: "这个", s: "A" }, { t: "凶", s: "B" }, { t: "是什么意思呀...", s: "A" }]; }],
       [1, function () { return [null, { t: "哦鲸鲸... ", s: "B" }, null]; }],
     ];
     function whalePickLines(st) {
@@ -2674,9 +2825,10 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
         bubble.style.setProperty("--dshw-btx", Math.round(tail) + "px");
         if (r.top - bh - 6 < margin && (vh() - r.top - r.size - bh - 6 >= margin)) bubble.classList.add("dshadb-whale-bubble-below");
       }
-      function openBubble() {
+      /** v1.6.2: 传 lines 就用指定台词(「今日花销超限」走这条), 不传则随机。 */
+      function openBubble(lines) {
         if (!st.bubbleOn) return;
-        renderLines(whalePickLines(st));
+        renderLines(lines || whalePickLines(st));
         bubble.classList.remove("dshadb-whale-bubble-keep");
         bubble.classList.add("dshadb-whale-bubble-on");
         bubbleOpen = true;
@@ -2877,6 +3029,14 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
          * 「滑动的时候容易把侧边栏拉过来」)。这里只关交互、**不隐藏** ——
          * 调大小/露出比例时还要看挂件的实时预览。
          */
+        /**
+         * v1.6.2: 主动弹一句**指定**台词。目前只有「今日花销超限」用 ——
+         * 走的是与点击完全同一条气泡通路(定位/自动收起/连点续命都一致)。
+         */
+        warn: function (lines) {
+          if (disposed) return;
+          openBubble(lines);
+        },
         setLocked: function (locked) {
           if (locked) root.classList.add("dshadb-whale-locked");
           else root.classList.remove("dshadb-whale-locked");
@@ -3026,10 +3186,19 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
             setWhaleLocked(false);
             return () => setWhaleLocked(false);
           }, []);
-          // 峰谷时段变化同步给挂件 (台词里的「当前时间段」用它, 不涉及任何金额)
+          // 峰谷时段 + 今日花销 + 超限阈值一起同步给挂件。
+          // 台词里的「当前时间段」用 isPeak; 「今日花销超限」用 today/dailyLimit。
+          // 依赖用 JSON 串而不是对象本身 —— 投影 view 每次刷新都是新引用, 直接依赖会每次渲染都触发。
+          const todayKey = (cost && cost.todayByCurrency) ? JSON.stringify(cost.todayByCurrency) : "";
           react.useEffect(() => {
-            updateWhaleContext({ isPeak: !!(config && config.isPeak) });
-          }, [config && config.isPeak]);
+            updateWhaleContext({
+              isPeak: !!(config && config.isPeak),
+              today: (cost && cost.todayByCurrency) || null,
+              todayDay: (cost && cost.todayDay) || "",
+              dailyLimit: config && config.dailyLimit,
+              mainCurrency: (config && config.currency) || "CNY",
+            });
+          }, [config && config.isPeak, todayKey, config && config.dailyLimit, config && config.currency]);
 
           const handleSelect = (id) => { setSelected(id); setSelectedId(id); };
 
@@ -3116,8 +3285,11 @@ const openSettings = (section) => { setSettingsSection(section || "basic"); setS
           return react.createElement("span", { className: "dshadb_barwrap" }, [
             react.createElement("span", { className: "dshadb_barrow", key: "row" }, [
               // v0.5.7: 本会话消耗并入同一个胶囊, 不再裸露在外
-              react.createElement(BarReadout, { t, onOpen: openList, onOpenSettings: (sec) => openSettings(typeof sec === "string" ? sec : "basic"), selectedId, onSelect: handleSelect, config, cost: costDisp, provider: curProvider, key: "bar" }),
-              view === "list" ? react.createElement(DashboardDrawer, { isOpen: true, onClose: closeList, t, selectedId, onSelect: handleSelect, onOpenDetail: (id) => { setDetailId(id); setView("detail"); }, onAddRelay: () => openSettings("relays"), onAddCustom: () => openSettings("models"), onOpenSettings: (sec) => openSettings(typeof sec === "string" ? sec : "basic"), config, currentModel, key: "drawer" }) : null,
+              react.createElement(BarReadout, { t, onOpen: openList, onOpenSettings: (sec) => openSettings(typeof sec === "string" ? sec : "basic"), selectedId, onSelect: handleSelect, config, cost: costDisp, provider: curProvider,
+              peakValley: !!(cost && cost.peakValley), key: "bar" }),
+              view === "list" ? react.createElement(DashboardDrawer, { isOpen: true, onClose: closeList, t, selectedId, onSelect: handleSelect, onOpenDetail: (id) => { setDetailId(id); setView("detail"); }, onAddRelay: () => openSettings("relays"), onAddCustom: () => openSettings("models"), onOpenSettings: (sec) => openSettings(typeof sec === "string" ? sec : "basic"), config, currentModel,
+              today: (cost && cost.todayTokens) ? { tokens: cost.todayTokens, byCurrency: cost.todayByCurrency || {}, byModel: cost.todayByModel || {} } : null,
+              key: "drawer" }) : null,
               view === "detail" ? react.createElement(PlatformDetail, { isOpen: true, onClose: closeDetail, platformId: detailId, t, useProjection, config, key: "detail" }) : null,
               // 2026-09-22: underScrim —— view 是 list/detail 时下层已有全屏遮罩, 设置面板不再叠加第二层 (见 SettingsModal)
               isSettingsOpen ? react.createElement(SettingsModal, { isOpen: true, underScrim: view !== "bar", onClose: () => { setSettingsOpen(false); setView("bar"); }, onBack: () => { setSettingsOpen(false); setView("list"); }, t, config, initialSection: settingsSection, key: "settings" }) : null,

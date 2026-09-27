@@ -59,5 +59,28 @@ a('X2 siliconflow 正常', m.parseResponse('siliconflow', { data: { totalBalance
 a('X3 novita 缺字段 → null', m.parseResponse('novita', {}) === null)
 a('X4 非对象输入一律 null', m.parseResponse('kimi', null) === null && m.parseResponse('openrouter', []) === null)
 
+// ===== ⑨ v1.6.3: 🔴 hard_limit_usd 是「账户上限设置」, 不是余额 =====
+// 维护者实测截图: 中转站 dsh:mimov 卡片显示 $100000000.00 还带绿灯「正常」。
+// 实测 mimo.ezlook.top 的 /v1/dashboard/billing/subscription 返回:
+//   {soft_limit_usd:1e8, hard_limit_usd:1e8, system_hard_limit_usd:1e8} —— **一个余额字段都没有**,
+// 而它同一站的 credit_grants 是 404、api/user/self 是 401。旧代码拿 hard_limit_usd 当余额 →
+// 渲染成"一亿美元"。属「选错字段就当真实数字渲染」家族第 4 例。
+{
+  const sentinel = { object: 'billing_subscription', has_payment_method: true, soft_limit_usd: 1e8, hard_limit_usd: 1e8, system_hard_limit_usd: 1e8, access_until: 0 }
+  a('O1 纯上限(哨兵 1e8)响应必须不表态 —— 旧代码渲染成 $100000000.00',
+    m.parseResponse('openai-billing', sentinel) === null)
+  a('O2 有 total_available 时用它, 且不再提"硬上限"',
+    m.parseResponse('openai-billing', { total_granted: 100, total_used: 20, total_available: 80, hard_limit_usd: 1e8 })?.total === 80 &&
+    !/硬上限/.test(m.parseResponse('openai-billing', { total_available: 80 }).note))
+  a('O3 只有 granted/used 时相减',
+    m.parseResponse('openai-billing', { total_granted: 100, total_used: 20 })?.total === 80)
+  a('O4 真实 0 余额仍是 0, 不能被当成"解析失败"',
+    m.parseResponse('openai-billing', { total_granted: 100, total_used: 100, total_available: 0 })?.total === 0)
+  a('O5 空串字段按缺失处理(Number("")===0 的坑)',
+    m.parseResponse('openai-billing', { total_available: '', total_granted: '', total_used: '' }) === null)
+  a('O6 缺字段 → null',
+    m.parseResponse('openai-billing', {}) === null && m.parseResponse('openai-billing', null) === null)
+}
+
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`)
 if (fail > 0) process.exitCode = 1

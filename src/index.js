@@ -433,6 +433,7 @@ const NUMBER_FIELDS = [
   ['timeoutMs', 1000, 60000],
   ['safeThreshold', 0, Number.MAX_SAFE_INTEGER],
   ['warnThreshold', 0, Number.MAX_SAFE_INTEGER],
+  ['dailyLimit', 0, Number.MAX_SAFE_INTEGER],   // v1.6.2: 今日花销提醒阈值, 0=关闭
   ['configVersion', 0, Number.MAX_SAFE_INTEGER],
 ]
 
@@ -1604,6 +1605,8 @@ export const Config = Schema.object({
   customRelays: Schema.array(RelaySchema).default([]),
   /** 安全阈值: 余额 > safe 显示绿色, > warn 黄色, 否则红色 */
   safeThreshold: Schema.number().min(0).default(50),
+  /** v1.6.2: 今日花销提醒阈值(主币种), 超过就弹一次「老大，今天花销已经超过 ¥# 啦」。0 = 关闭。 */
+  dailyLimit: Schema.number().min(0).default(0),
   warnThreshold: Schema.number().min(0).default(10),
   /** 计价货币 */
   currency: Schema.string().default('CNY'),
@@ -1754,8 +1757,8 @@ function checkAlerts(balances, config, ctx) {
     const name = b.name || id
     const unit = b.percent != null ? '%' : (b.currency || '')
     const msg = level === 'warn'
-      ? `🔔 ${name} 余额偏低: ${val}${unit}`
-      : `🚨 ${name} 余额不足: ${val}${unit}`
+      ? `${name} 余额偏低: ${val}${unit}`
+      : `${name} 余额不足: ${val}${unit}`
     alertStatus.last = { at: Date.now(), level, platform: id, text: msg }
     void notifyViaAppBridge('哦鲸鲸', msg)
   }
@@ -1853,9 +1856,30 @@ export function parseResponse(queryType, json, pref) {
       return { total: quota / 500000, currency: 'USD', available: null, used: null, note: 'one-api quota (÷500000, 系数待实测)' }
     }
     case 'openai-billing': {
-      const limit = toAmount(json?.hard_limit_usd)
-      if (limit === 0 && !json?.has_credit_card) return null
-      return { total: limit, currency: 'USD', available: limit, used: null, note: 'OpenAI 订阅硬上限' }
+      // v1.6.3 修复(维护者实测截图: 中转站卡片显示 $100000000.00 还带绿灯「正常」):
+      // 旧实现拿 `hard_limit_usd` 当余额 —— 那是 OpenAI 的**账户硬上限设置**, 不是余额,
+      // 且"无限制"时恒为哨兵值 1e8。本机实测 mimo.ezlook.top 的 subscription 返回
+      // soft/hard/system_hard_limit_usd 全是 100000000、**一个余额字段都没有**, 于是被
+      // 渲染成"一亿美元余额"。⚠️ 这是「选错字段就当真实数字渲染」漏洞家族的第 4 例
+      // (前 3 例: openai-credit-grants / openrouter / deepseek 多币种)。
+      //
+      // 正确来源是 credit_grants 的 `total_available`(= total_granted - total_used)。
+      // **拿不到就返回 null** —— 让 auto 探测继续试下一个端点(quota / credit_grants),
+      // 全试完则如实显示「该平台未开放余额查询」, 绝不拿上限顶替。
+      const avail = json?.total_available
+      const granted = json?.total_granted
+      const used = json?.total_used
+      const has = (v) => v !== null && v !== undefined && v !== ''
+      let total = null
+      if (has(avail)) total = toAmount(avail)
+      else if (has(granted) && has(used)) total = toAmount(granted) - toAmount(used)
+      if (total === null) return null
+      return {
+        total, currency: 'USD',
+        available: has(avail) ? toAmount(avail) : total,
+        used: has(used) ? toAmount(used) : null,
+        note: 'OpenAI 额度 (total_available)',
+      }
     }
     case 'glm': {
       // 智谱 Coding Plan 配额(实测 2026-08-30; unit 含义转自 z.ai 前端源码 / cc-switch)：
@@ -2239,6 +2263,93 @@ const loadCacheEntry = (sessionId) => {
 const readSessionCacheRecord = (sessionId) => loadCacheEntry(sessionId)?.rows ?? null
 
 /**
+ * v1.6.2: projcache 目录里的会话 id 列表 —— 「今日花销」要靠它发现**冷会话**
+ * (框架没有同步的"列出全部会话"接口, 常驻表里只有当前开着的)。
+ * 10 秒 TTL: view() 会被频繁调用, 不能每次都读目录。
+ */
+const CACHE_ID_LIST_TTL_MS = 10000
+let cacheIdList = { at: 0, ids: [] }
+const listCacheSessionIds = () => {
+  const now = Date.now()
+  if (now - cacheIdList.at < CACHE_ID_LIST_TTL_MS) return cacheIdList.ids
+  let ids = []
+  try {
+    const home = process.env.DSH_HOME || join(homedir(), '.dsh')
+    const dir = join(home, 'storages', 'session_projcache', 'sessions')
+    ids = readdirSync(dir)
+      .filter((n) => typeof n === 'string' && n.endsWith('.json'))
+      .map((n) => n.slice(0, -5))
+      .filter((n) => safeSessionId(n) !== null)
+  } catch { ids = [] }
+  cacheIdList = { at: now, ids }
+  return ids
+}
+
+/**
+ * v1.6.2: **今日**(北京时间)全部会话的消耗, 按币种分组 —— 挂件「今天花销已经超过 ¥#」的数据源。
+ *
+ * 为什么必须跨会话: 投影只折叠本会话, 而"今天花了多少"是所有会话加起来的。
+ * 会按 sessionId 去重, 依次取: 常驻会话(内存, 更新鲜) → 冷会话(投影缓存文件)。
+ * 任何一步取不到都静默跳过 —— 这个数字是彩蛋, 绝不能拖垮主投影。
+ *
+ * @param services 服务取用器(与 collectSubagentCosts 同一个)
+ * @param priceDay (dayMap) => { 币种: 金额 } —— 计价实现由投影侧注入(与主板同一套口径, 含峰谷分相)
+ * @param selfState 当前这个 state —— **必须显式传**: 下面遍历的是"别的会话",
+ *        拿不到调用方自己那一份(第一版就漏了它, 结果今日花销恒为 0)。
+ */
+/** 把某个会话 state 里"今天"那一桶折算出来, 累进 acc(金额按币种 + token 总量 + 逐模型)。 */
+const add2 = (acc, priceDay, state, day) => {
+  const dayMap = state?.byDay?.[day]
+  if (!dayMap) return
+  const s = priceDay(dayMap)
+  for (const cur of Object.keys(s.byCurrency)) {
+    acc.byCurrency[cur] = Math.round(((acc.byCurrency[cur] ?? 0) + s.byCurrency[cur]) * 1e6) / 1e6
+  }
+  for (const k of Object.keys(acc.tokens)) acc.tokens[k] += s.tokens[k] ?? 0
+  for (const model of Object.keys(s.byModel)) {
+    const cur = acc.byModel[model] ?? { tokens: 0, cost: 0, currency: s.byModel[model].currency }
+    acc.byModel[model] = {
+      tokens: cur.tokens + s.byModel[model].tokens,
+      cost: Math.round((cur.cost + s.byModel[model].cost) * 1e6) / 1e6,
+      currency: cur.currency,
+    }
+  }
+}
+
+const collectTodayCost = (services, priceDay, selfState) => {
+  const day = bjtParts(Date.now()).ymd
+  const acc = {
+    byCurrency: {},
+    tokens: { uncachedInput: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
+    byModel: {},
+  }
+  const seen = new Set()
+  // ① 先算自己, 并登记 id —— 免得下面遍历常驻会话时把自己再加一遍
+  add2(acc, priceDay, selfState, day)
+  const selfId = typeof selfState?.sessionId === 'string' && selfState.sessionId !== '' ? selfState.sessionId : null
+  if (selfId !== null) seen.add(selfId)
+  const add = (st) => add2(acc, priceDay, st, day)
+  const svc = typeof services === 'function' ? services() : services
+  const sessions = svc?.sessions ?? null
+  const projections = svc?.projections ?? null
+  try {
+    const list = sessions?.list?.()
+    if (Array.isArray(list)) {
+      for (const s of list) {
+        const id = typeof s?.id === 'string' ? s.id : null
+        if (id !== null) seen.add(id)
+        try { add(projections?.stateOf?.(s, 'queryBalanceCost')) } catch { /* 单个会话失败不影响整体 */ }
+      }
+    }
+  } catch { /* 宿主没给 list() → 只靠缓存目录 */ }
+  for (const id of listCacheSessionIds()) {
+    if (seen.has(id)) continue
+    add(readSessionCacheRecord(id)?.queryBalanceCost?.val)
+  }
+  return { day, byCurrency: acc.byCurrency, tokens: acc.tokens, byModel: acc.byModel }
+}
+
+/**
  * 冷路径: 从缓存文件里取该会话的 queryBalanceCost **状态**(不是 wire 视图)。
  *
  * ⚠️ v1.4.4 修正 v1.4.3 的一个过严判断：v1.4.3 只认 `ver === 3`，于是**升级后所有旧缓存行
@@ -2439,6 +2550,28 @@ export function makeCostProjection(configOrGetter, services) {
     return { ...map, [model]: { ...cur, [phase]: subBuckets(cur[phase], buckets) } }
   }
 
+  /** v1.6.2: 事件归属的「日」—— 与峰谷判定共用北京时间, 免掉跨日界的 8 小时错位。 */
+  const dayKeyOf = (ts) => bjtParts(Number.isFinite(ts) ? ts : Date.now()).ymd
+  /** 相名: 走峰谷表的模型给 peak/offPeak, 其余归 flat (它们本来就不分相)。 */
+  const slotOf = (phase) => (phase === 'peak' || phase === 'offPeak' ? phase : 'flat')
+  /** 往日桶加一份用量 (不可变更新)。 */
+  const dayAdd = (map, day, model, phase, buckets) => {
+    const dayMap = map[day] ?? {}
+    const cur = dayMap[model] ?? {}
+    const slot = slotOf(phase)
+    return { ...map, [day]: { ...dayMap, [model]: { ...cur, [slot]: addBuckets(cur[slot] ?? zero(), buckets) } } }
+  }
+  /** 从日桶减一份 (替换语义) —— 重试替换槽位时必须回退, 否则同一笔会被算两次。 */
+  const daySub = (map, day, model, phase, buckets) => {
+    const dayMap = map[day]
+    if (dayMap === undefined) return map
+    const cur = dayMap[model]
+    if (cur === undefined) return map
+    const slot = slotOf(phase)
+    if (cur[slot] === undefined) return map
+    return { ...map, [day]: { ...dayMap, [model]: { ...cur, [slot]: subBuckets(cur[slot], buckets) } } }
+  }
+
   /**
    * v1.4.0: 从一条 assistant stream 里取**最后一次** usage chunk。
    * 与 dsh-llm 的 `lastAssistantStreamChunk(stream, 'usage')` 同语义, 本地实现以免给插件引入额外依赖
@@ -2470,6 +2603,48 @@ export function makeCostProjection(configOrGetter, services) {
    * v1.4.0: 把一份投影状态折成金额汇总 —— 主视图与子代理汇总**共用同一套口径**,
    * 保证「子代理那行」与「主板数字」算法完全一致 (含峰谷、币种、缓存读写分桶)。
    */
+  /**
+   * v1.6.2: 一天的用量桶 → 花费(按币种分组)。
+   * 计价口径与 summarize **逐项一致**(原生币种 / 峰谷分相 / 缓存写缺省回退到标准输入价),
+   * 只是数据源从"整段历史"换成"某一天的桶" —— byDay 的形状是 { 模型: { peak?, offPeak?, flat? } }。
+   */
+  const summarizeDay = (dayMap) => {
+    const cfg = getConfig()
+    const byCurrency = {}
+    const tokens = { uncachedInput: 0, cacheRead: 0, cacheWrite: 0, output: 0 }
+    /** v1.6.3: 逐模型的今日用量 —— 「今日总结」的模型占比用它。 */
+    const byModel = {}
+    const empty = { byCurrency, tokens, byModel }
+    if (dayMap === null || typeof dayMap !== 'object') return empty
+    const costOf = (bk, price) => ((bk.uncachedInputTokens * price.cacheMiss + bk.cacheWriteTokens * (price.cacheWrite ?? price.cacheMiss) + bk.cacheReadTokens * price.cacheHit + bk.outputTokens * price.output)) / 1e6
+    const sumOf = (bk) => (bk?.uncachedInputTokens ?? 0) + (bk?.cacheReadTokens ?? 0) + (bk?.cacheWriteTokens ?? 0) + (bk?.outputTokens ?? 0)
+    for (const model of Object.keys(dayMap)) {
+      const slots = dayMap[model] ?? {}
+      let c = 0
+      // 走峰谷表的模型分 peak/offPeak 两桶各自计价; 其余在 flat 桶里, 按当前时刻的价(没有相)
+      if (slots.peak !== undefined || slots.offPeak !== undefined) {
+        c += costOf(slots.peak ?? zero(), resolveModelPrice(cfg, model, undefined, 'peak'))
+        c += costOf(slots.offPeak ?? zero(), resolveModelPrice(cfg, model, undefined, 'offPeak'))
+      }
+      if (slots.flat !== undefined) c += costOf(slots.flat, resolveModelPrice(cfg, model))
+      // token 维度不分峰谷(它本来也不受时段影响), 把该模型所有槽位加起来
+      let tk = 0
+      for (const slot of Object.keys(slots)) {
+        const bk = slots[slot]
+        if (!bk) continue
+        tk += sumOf(bk)
+        tokens.uncachedInput += bk.uncachedInputTokens ?? 0
+        tokens.cacheRead += bk.cacheReadTokens ?? 0
+        tokens.cacheWrite += bk.cacheWriteTokens ?? 0
+        tokens.output += bk.outputTokens ?? 0
+      }
+      const cur = currencyForModel(cfg, model)
+      if (c > 0) byCurrency[cur] = round6((byCurrency[cur] ?? 0) + c)
+      if (tk > 0 || c > 0) byModel[model] = { tokens: tk, cost: round6(c), currency: cur }
+    }
+    return { byCurrency, tokens, byModel }
+  }
+
   const summarize = (state) => {
     const cfg = getConfig()
     const mainCurrency = (cfg.currency ?? 'CNY').toUpperCase()
@@ -2553,6 +2728,7 @@ export function makeCostProjection(configOrGetter, services) {
       //   谷时跑的量在峰时查看会被翻倍, 反之漏掉一半。事件无 time 时回退当前时刻。
       const eventTime = Number.isFinite(event?.time) ? event.time : Date.now()
       const phase = phaseOfModel(model, eventTime)
+      const day = dayKeyOf(eventTime)
       const prev = state.last !== null && state.last.turn === turn && state.last.step === step ? state.last : null
       if (prev !== null && prev.model === model && bucketsEqual(prev.buckets, buckets)) {
         return unchanged ? state : { ...state, currentModel: nextModel, currentProvider: nextProvider }
@@ -2560,14 +2736,18 @@ export function makeCostProjection(configOrGetter, services) {
       const isNewModel = !(model in state.byModel)
       let byModel = state.byModel
       let phaseBuckets = state.phaseBuckets ?? {}
+      let byDay = state.byDay ?? {}
       if (prev !== null) {
         byModel = { ...byModel, [prev.model]: subBuckets(byModel[prev.model] ?? zero(), prev.buckets) }
         // 替换槽位时, 分相桶也要按**上一个事件当时的相**回退, 否则重试会把同一笔算两次。
         if (prev.phase) phaseBuckets = phaseSub(phaseBuckets, prev.model, prev.phase, prev.buckets)
+        // 日桶同理: 按上一个事件**当时那一天**回退 (老状态没有 prev.day, 用当前 day 兜底)
+        byDay = daySub(byDay, prev.day ?? day, prev.model, prev.phase, prev.buckets)
       }
       byModel = { ...byModel, [model]: addBuckets(byModel[model] ?? zero(), buckets) }
       if (phase) phaseBuckets = phaseAdd(phaseBuckets, model, phase, buckets)
-      return { ...state, currentModel: nextModel, currentProvider: nextProvider, last: { turn, step, model, buckets, phase }, byModel, phaseBuckets, modelOrder: isNewModel ? [...state.modelOrder, model] : state.modelOrder }
+      byDay = dayAdd(byDay, day, model, phase, buckets)
+      return { ...state, currentModel: nextModel, currentProvider: nextProvider, last: { turn, step, model, buckets, phase, day }, byModel, phaseBuckets, byDay, modelOrder: isNewModel ? [...state.modelOrder, model] : state.modelOrder }
   }
 
   return {
@@ -2589,6 +2769,8 @@ export function makeCostProjection(configOrGetter, services) {
         }),
         /** v1.5.0: 该事件发生时的峰谷相, 替换槽位时要按同一个相回退分相桶。 */
         phase: z.string().nullable().optional(),
+        /** v1.6.2: 该事件归属的日(北京时间 yyyy-mm-dd), 替换槽位时要按同一天回退日桶。 */
+        day: z.string().optional(),
       }).nullable(),
       byModel: z.record(z.string(), z.object({
         uncachedInputTokens: z.number(),
@@ -2601,6 +2783,17 @@ export function makeCostProjection(configOrGetter, services) {
         peak: z.object({ uncachedInputTokens: z.number(), cacheReadTokens: z.number(), cacheWriteTokens: z.number(), outputTokens: z.number() }).optional(),
         offPeak: z.object({ uncachedInputTokens: z.number(), cacheReadTokens: z.number(), cacheWriteTokens: z.number(), outputTokens: z.number() }).optional(),
       })).optional(),
+      /**
+       * v1.6.2: 按「日」拆的用量桶 —— 「今日花销」的数据源。
+       * 结构: { 'yyyy-mm-dd': { 模型: { peak?, offPeak?, flat? } } }。
+       * 日期用**北京时间**(bjtParts), 与峰谷判定同一套口径 —— 否则跨日界那 8 小时会和峰谷对不上。
+       * `flat` 收那些不走 V4 峰谷表的模型(它们的 phase 是 null)。
+       */
+      byDay: z.record(z.string(), z.record(z.string(), z.object({
+        peak: z.object({ uncachedInputTokens: z.number(), cacheReadTokens: z.number(), cacheWriteTokens: z.number(), outputTokens: z.number() }).optional(),
+        offPeak: z.object({ uncachedInputTokens: z.number(), cacheReadTokens: z.number(), cacheWriteTokens: z.number(), outputTokens: z.number() }).optional(),
+        flat: z.object({ uncachedInputTokens: z.number(), cacheReadTokens: z.number(), cacheWriteTokens: z.number(), outputTokens: z.number() }).optional(),
+      }))).optional(),
       modelOrder: z.array(z.string()),
       /** v1.4.0: 本投影所属会话 id —— 子代理汇总要拿它去查 `subagentCatalog`。空串表示未知。 */
       sessionId: z.string(),
@@ -2610,7 +2803,7 @@ export function makeCostProjection(configOrGetter, services) {
       own: z.object({ currentModel: z.string().nullable(), currentProvider: z.string().nullable(), last: z.any().nullable(), byModel: z.record(z.string(), z.object({ uncachedInputTokens: z.number().nonnegative(), cacheReadTokens: z.number().nonnegative(), cacheWriteTokens: z.number().nonnegative(), outputTokens: z.number().nonnegative() })), phaseBuckets: z.record(z.string(), z.any()).optional(), modelOrder: z.array(z.string()) }),
     }),
     init: (header, inheritedEventCount) => ({
-      currentModel: null, currentProvider: null, last: null, byModel: {}, phaseBuckets: {}, modelOrder: [],
+      currentModel: null, currentProvider: null, last: null, byModel: {}, phaseBuckets: {}, byDay: {}, modelOrder: [],
       sessionId: typeof header?.id === 'string' ? header.id : '',
       inheritedEventCount: Number.isSafeInteger(inheritedEventCount) && inheritedEventCount >= 0 ? inheritedEventCount : 0,
       ownBoundaryKnown: (Number.isSafeInteger(inheritedEventCount) && inheritedEventCount >= 0) || !header?.isSeeded,
@@ -2665,15 +2858,42 @@ export function makeCostProjection(configOrGetter, services) {
           }).strict(),
           models: z.array(z.string()),
         }).strict()).optional(),
+        /**
+         * v1.6.2: 「今日」(北京时间)全部会话的消耗, 按币种分组 —— 挂件超限提醒的数据源。
+         * 跨会话汇总, 与主板数字同一套计价口径(原生币种 + 峰谷分相)。
+         */
+        todayByCurrency: z.record(z.string(), z.number().nonnegative()).optional(),
+        todayDay: z.string().optional(),
+        /**
+         * v1.6.3: **当前模型是否走 DeepSeek 峰谷表** —— 状态条据此决定要不要显示 ☀️/🌙。
+         * 旧行为只看 config.isPeak(那是个恒真的全局布尔), 于是**任何模型**都会挂上峰谷标记,
+         * 连 glm-5.3 / claude 这种根本没有峰谷价的面板也在显示, 误导用户(维护者实测反馈)。
+         */
+        peakValley: z.boolean().optional(),
+        /** v1.6.3: 今日 token 总量(四类分桶) —— 「今日总结」用。 */
+        todayTokens: z.object({
+          uncachedInput: z.number().nonnegative(),
+          cacheRead: z.number().nonnegative(),
+          cacheWrite: z.number().nonnegative(),
+          output: z.number().nonnegative(),
+        }).optional(),
+        /** v1.6.3: 逐模型的今日用量 { 模型: { tokens, cost, currency } } —— 模型占比用它。 */
+        todayByModel: z.record(z.string(), z.object({
+          tokens: z.number().nonnegative(),
+          cost: z.number().nonnegative(),
+          currency: z.string(),
+        })).optional(),
       }).strict(),
       view: (state) => {
       const cfg = getConfig()
       const mainCurrency = (cfg.currency ?? 'CNY').toUpperCase()
       // v1.4.0: 子代理消耗 (换行单独展示)。取不到服务/没有子代理 → 空数组。
       const subagents = collectSubagentCosts(services, state.sessionId, summarize, state.ownChildIds)
+      // v1.6.2: 今日花销 —— 自身那一份直接用本 state, 其余会话走 collectTodayCost (带 TTL, 见函数注释)
+      const today = collectTodayCost(services, summarizeDay, state)
       // 无事件时返回 waiting 标记, 客户端据此显示 "~—" 而非 "~¥0"
       if (state.modelOrder.length === 0) {
-        return { models: [], currentModel: state.currentModel ?? null, currentProvider: state.currentProvider ?? null, cost: -1, costByModel: {}, costByCurrency: {}, currencyByModel: {}, mixedCurrency: false, tokens: { uncachedInput: 0, cacheRead: 0, cacheWrite: 0, output: 0 }, tokensByModel: {}, currency: mainCurrency, isPeak: isPeakTime(), waiting: true, subagents }
+        return { models: [], currentModel: state.currentModel ?? null, currentProvider: state.currentProvider ?? null, cost: -1, costByModel: {}, costByCurrency: {}, currencyByModel: {}, mixedCurrency: false, tokens: { uncachedInput: 0, cacheRead: 0, cacheWrite: 0, output: 0 }, tokensByModel: {}, currency: mainCurrency, isPeak: isPeakTime(), waiting: true, subagents, todayByCurrency: today.byCurrency, todayDay: today.day, todayTokens: today.tokens, todayByModel: today.byModel, peakValley: phaseOfModel(state.currentModel ?? '', Date.now()) !== null }
       }
       const s = summarize(state)
       return {
@@ -2681,10 +2901,13 @@ export function makeCostProjection(configOrGetter, services) {
         cost: s.cost, costByModel: s.costByModel, costByCurrency: s.costByCurrency, currencyByModel: s.currencyByModel,
         mixedCurrency: s.mixedCurrency, tokens: s.tokens, tokensByModel: s.tokensByModel,
         currency: mainCurrency, isPeak: isPeakTime(), waiting: false, subagents,
+        todayByCurrency: today.byCurrency, todayDay: today.day,
+        todayTokens: today.tokens, todayByModel: today.byModel,
+        peakValley: phaseOfModel(state.currentModel ?? '', Date.now()) !== null,
       }
       },
     },
-    stateVersion: 4,
+    stateVersion: 5,
   }
 }
 
@@ -2720,6 +2943,8 @@ export function apply(ctx, config) {
     // v1.3.2: 海外模型独立计价货币 ('follow' = 跟随主货币, 默认, 行为同 v1.2.6)
     overseasCurrency: persisted.overseasCurrency ?? config.overseasCurrency ?? 'follow',
     safeThreshold: persisted.safeThreshold ?? config.safeThreshold ?? 50,
+    // v1.6.2: 今日花销提醒阈值 —— 0 表示关闭(默认关, 不打扰存量用户)
+    dailyLimit: (() => { const n = Number(persisted.dailyLimit ?? config.dailyLimit); return Number.isFinite(n) && n > 0 ? n : 0 })(),
     warnThreshold: persisted.warnThreshold ?? config.warnThreshold ?? 10,
     whaleEnabled: persisted.whaleEnabled ?? config.whaleEnabled ?? false,
     showNoBalanceBrands: persisted.showNoBalanceBrands ?? config.showNoBalanceBrands ?? false,
@@ -2896,6 +3121,7 @@ export function apply(ctx, config) {
           overseasCurrency: runtimeConfig.overseasCurrency,
           isPeak: isPeakTime(),
           isWeekend: isWeekend(),
+          dailyLimit: runtimeConfig.dailyLimit,
           whaleEnabled: !!runtimeConfig.whaleEnabled,
           showNoBalanceBrands: !!runtimeConfig.showNoBalanceBrands,
           // provider 官方/中转判定素材下发给客户端 (第 1 层: 用户名单; 第 2 层: baseURL 域名判定)
@@ -3259,6 +3485,7 @@ export function apply(ctx, config) {
             // 用户一点"保存并生效"就把自己存的阈值覆盖掉了。补上。
             safeThreshold: runtimeConfig.safeThreshold,
             warnThreshold: runtimeConfig.warnThreshold,
+            dailyLimit: runtimeConfig.dailyLimit,
             overseasCurrency: runtimeConfig.overseasCurrency,
             whaleEnabled: !!runtimeConfig.whaleEnabled,
             showNoBalanceBrands: !!runtimeConfig.showNoBalanceBrands,
@@ -3319,6 +3546,8 @@ export function apply(ctx, config) {
             }
             // 更新安全阈值
             if (typeof body.safeThreshold === 'number' && body.safeThreshold >= 0) runtimeConfig.safeThreshold = body.safeThreshold
+            // v1.6.2: 今日花销阈值(0 = 关闭) —— 负数/NaN 一律当关闭, 别让脏值进状态文件
+            if (typeof body.dailyLimit === 'number' && Number.isFinite(body.dailyLimit) && body.dailyLimit >= 0) runtimeConfig.dailyLimit = body.dailyLimit
             if (typeof body.warnThreshold === 'number' && body.warnThreshold >= 0) runtimeConfig.warnThreshold = body.warnThreshold
             if (typeof body.currency === 'string' && body.currency.trim()) runtimeConfig.currency = body.currency.trim().toUpperCase()
             // v1.3.2: 海外模型独立计价货币, 只接受白名单三值 (脏值一律落回 follow, 不放行任意字符串)
@@ -3349,6 +3578,7 @@ export function apply(ctx, config) {
               overseasCurrency: runtimeConfig.overseasCurrency,
               safeThreshold: runtimeConfig.safeThreshold,
               warnThreshold: runtimeConfig.warnThreshold,
+              dailyLimit: runtimeConfig.dailyLimit,
               whaleEnabled: runtimeConfig.whaleEnabled,
               showNoBalanceBrands: runtimeConfig.showNoBalanceBrands,
               officialProviders: runtimeConfig.officialProviders,
