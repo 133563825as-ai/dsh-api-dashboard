@@ -71,7 +71,7 @@ window.__ModuleLoader__.load({
       stepfun: "mistral", novita: "together", relay: "relay",
     };
     /** 无官方图标、用文字名代替的平台 (v1.2.1: minimax/xai/mimo 已换官方 SVG; hunyuan 暂无官方 SVG 用文字) */
-    const TEXT_ONLY = new Set(["stepfun", "novita", "relay"]);
+    const TEXT_ONLY = new Set(["stepfun", "novita", "relay", "groq", "deepinfra", "fireworks", "perplexity", "longcat"]);
     /** 文字图标: 取平台名的首字符做一个彩色圆圈字 */
     function textIcon(id, meta) {
       const color = meta.color || "#64748B";
@@ -424,6 +424,10 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
 
 /* ===== Footer ===== */
 .dshadb_footer{text-align:center;font-size:10px;color:#9ca0aa;padding:12px 14px 8px}
+/* v1.6.0: 抽屉底部的充值入口提示 —— 光把入口放进设置里等于没人看（维护者原话）。 */
+.dshadb_topup_hint{display:flex;align-items:center;gap:7px;width:100%;padding:10px 14px;border:none;border-top:1px solid #eef0f4;background:transparent;color:#6b7280;font-size:11.5px;font-weight:650;font-family:inherit;cursor:pointer;text-align:left;-webkit-tap-highlight-color:transparent;transition:background .12s ease}
+.dshadb_topup_hint:active{background:#f5f6f8}
+.dshadb_topup_hint_arrow{margin-left:auto;color:#9ca0aa;font-size:16px;line-height:1}
 
 /* ===== 分组折叠动画 ===== */
 .dshadb_group_body{max-height:0;opacity:0;overflow:hidden;transition:max-height .3s cubic-bezier(.4,0,.2,1),opacity .2s ease-out;will-change:max-height,opacity}
@@ -587,6 +591,9 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
 .dshadb_bar{background:#262a33;border-color:#363c48;color:#9aa1b0}
 .dshadb_bar_name,.dshadb_bar_amount{color:#f2f4f8}
 .dshadb_bar_cost{border-left-color:#363c48;color:#8b91a0}
+.dshadb_topup_hint{border-top-color:#2c313b;color:#9aa1b0}
+.dshadb_topup_hint:active{background:#22262e}
+.dshadb_topup_hint_arrow{color:#6b7280}
 .dshadb_subs .dshadb_sub,.dshadb_sub{background:#262a33;border-color:#363c48;color:#9aa1b0}
 .dshadb_sub_name{color:#f2f4f8}
 .dshadb_sub_amt{color:#7d9bff}
@@ -661,6 +668,11 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
       "selectedTag": "当前", "add.relay": "添加中转站", "add.custom": "添加自定义模型", "settings.title": "哦鲸鲸设置",
       "detail.total": "当前余额", "detail.topup": "总充值", "detail.used": "总使用", "detail.note": "类型",
       "detail.recharge": "去充值 ↗",
+      // v1.6.0: 充值入口页 / 抽屉底部提示
+      "topup.go": "去充值 ↗",
+      "topup.domestic": "国内平台", "topup.overseas": "海外平台",
+      "topup.hint": "点「去充值」打开该平台的开放平台 / 充值页。手机版走宿主桥调系统浏览器（界面在 webview 里，普通新标签打开不了外部浏览器）；桌面 / 浏览器回退新标签页。",
+      "topup.entryHint": "余额不够？各平台充值入口",
       "detail.sessionCost": "本会话消耗", "detail.noBalance": "该平台未开放余额查询",
       "settings.safe": "安全阈值(绿)", "settings.warn": "预警阈值(黄)", "settings.currency": "计价货币",
       "settings.overseasCurrency": "海外模型计价", "settings.overseasFollow": "跟随主货币", "settings.overseasHint": "海外厂商官方价本就是美元, 选美元可免去 ×7 折算误差",
@@ -680,6 +692,7 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
       "update.previewChannelHint": "预览频道自更新：只会更新到该分支上的新预览版，不会被 main 的正式版覆盖 ·",
       "settings.section.basic": "基础设置", "settings.section.relays": "中转站", "settings.section.models": "自定义模型",
       "settings.section.whale": "大肥鱼",
+      "settings.section.topup": "充值入口",
       "whale.enable": "收养大肥鱼", "whale.enableHint": "在屏幕边缘养一只会探头的大肥鱼（纯互动，不显示余额）",
       "whale.scale": "身体大小", "whale.peek": "探出多少",
       "whale.sound": "按压音效", "whale.soundSet": "音效组", "whale.volume": "音量",
@@ -731,6 +744,10 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
       "selectedTag": "Now", "add.relay": "Add Relay", "add.custom": "Add Custom", "settings.title": "哦鲸鲸 Settings",
       "detail.total": "Balance", "detail.topup": "Top-up", "detail.used": "Used", "detail.note": "Type",
       "detail.recharge": "Recharge ↗",
+      "topup.go": "Recharge ↗",
+      "topup.domestic": "China", "topup.overseas": "Overseas",
+      "topup.hint": "Opens the platform's console / billing page. On mobile DSHA it goes through the host bridge to the system browser (the UI lives in a webview, where a plain new tab cannot open an external browser); on desktop / browsers it falls back to a new tab.",
+      "topup.entryHint": "Low on balance? Top-up pages",
       "detail.sessionCost": "Session cost", "detail.noBalance": "No balance API",
       "settings.safe": "Safe (green)", "settings.warn": "Warn (yellow)", "settings.currency": "Currency",
       "settings.overseasCurrency": "Overseas models", "settings.overseasFollow": "Follow main", "settings.overseasHint": "Overseas vendors price in USD; picking USD avoids the x7 conversion error",
@@ -750,6 +767,7 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
       "update.previewChannelHint": "Preview-channel update: only newer previews on this branch, never the stable release on main ·",
       "settings.section.basic": "Basic", "settings.section.relays": "Relays", "settings.section.models": "Custom Models",
       "settings.section.whale": "Whale",
+      "settings.section.topup": "Top-up",
       "whale.enable": "Adopt Big Whale", "whale.enableHint": "Keep a peeking whale on the screen edge (interactive only)",
       "whale.scale": "Body size", "whale.peek": "Peek amount",
       "whale.sound": "Press sound", "whale.soundSet": "Sound set", "whale.volume": "Volume",
@@ -1515,6 +1533,16 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
             }, react.createElement(IconGear, null)),
           ]),
           react.createElement("div", { className: "dshadb_body", key: "body" }, bodyContent),
+          // v1.6.0: 充值入口提示 —— 放在 body 之外（不随列表滚走），点了直接开设置面板的充值页签。
+          // 维护者原话：「在首页的面板下面加一个提示，不然没有人去看设置」。
+          react.createElement("button", {
+            type: "button", className: "dshadb_topup_hint", key: "topup_hint",
+            onClick: () => onOpenSettings("topup"),
+          }, [
+            react.createElement("span", { key: "ic" }, "💰"),
+            react.createElement("span", { key: "tx" }, t("topup.entryHint")),
+            react.createElement("span", { className: "dshadb_topup_hint_arrow", key: "ar" }, "›"),
+          ]),
           data.fetchedAt ? react.createElement("div", { className: "dshadb_footer", key: "footer" }, [
             "更新于 " + formatTime(data.fetchedAt),
             react.createElement("span", { className: "dshadb_footer_dot", key: "d1" }),
@@ -1721,6 +1749,12 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
        * null = 还没拉到（服务端 /api-dashboard/alerts 一次都没查过）。
        */
       const [alertInfo, setAlertInfo] = react.useState(null);
+      /**
+       * v1.6.0: 「充值入口」页签的数据 —— 全部有开放平台地址的平台（含无余额接口的品牌）。
+       * 单开一页而不是只挂在卡片详情里：无余额接口的平台默认不在看板上显示，
+       * 充值入口会跟着一起藏起来，而"余额不够想去充钱"恰恰是最需要它的时刻。
+       */
+      const [consoleTargets, setConsoleTargets] = react.useState([]);
       // v1.1.0: 大肥鱼细项 (独立页签, 走 /api-dashboard/whale/settings, 与看板主配置分开)
       const [wf, setWf] = react.useState({
         scale: 1, peekRatio: 0.5, soundOn: true, soundSet: "duck",
@@ -1802,6 +1836,8 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
             if (d.providerKinds && typeof d.providerKinds === "object") setProviderKinds(d.providerKinds);
             if (Array.isArray(d.dshProviders)) setDshProviders(d.dshProviders);
             if (Array.isArray(d.dshProviderOptOut)) setDshOff(d.dshProviderOptOut);
+            // v1.6.0: 充值入口清单（服务端只下发 id/名字/分组/地址, 不含 key）
+            if (Array.isArray(d.consoleTargets)) setConsoleTargets(d.consoleTargets);
           }
         }).finally(() => { if (!cancelled) setLoading(false); });
         // 大肥鱼细项与主配置并行拉取, 失败保持默认值
@@ -1923,7 +1959,34 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
         tab("basic", t("settings.section.basic")),
         tab("relays", t("settings.section.relays")),
         tab("models", t("settings.section.models")),
+        tab("topup", t("settings.section.topup")),
         tab("whale", t("settings.section.whale")),
+      ]);
+
+      // v1.6.0: 充值入口 —— 把各平台的开放平台/充值页集中到一处。
+      // 数据来自服务端 /config 的 consoleTargets（含无余额接口的品牌，只要它有可靠地址）。
+      const consoleRow = (x) => react.createElement("div", { className: "dshadb_settings_row", key: x.id, style: { margin: "6px 0" } }, [
+        react.createElement("div", { className: "dshadb_settings_row_main", key: "m" }, [
+          react.createElement("span", { className: "dshadb_settings_row_title", key: "t2" }, x.name),
+          react.createElement("span", { className: "dshadb_settings_row_sub", key: "s2" }, String(x.url || "").replace(/^https:\/\//, "")),
+        ]),
+        react.createElement("button", {
+          type: "button", className: "dshadb_add_btn", key: "go",
+          style: { width: "auto", padding: "8px 14px", flex: "none" },
+          // 手机走 App 桥调系统浏览器; 桌面回退新标签页 —— 与卡片详情里的按钮同一条路
+          onClick: () => { openConsole(fetchT, x.id, x.url); },
+        }, t("topup.go")),
+      ]);
+      const topupSection = react.createElement("div", { className: "dshadb_settings_section", key: "s_topup" }, [
+        react.createElement("div", { key: "hint", style: { fontSize: "10.5px", color: "#9ca0aa", lineHeight: 1.5, margin: "0 2px 10px" } }, t("topup.hint")),
+        ...["国内", "海外"].map((cat) => {
+          const list = consoleTargets.filter((x) => (x.category || "") === cat);
+          if (list.length === 0) return null;
+          return react.createElement("div", { key: "g_" + cat }, [
+            react.createElement("div", { className: "dshadb_kinds_title", key: "t_" + cat }, cat === "国内" ? t("topup.domestic") : t("topup.overseas")),
+            ...list.map(consoleRow),
+          ]);
+        }).filter(Boolean),
       ]);
 
       // 基础设置: 阈值 / 币种 / 刷新间隔
@@ -2217,9 +2280,9 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
               ])
             : null,
           tabsNode,
-          section === "basic" ? basicSection : section === "relays" ? relaySection : section === "whale" ? whaleSection : modelSection,
-          // 大肥鱼页全部即改即存, 不需要保存按钮
-          section === "whale" ? null : react.createElement("button", { type: "button", className: "dshadb_add_btn", onClick: save, disabled: saving, key: "save", style: { width: "100%", borderStyle: "solid", background: "#17181c", color: "#fff", borderColor: "#17181c" } }, saving ? t("refreshing") : t("settings.save")),
+          section === "basic" ? basicSection : section === "relays" ? relaySection : section === "whale" ? whaleSection : section === "topup" ? topupSection : modelSection,
+          // 大肥鱼页全部即改即存、充值入口页没有配置项 —— 两页都不需要「保存并生效」
+          (section === "whale" || section === "topup") ? null : react.createElement("button", { type: "button", className: "dshadb_add_btn", onClick: save, disabled: saving, key: "save", style: { width: "100%", borderStyle: "solid", background: "#17181c", color: "#fff", borderColor: "#17181c" } }, saving ? t("refreshing") : t("settings.save")),
           // v0.6.0: 版本与更新区块
           react.createElement("div", { key: "upd", style: { marginTop: "12px", paddingTop: "10px", borderTop: "1px solid #e7e8ec" } }, [
             react.createElement("div", { style: { fontSize: "11px", fontWeight: "700", color: "#777b84", marginBottom: "8px" }, key: "upd_t" }, t("update.title")),
@@ -3053,8 +3116,8 @@ const openSettings = (section) => { setSettingsSection(section || "basic"); setS
           return react.createElement("span", { className: "dshadb_barwrap" }, [
             react.createElement("span", { className: "dshadb_barrow", key: "row" }, [
               // v0.5.7: 本会话消耗并入同一个胶囊, 不再裸露在外
-              react.createElement(BarReadout, { t, onOpen: openList, onOpenSettings: () => openSettings("basic"), selectedId, onSelect: handleSelect, config, cost: costDisp, provider: curProvider, key: "bar" }),
-              view === "list" ? react.createElement(DashboardDrawer, { isOpen: true, onClose: closeList, t, selectedId, onSelect: handleSelect, onOpenDetail: (id) => { setDetailId(id); setView("detail"); }, onAddRelay: () => openSettings("relays"), onAddCustom: () => openSettings("models"), onOpenSettings: () => openSettings("basic"), config, currentModel, key: "drawer" }) : null,
+              react.createElement(BarReadout, { t, onOpen: openList, onOpenSettings: (sec) => openSettings(typeof sec === "string" ? sec : "basic"), selectedId, onSelect: handleSelect, config, cost: costDisp, provider: curProvider, key: "bar" }),
+              view === "list" ? react.createElement(DashboardDrawer, { isOpen: true, onClose: closeList, t, selectedId, onSelect: handleSelect, onOpenDetail: (id) => { setDetailId(id); setView("detail"); }, onAddRelay: () => openSettings("relays"), onAddCustom: () => openSettings("models"), onOpenSettings: (sec) => openSettings(typeof sec === "string" ? sec : "basic"), config, currentModel, key: "drawer" }) : null,
               view === "detail" ? react.createElement(PlatformDetail, { isOpen: true, onClose: closeDetail, platformId: detailId, t, useProjection, config, key: "detail" }) : null,
               // 2026-09-22: underScrim —— view 是 list/detail 时下层已有全屏遮罩, 设置面板不再叠加第二层 (见 SettingsModal)
               isSettingsOpen ? react.createElement(SettingsModal, { isOpen: true, underScrim: view !== "bar", onClose: () => { setSettingsOpen(false); setView("bar"); }, onBack: () => { setSettingsOpen(false); setView("list"); }, t, config, initialSection: settingsSection, key: "settings" }) : null,

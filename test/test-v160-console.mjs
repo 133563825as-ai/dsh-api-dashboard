@@ -94,6 +94,9 @@ const HOST_OK = {
   xai: /(^|\.)x\.ai$/, openai: /(^|\.)openai\.com$/, claude: /(^|\.)claude\.com$/,
   gemini: /(^|\.)google\.com$/, qwen: /(^|\.)aliyun\.com$/,
   mimo: /(^|\.)xiaomimimo\.com$/, doubao: /(^|\.)volcengine\.com$/, hunyuan: /(^|\.)tencent\.com$/,
+  groq: /(^|\.)groq\.com$/, mistral: /(^|\.)mistral\.ai$/, together: /(^|\.)together\.ai$/,
+  deepinfra: /(^|\.)deepinfra\.com$/, fireworks: /(^|\.)fireworks\.ai$/, perplexity: /(^|\.)perplexity\.ai$/,
+  longcat: /(^|\.)longcat\.chat$/,
 }
 for (const { id, url } of pairs) {
   let host = ''
@@ -114,7 +117,10 @@ const stepfunLine = (src.match(/id: 'stepfun'[\s\S]{0,400}?consoleUrl: '([^']+)'
 a('#2 stepfun 只给首页(它的 /finance /account 全是 404, 不编路径)',
   stepfunLine === 'https://platform.stepfun.com/', stepfunLine)
 const geminiLine = (src.match(/id: 'gemini'[\s\S]{0,400}?consoleUrl: '([^']+)'/) || [])[1] || ''
-a('#2 gemini 只给一级域名首页', geminiLine === 'https://aistudio.google.com/', geminiLine)
+a('#2 gemini 用官方文档给的 AI Studio billing 页(已核实, 不再只给首页)',
+  geminiLine === 'https://aistudio.google.com/billing', geminiLine)
+a('#2 xai 用官方 Manage Billing 文档的地址(已核实)',
+  /consoleUrl: 'https:\/\/console\.x\.ai\/team\/default\/billing'/.test(src))
 
 // 服务端下发: 客户端得拿得到
 a('#2 /platforms 下发 consoleUrl', /consoleUrl: p\.consoleUrl \|\| ''/.test(src))
@@ -125,6 +131,28 @@ a('#2 挂 consoleUrl 的那段只从预设表取地址, 不吃客户端输入',
 // 没地址的平台不挂字段 → 卡片自然不显示按钮
 a('#2 空 consoleUrl 不挂到 balance 上(避免渲染一个点了 404 的按钮)',
   !/b\.consoleUrl = u \|\| ''/.test(src) && /if \(u\) b\.consoleUrl = u/.test(src))
+
+// ===== ③ 充值入口要有"能一眼看全"的地方 + 首页得给指路 =====
+// 维护者原话：「在首页的面板下面加一个提示，不然没有人去看设置」——
+// 入口只藏在设置里 = 等于没有。两处都要钉住。
+a('#3 设置面板有独立「充值入口」页签',
+  /tab\("topup", t\("settings\.section\.topup"\)\)/.test(cli))
+a('#3 充值页按平台逐行渲染 + 每行一个按钮', /const consoleRow = \(x\) =>/.test(cli) && /t\("topup\.go"\)/.test(cli))
+a('#3 充值页国内/海外分组', /\["国内", "海外"\]\.map\(/.test(cli))
+a('#3 充值页没有配置项 → 不显示「保存并生效」(免得用户以为要保存什么)',
+  /\(section === "whale" \|\| section === "topup"\) \? null :/.test(cli))
+a('#3 抽屉底部有充值提示(不随列表滚走: 在 body 之外)',
+  /className: "dshadb_topup_hint"/.test(cli) &&
+  /dshadb_body", key: "body" \}, bodyContent\),[\s\S]{0,400}?dshadb_topup_hint/.test(cli))
+a('#3 点提示直接进「充值入口」页, 不是进基础页', /onClick: \(\) => onOpenSettings\("topup"\)/.test(cli))
+a('#3 onOpenSettings 兼容不带参数调用(状态条齿轮那里就是不带的)',
+  /onOpenSettings: \(sec\) => openSettings\(typeof sec === "string" \? sec : "basic"\)/.test(cli))
+a('#3 抽屉提示有独立 CSS 且深色模式有覆盖',
+  /\.dshadb_topup_hint\{display:flex/.test(cli) &&
+  /prefers-color-scheme:dark\)\{[\s\S]*?\.dshadb_topup_hint\{border-top-color/.test(cli))
+a('#3 清单由服务端下发(不靠 balances, 无 key / 关了品牌开关的平台也得在)',
+  /consoleTargets: PLATFORM_PRESETS\.filter\(p => p\.consoleUrl\)\.map/.test(src))
+a('#3 客户端拉 consoleTargets', /setConsoleTargets\(d\.consoleTargets\)/.test(cli))
 
 console.log('\n结果: ' + pass + ' 通过, ' + fail + ' 失败')
 if (fail > 0) process.exitCode = 1

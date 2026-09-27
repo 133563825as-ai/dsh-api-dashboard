@@ -1534,7 +1534,7 @@ const PLATFORM_PRESETS = [
     consoleUrl: 'https://novita.ai/billing/payment-methods' },               // 已核实(官方 Payment Methods 文档直链)
   { id: 'xai', label: 'xAI Grok', icon: 'xai', color: '#000000', category: '海外',
     baseUrl: 'https://api.x.ai', queryType: 'openai', envKeys: ['XAI_API_KEY'],
-    consoleUrl: 'https://console.x.ai/' },                                   // 仅首页(本机 x.ai 只解析 IPv6, 未实测)
+    consoleUrl: 'https://console.x.ai/team/default/billing' },                 // 已核实(官方 Manage Billing 文档直链; team/default 为占位段)
 
   // ===== 著名模型品牌 (无公开余额接口, 仅显示模型 + 按价格表估算消耗) =====
   // 这些平台查不到余额, 但更要紧的是让用户点得到充值页 —— 余额红着脸却找不到入口最难受。
@@ -1543,7 +1543,7 @@ const PLATFORM_PRESETS = [
   { id: 'claude', label: 'Anthropic Claude', icon: 'claude', color: '#D97757', category: '海外', noBalance: true,
     consoleUrl: 'https://platform.claude.com/settings/billing' },              // 已核实(support.claude.com 帮助文直链)
   { id: 'gemini', label: 'Google Gemini', icon: 'gemini', color: '#4285F4', category: '海外', noBalance: true,
-    consoleUrl: 'https://aistudio.google.com/' },                              // 仅首页(本机不可达, 未实测)
+    consoleUrl: 'https://aistudio.google.com/billing' },                       // 已核实(官方 Gemini API billing 文档「AI Studio Billing page」直链)
   { id: 'qwen', label: '通义千问 Qwen', icon: 'qwen', color: '#623AE7', category: '国内', noBalance: true,
     consoleUrl: 'https://billing-cost.console.aliyun.com/fortune/fund-management/recharge' }, // 已核实(阿里云官方帮助文直链)
   { id: 'mimo', label: '小米 MiMo', icon: 'mimo', color: '#FF6900', category: '国内', noBalance: true,
@@ -1553,6 +1553,23 @@ const PLATFORM_PRESETS = [
     consoleUrl: 'https://console.volcengine.com/finance/recharge/' },          // 未核实(302 到登录页且保留该路径)
   { id: 'hunyuan', label: '腾讯混元', icon: 'hunyuan', color: '#0052D9', category: '国内', noBalance: true,
     consoleUrl: 'https://console.cloud.tencent.com/account/recharge' },        // 未核实(302 到登录页且保留该路径)
+
+  // ===== v1.6.0: 又一批「查不到余额、但查到了官方充值入口」的平台 =====
+  // 地址全部来自官方文档/帮助页**正文直链**（2026-09-27 逐条核实，含假路径对照以排除 SPA 万能兜底）。
+  { id: 'groq', label: 'Groq', icon: 'groq', color: '#F55036', category: '海外', noBalance: true,
+    consoleUrl: 'https://console.groq.com/settings/billing/manage' },          // 已核实(官方 Billing FAQ 直链)
+  { id: 'mistral', label: 'Mistral', icon: 'mistral', color: '#FA520F', category: '海外', noBalance: true,
+    consoleUrl: 'https://admin.mistral.ai/organization/billing' },             // 已核实(官方 Billing 文档「Open Billing」直链)
+  { id: 'together', label: 'Together AI', icon: 'together', color: '#0F6FFF', category: '海外', noBalance: true,
+    consoleUrl: 'https://api.together.ai/settings/billing' },                  // 已核实(官方帮助中心 Credit Packs 直链)
+  { id: 'deepinfra', label: 'DeepInfra', icon: 'deepinfra', color: '#00A67E', category: '海外', noBalance: true,
+    consoleUrl: 'https://deepinfra.com/dash/billing' },                        // 已核实(页面确为账单页 + 官方 API 文档佐证)
+  { id: 'fireworks', label: 'Fireworks AI', icon: 'fireworks', color: '#FF5C1A', category: '海外', noBalance: true,
+    consoleUrl: 'https://fireworks.ai/billing' },                              // 已核实(官方 quotas 文档直链 → app.fireworks.ai/account/billing)
+  { id: 'perplexity', label: 'Perplexity', icon: 'perplexity', color: '#20808D', category: '海外', noBalance: true,
+    consoleUrl: 'https://console.perplexity.ai/project/billing' },             // 已核实(官方文档 Card + FAQ 正文直链)
+  { id: 'longcat', label: '美团 LongCat', icon: 'longcat', color: '#F5C518', category: '国内', noBalance: true,
+    consoleUrl: 'https://longcat.chat/platform/cost/recharge?tab=api' },       // 已核实(官方文档正文直链)
 ]
 
 // ============================================================
@@ -3242,6 +3259,12 @@ export function apply(ctx, config) {
             preview: IS_PREVIEW,
             updateRef: UPDATE_REF,
             previewChannel: PREVIEW_CHANNEL,
+            // v1.6.0: 「充值入口」页签的数据源 —— 全部有开放平台地址的平台(含无余额接口的品牌)。
+            // 单独下发而不是让客户端从 balances 里扒: 那些平台可能因为没配 key、或用户关了
+            // 「显示模型品牌」而不出现在看板上, 但充值入口照样要给。
+            consoleTargets: PLATFORM_PRESETS.filter(p => p.consoleUrl).map(p => ({
+              id: p.id, name: p.label, category: p.category, url: p.consoleUrl,
+            })),
           })
           return
         }
