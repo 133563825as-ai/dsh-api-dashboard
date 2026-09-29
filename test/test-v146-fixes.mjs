@@ -68,8 +68,17 @@ a('#2-2 中英文都有 all.attention 文案', /"all\.attention": "\{n\} 需关�
 // ===== ③ 告警通道 =====
 a('#2-3 不再调用不存在的 ctx.notify', !/typeof ctx\.notify === 'function'/.test(src))
 a('#2-3 不再调用不存在的 webServer.notify', !/ctx\.get\('webServer'\)\?\.notify/.test(src))
+// v1.6.8: 桥调用收敛到通用 bridgeCall; 且**前台跳过(FOREGROUND_SKIP)要改发 App 内提示**。
+// 真机(2026-09-29, 维护者反馈「余额告警没反应」): App 在前台时 /app/notify 回 200 +
+// FOREGROUND_SKIP(桥主动跳过), 旧实现只看 res.ok → 记成 sent, 面板显示"已送达"而屏幕上什么都没有。
 a('#2-3 改走 DSHA App 桥(127.0.0.1:3090/app/notify)',
-  /const ALERT_BRIDGE_URL = 'http:\/\/127\.0\.0\.1:3090\/app\/notify'/.test(src) && /function notifyViaAppBridge/.test(src))
+  /const ALERT_BRIDGE_URL = 'http:\/\/127\.0\.0\.1:3090\/app\/notify'/.test(src) && /async function bridgeCall\(/.test(src))
+a('#2-3 前台被桥跳过(FOREGROUND_SKIP)时改发 App 内提示',
+  /const ALERT_BRIDGE_TOAST = 'http:\/\/127\.0\.0\.1:3090\/app\/toast'/.test(src) && /if \(first\.kind === 'foreground-skip'\)/.test(src))
+a('#2-3 桥响应体按分类函数判定, 不能只看 HTTP 200',
+  /export const classifyBridgeReply = \(status, body\) => \{/.test(src) && /includes\('FOREGROUND_SKIP'\)/.test(src))
+a('#2-3 投递结果如实分三档计数(进通知栏 / 前台转内提示 / 失败)',
+  /alertStatus\.sent\+\+/.test(src) && /alertStatus\.skipped\+\+/.test(src) && /alertStatus\.failed\+\+/.test(src))
 a('#2-3 桥 token 从 $DSH_HOME/.bridge_token 读(不再硬编码 /root)',
   /process\.env\.DSH_HOME \|\| join\(homedir\(\), '\.dsh'\)/.test(src) && /\.bridge_token/.test(src))
 a('#2-3 桥调用带超时, 不拖住余额轮询', /AbortSignal\.timeout\(\d+\)/.test(src))
@@ -78,8 +87,22 @@ a('#2-3 拿不到通道时记状态(可见降级), 不静默吞掉',
 a('#2-3 /api-dashboard/alerts 暴露通道状态与最近一条告警',
   /path: '\/api-dashboard\/alerts'/.test(src) && /channel: alertStatus\.channel/.test(src) && /last: alertStatus\.last/.test(src))
 a('#2-3 告警状态端点同样过鉴权闸门', /path: '\/api-dashboard\/alerts',[\s\S]{0,220}?if \(!allowRequest\(req, res\)\) return/.test(src))
-a('#2-3 只在跨档且非回到正常时告警(与旧行为一致)',
-  /if \(level === prev \|\| level === 'ok'\) continue/.test(src))
+// v1.6.8: 告警策略从「只在跨档发一次」升级为「跨档立即发 + 停在低档时按间隔重复」。
+// 旧判定 `if (level === prev || level === 'ok') continue` 已随之下线 —— 真机反馈
+// 「错过那一条就彻底安静了」。判定收敛到纯函数 planAlert（test-alert-plan.mjs 另有 10 条行为断言），
+// 这里只钉"契约没变味": 回到正常不提醒 / 跨档立即提醒 / 低档按间隔重复 / 间隔 0 = 关闭重复。
+a('#2-3 告警判定收敛到纯函数 planAlert(跨档立即提醒 + 低档按间隔重复)',
+  /export const planAlert = \(prev, level, now, repeatMs\) => \{/.test(src) &&
+  /if \(level !== 'warn' && level !== 'err'\) return null/.test(src) &&
+  /if \(prevLevel !== level\) return 'cross'/.test(src) &&
+  /return now - at >= repeatMs \? 'repeat' : null/.test(src))
+a('#2-3 旧的「只发一次」判定已下线(改由 planAlert 决定)', !/if \(level === prev \|\| level === 'ok'\) continue/.test(src))
+a('#2-3 告警状态跟着状态文件走(重启不再把所有低余额重新轰炸一遍)',
+  /lastAlertState = \(persisted\.alertState/.test(src) && /saveAlertState\(newState\)/.test(src))
+a('#2-3 重复提醒间隔可配(0 = 关闭)且进消毒表',
+  /alertRepeatHours = clampAlertRepeatHours\(body\.alertRepeatHours\)/.test(src) && /'alertRepeatHours', 0, ALERT_REPEAT_MAX_HOURS/.test(src))
+a('#2-3 设置面板有「发送测试提醒」端点',
+  /path: '\/api-dashboard\/alerts\/test'/.test(src) && /async handler\(req, res\) \{\n\s+if \(!allowRequest\(req, res\)\) return/.test(src))
 
 // ===== ③b 可见降级必须真的落到界面上 (v1.5.1) =====
 // 端点存在 ≠ 用户看得见。v1.5.0 只注册了 /api-dashboard/alerts, 客户端一次都没引用 ——

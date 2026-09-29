@@ -184,7 +184,8 @@ a('H4b clampRefreshSec 下限 1 / 上限 60', (() => {
   const gateCount = (src.match(/if \(!allowRequest\(req, res\)\) return/g) || []).length
   // v1.4.6: 11 → 12 —— 新增 /api-dashboard/alerts(告警通道状态), 同样带闸门
   // v1.6.0: 12 → 13 —— 新增 /api-dashboard/open(打开开放平台/充值页), 同样带闸门
-  a('H3 13 个路由全部过闸门', gateCount === 13, 'got ' + gateCount)
+  // v1.6.8: 13 → 14 —— 新增 /api-dashboard/alerts/test(发送测试提醒), 同样带闸门
+  a('H3 14 个路由全部过闸门', gateCount === 14, 'got ' + gateCount)
   a('H3 用 connection.requestRejection（与 dsh-web-mobile 同一个闸门）', /requestRejection\(req\)/.test(src))
   // 只看代码行, 注释里提到这个坑不算（第一版断言就栽在这: 注释里写了这句, 断言直接假红）
   const codeOnly = src.split('\n').filter((l) => { const t = l.trim(); return !t.startsWith('*') && !t.startsWith('//') && !t.startsWith('/*') }).join('\n')
@@ -262,7 +263,9 @@ a('H4b clampRefreshSec 下限 1 / 上限 60', (() => {
   a('A 载入时做形状校验', /relayEndpointHints\.clear\(\)/.test(src) && /typeof v === 'string' && v\.length <= 32/.test(src))
   a('A 命中端点排到候选最前', /candidates\.unshift\(candidates\.splice\(idx, 1\)\[0\]\)/.test(src))
   a('A 命中后落盘（仅在变化时）', /if \(relayEndpointHints\.get\(id\) !== cand\.type\)/.test(src) && /relayEndpoints: Object\.fromEntries/.test(src))
-  a('A 的持久化字段进消毒白名单', /OBJECT_FIELDS = \['whaleSettings', 'prices', 'relayEndpoints'\]/.test(src))
+  a('A 的持久化字段进消毒白名单', /OBJECT_FIELDS = \['whaleSettings', 'prices', 'relayEndpoints'/.test(src))
+  // v1.6.8: 告警状态也持久化(重启不再重新轰炸), 同样必须登记进消毒表 —— 否则状态文件形状跑偏时 apply() 会抛
+  a('告警状态的持久化字段同样进消毒白名单', /OBJECT_FIELDS = \[[^\]]*'alertState'/.test(src))
   a('A 只影响顺序（候选全表仍会试）', /只做\*\*排序提示\*\*/.test(src))
 }
 

@@ -425,8 +425,11 @@ const CONFIG_VERSION = 2
  * 所以这里把所有"本该是数组/对象/数字"的字段统一消毒, 消毒不了就丢弃, 绝不让 apply() 抛。
  * ⚠️ 新增持久化字段时, 记得同步登记到这里。
  */
+/** v1.6.8: 重复提醒间隔上限(小时) —— 一周。0 = 只在跨档时提醒一次(旧行为)。 */
+const ALERT_REPEAT_MAX_HOURS = 168
+
 const ARRAY_FIELDS = ['customRelays', 'customModels', 'officialProviders', 'dshProviderOptOut', 'presets']
-const OBJECT_FIELDS = ['whaleSettings', 'prices', 'relayEndpoints']
+const OBJECT_FIELDS = ['whaleSettings', 'prices', 'relayEndpoints', 'alertState']
 const NUMBER_FIELDS = [
   ['refreshIntervalMs', 1000, 60000],   // H-4b: 曾经能持久化成 -1 → 3 秒内 1794 次上游请求
   ['clientPollIntervalMs', 1000, 60000],
@@ -434,6 +437,7 @@ const NUMBER_FIELDS = [
   ['safeThreshold', 0, Number.MAX_SAFE_INTEGER],
   ['warnThreshold', 0, Number.MAX_SAFE_INTEGER],
   ['dailyLimit', 0, Number.MAX_SAFE_INTEGER],   // v1.6.2: 今日花销提醒阈值, 0=关闭
+  ['alertRepeatHours', 0, ALERT_REPEAT_MAX_HOURS], // v1.6.8: 重复提醒间隔(小时), 0=只在跨档提醒一次
   ['configVersion', 0, Number.MAX_SAFE_INTEGER],
 ]
 
@@ -1607,6 +1611,12 @@ export const Config = Schema.object({
   safeThreshold: Schema.number().min(0).default(50),
   /** v1.6.2: 今日花销提醒阈值(主币种), 超过就弹一次「老大，今天花销已经超过 ¥# 啦」。0 = 关闭。 */
   dailyLimit: Schema.number().min(0).default(0),
+  /**
+   * v1.6.8: **重复提醒间隔(小时)** —— 余额停在预警档(黄/红)时, 每隔这么久再提醒一次。
+   * 0 = 关闭(只在刚跌破/跨档时提醒一次, 即 v1.6.7 及更早的行为)。默认 6 小时。
+   * 为什么加: 真机反馈「错过那一条就彻底安静了」—— 跨档只发一条的设计在手机上太容易漏。
+   */
+  alertRepeatHours: Schema.number().min(0).max(168).default(6),
   warnThreshold: Schema.number().min(0).default(10),
   /** 计价货币 */
   currency: Schema.string().default('CNY'),
@@ -1673,12 +1683,94 @@ let lastAlertState = {}
 // token 读 $DSH_HOME/.bridge_token。拿不到通道时不再只"静默": alertStatus.channel 记 'none',
 // 由 /api-dashboard/alerts 暴露给设置面板做可见降级 (issue #2 点名要求这一点)。
 const ALERT_BRIDGE_URL = 'http://127.0.0.1:3090/app/notify'
+// v1.6.8: App **在前台**时 /app/notify 会回 FOREGROUND_SKIP(真机实测), 这时改发 App 内提示。
+// 这条通道是 2026-09-29 真机验证过的: 前台 toast = OK, 前台 notify = FOREGROUND_SKIP, 后台 notify = OK。
+const ALERT_BRIDGE_TOAST = 'http://127.0.0.1:3090/app/toast'
 // v1.5.1: 探测通道只用**只读**的 /app/version —— 不拿 /app/notify 去试,
 // 那会在用户手机上真弹一条通知来"测通知", 很讨嫌。
 const ALERT_BRIDGE_PROBE = 'http://127.0.0.1:3090/app/version'
-const alertStatus = { channel: 'unknown', checkedAt: 0, last: null, sent: 0, failed: 0 }
+/** v1.6.8: 重复提醒间隔(小时) 消毒 —— 非法/≤0 一律 0(关闭), 超上限夹到上限。纯函数, 便于单测。 */
+export const clampAlertRepeatHours = (v) => {
+  const n = Number(v)
+  if (!Number.isFinite(n) || n <= 0) return 0
+  return Math.min(Math.round(n), ALERT_REPEAT_MAX_HOURS)
+}
+
+/**
+ * v1.6.8: 桥的响应 → 投递结果。
+ *   'delivered'       —— 真的进了通知栏
+ *   'foreground-skip' —— App 在前台, 桥主动跳过(200 + `{"result":"FOREGROUND_SKIP"}`)
+ *   'failed'          —— 其它(非 2xx / 认不出的响应体)
+ *
+ * ⚠️ **只看 `resp.ok` 是不够的** —— FOREGROUND_SKIP 也是 200。旧实现把它计入 sent,
+ * 于是设置面板显示「通道可用 / 已发送」, 用户屏幕上却什么都没有: 2026-09-29 真机那条
+ * 15:30 的余额告警就是这么"消失"的(排查时被这个假成功带偏到系统设置方向)。
+ */
+export const classifyBridgeReply = (status, body) => {
+  if (!(typeof status === 'number' && status >= 200 && status < 300)) return 'failed'
+  const text = typeof body === 'string' ? body : ''
+  if (text.includes('FOREGROUND_SKIP')) return 'foreground-skip'
+  if (text.includes('"result":"OK"')) return 'delivered'
+  return 'failed'
+}
+
+/**
+ * v1.6.8: 告警触发判定 —— 纯函数, 便于单测。
+ *   ① 跨档(level 与上次不同, 且新档非 ok) → 'cross', 立即提醒
+ *   ② 停在同一个低档 + 距上次提醒已过 repeatMs → 'repeat', 冷却重发
+ *      (repeatMs = 0 表示不重发, 即 v1.6.7 及更早的「只提醒一次」行为)
+ * ⚠️ prev 为空(进程刚起来、且状态文件里没有记录)按**跨档**处理: 相当于重新上膛,
+ *   否则重启后余额已经很低却永远不提醒。
+ * @param prev {{level?: string, at?: number}|undefined} 上一次的档位与提醒时刻
+ * @param level {'ok'|'warn'|'err'} 本次档位
+ * @param now {number} 当前时间戳
+ * @param repeatMs {number} 重复提醒间隔(毫秒), 0 = 关闭
+ * @returns {'cross'|'repeat'|null}
+ */
+export const planAlert = (prev, level, now, repeatMs) => {
+  if (level !== 'warn' && level !== 'err') return null
+  const prevLevel = prev && typeof prev === 'object' ? prev.level : undefined
+  if (prevLevel !== level) return 'cross'
+  const at = prev && Number.isFinite(prev.at) ? prev.at : 0
+  if (!(repeatMs > 0)) return null
+  return now - at >= repeatMs ? 'repeat' : null
+}
+
+const alertStatus = {
+  channel: 'unknown',   // 'unknown' | 'app-bridge' | 'none'
+  checkedAt: 0,
+  last: null,
+  sent: 0,              // 真的进了通知栏
+  skipped: 0,           // App 在前台被跳过 → 改发 App 内提示且成功
+  failed: 0,
+  lastDelivery: null,   // 'notify' | 'toast' | 'failed'
+}
 // 探测只做一次(通道在进程生命周期内不会变), 失败也不重试 —— 别拿用户的面板开启时机做重试循环
 let alertChannelProbed = false
+
+/** 读 3090 桥 token; 拿不到返回 ''。 */
+async function readBridgeToken() {
+  try {
+    const fsp = await import('node:fs/promises')
+    const home = process.env.DSH_HOME || join(homedir(), '.dsh')
+    return (await fsp.readFile(join(home, '.bridge_token'), 'utf-8')).trim()
+  } catch { return '' }
+}
+
+/** 调一次桥端点; 返回 { kind, status, body }(kind 见 classifyBridgeReply)。不抛。 */
+async function bridgeCall(base, params, timeoutMs) {
+  try {
+    const token = await readBridgeToken()
+    if (!token) return { kind: 'failed', status: 0, body: 'no-token' }
+    const qs = Object.entries({ ...params, token })
+      .map(([k, v]) => k + '=' + encodeURIComponent(v)).join('&')
+    const resp = await fetch(base + '?' + qs, { signal: AbortSignal.timeout(timeoutMs) })
+    const body = await resp.text()
+    return { kind: classifyBridgeReply(resp.status, body), status: resp.status, body }
+  } catch (err) {
+    return { kind: 'failed', status: 0, body: err instanceof Error ? err.message : String(err) }
+  }
+}
 
 /**
  * v1.5.1: 主动探测一次通知通道 (issue #2 的"可见降级"补完)。
@@ -1699,10 +1791,7 @@ async function probeAlertChannel() {
   }
   alertChannelProbed = true
   try {
-    const fsp = await import('node:fs/promises')
-    const home = process.env.DSH_HOME || join(homedir(), '.dsh')
-    let token = ''
-    try { token = (await fsp.readFile(join(home, '.bridge_token'), 'utf-8')).trim() } catch { /* 无 token */ }
+    const token = await readBridgeToken()
     if (!token) { alertStatus.channel = 'none'; alertStatus.checkedAt = Date.now(); return alertStatus.channel }
     const resp = await fetch(ALERT_BRIDGE_PROBE + '?token=' + encodeURIComponent(token),
       { signal: AbortSignal.timeout(2000) })
@@ -1715,35 +1804,51 @@ async function probeAlertChannel() {
   return alertStatus.channel
 }
 
-/** 通过 3090 桥发一条 App 通知; 只记录结果, 不抛。 */
-async function notifyViaAppBridge(title, text) {
-  try {
-    const fsp = await import('node:fs/promises')
-    const home = process.env.DSH_HOME || join(homedir(), '.dsh')
-    let token = ''
-    try { token = (await fsp.readFile(join(home, '.bridge_token'), 'utf-8')).trim() } catch { /* 无 token */ }
-    if (!token) { alertStatus.channel = 'none'; alertStatus.checkedAt = Date.now(); alertStatus.failed++; return false }
-    const url = ALERT_BRIDGE_URL
-      + '?title=' + encodeURIComponent(title)
-      + '&text=' + encodeURIComponent(text)
-      + '&token=' + encodeURIComponent(token)
-    const resp = await fetch(url, { signal: AbortSignal.timeout(5000) })
-    await resp.text()
-    alertStatus.channel = resp.ok ? 'app-bridge' : 'none'
-    alertStatus.checkedAt = Date.now()
-    if (resp.ok) alertStatus.sent++; else alertStatus.failed++
-    return resp.ok
-  } catch {
-    alertStatus.channel = 'none'; alertStatus.checkedAt = Date.now(); alertStatus.failed++
-    return false
+/**
+ * v1.6.8: 投递一条告警 —— 后台走通知栏; App 在前台(`FOREGROUND_SKIP`)时改发 App 内 Toast。
+ * 三个计数**如实分开**: sent(进通知栏) / skipped(前台→内提示) / failed。
+ * @returns {Promise<'notify'|'toast'|'failed'>}
+ */
+async function deliverAlert(title, text) {
+  const first = await bridgeCall(ALERT_BRIDGE_URL, { title, text }, 5000)
+  alertStatus.checkedAt = Date.now()
+  if (first.kind === 'delivered') {
+    alertStatus.channel = 'app-bridge'; alertStatus.sent++; alertStatus.lastDelivery = 'notify'
+    return 'notify'
   }
+  if (first.kind === 'foreground-skip') {
+    // 你就在 App 里 —— 通知栏那条会被桥丢掉, 换成能立刻看见的 App 内提示
+    alertStatus.channel = 'app-bridge'
+    const toast = await bridgeCall(ALERT_BRIDGE_TOAST, { text: title + ' · ' + text }, 5000)
+    alertStatus.checkedAt = Date.now()
+    if (toast.kind === 'delivered') { alertStatus.skipped++; alertStatus.lastDelivery = 'toast'; return 'toast' }
+    alertStatus.failed++; alertStatus.lastDelivery = 'failed'
+    return 'failed'
+  }
+  alertStatus.channel = first.body === 'no-token' ? 'none' : alertStatus.channel
+  alertStatus.failed++; alertStatus.lastDelivery = 'failed'
+  return 'failed'
+}
+
+/** v1.6.8: 低档提醒文案; 'repeat' 是冷却到期后的重复提醒, 要让人看出这不是新问题。 */
+const alertMessage = (level, kind, name, val, unit) => {
+  const base = level === 'warn' ? `${name} 余额偏低: ${val}${unit}` : `${name} 余额不足: ${val}${unit}`
+  return kind === 'repeat' ? `${base}（仍未处理，再次提醒）` : base
+}
+
+/** v1.6.8: 把告警状态写回状态文件(只在真的提醒过时才写) —— 免得每次重启都重新轰炸一遍。 */
+const saveAlertState = (state) => {
+  try { savePersistedState({ alertState: state }) } catch { /* 写盘失败不影响告警本身 */ }
 }
 
 function checkAlerts(balances, config, ctx) {
   void ctx // 旧通知通道参数保留: 调用方签名不变, 但已不再使用 (见上方说明)
   const safe = config.safeThreshold ?? 50
   const warn = config.warnThreshold ?? 10
+  const repeatMs = clampAlertRepeatHours(config.alertRepeatHours) * 3600_000
+  const now = Date.now()
   const newState = {}
+  let fired = false
 
   for (const b of balances) {
     if (b.status !== 'ok') continue
@@ -1751,18 +1856,20 @@ function checkAlerts(balances, config, ctx) {
     const val = b.percent != null ? b.percent : b.total
     const prev = lastAlertState[id]
     const level = val > safe ? 'ok' : val > warn ? 'warn' : 'err'
-    newState[id] = level
-    if (level === prev || level === 'ok') continue // 只在跨档(且非回到正常)时告警, 与旧行为一致
+    const kind = planAlert(prev, level, now, repeatMs)
+    // 提醒过才刷新时刻, 否则沿用上次的时刻(冷却从"上一次真的提醒"算起)
+    newState[id] = { level, at: kind !== null ? now : (Number.isFinite(prev?.at) ? prev.at : now) }
+    if (kind === null) continue
 
     const name = b.name || id
     const unit = b.percent != null ? '%' : (b.currency || '')
-    const msg = level === 'warn'
-      ? `${name} 余额偏低: ${val}${unit}`
-      : `${name} 余额不足: ${val}${unit}`
-    alertStatus.last = { at: Date.now(), level, platform: id, text: msg }
-    void notifyViaAppBridge('哦鲸鲸', msg)
+    const msg = alertMessage(level, kind, name, val, unit)
+    alertStatus.last = { at: now, level, platform: id, text: msg, kind }
+    fired = true
+    void deliverAlert('哦鲸鲸', msg)
   }
   lastAlertState = newState
+  if (fired) saveAlertState(newState)
 }
 
 // 余额解析适配器
@@ -2960,6 +3067,8 @@ export function apply(ctx, config) {
     safeThreshold: persisted.safeThreshold ?? config.safeThreshold ?? 50,
     // v1.6.2: 今日花销提醒阈值 —— 0 表示关闭(默认关, 不打扰存量用户)
     dailyLimit: (() => { const n = Number(persisted.dailyLimit ?? config.dailyLimit); return Number.isFinite(n) && n > 0 ? n : 0 })(),
+    // v1.6.8: 重复提醒间隔(小时); 0=关闭。默认 6 小时(真机反馈「只提醒一次太容易漏」)
+    alertRepeatHours: clampAlertRepeatHours(persisted.alertRepeatHours ?? config.alertRepeatHours ?? 6),
     warnThreshold: persisted.warnThreshold ?? config.warnThreshold ?? 10,
     whaleEnabled: persisted.whaleEnabled ?? config.whaleEnabled ?? false,
     showNoBalanceBrands: persisted.showNoBalanceBrands ?? config.showNoBalanceBrands ?? false,
@@ -2975,6 +3084,12 @@ export function apply(ctx, config) {
   }
 
   const getConfig = () => runtimeConfig
+
+  // v1.6.8: 告警状态(上次档位 + 上次提醒时刻)跟着状态文件走 —— 否则每次重启都会把
+  // 所有低余额平台重新提醒一遍(repeat 冷却也失去意义)。
+  lastAlertState = (persisted.alertState && typeof persisted.alertState === 'object' && !Array.isArray(persisted.alertState))
+    ? persisted.alertState
+    : {}
 
   /** 直接读 ~/.dsh/.credentials.yaml 的 refs: 段 —— 拿不到 credentials 服务时的兜底。
    *  @param {string[]} names 要找的 ref 名 (遇到第一个有值的就返回) */
@@ -3137,6 +3252,8 @@ export function apply(ctx, config) {
           isPeak: isPeakTime(),
           isWeekend: isWeekend(),
           dailyLimit: runtimeConfig.dailyLimit,
+          // v1.6.8: 重复提醒间隔(小时) —— 设置面板那个输入框的初值来源之一
+          alertRepeatHours: runtimeConfig.alertRepeatHours,
           whaleEnabled: !!runtimeConfig.whaleEnabled,
           showNoBalanceBrands: !!runtimeConfig.showNoBalanceBrands,
           // provider 官方/中转判定素材下发给客户端 (第 1 层: 用户名单; 第 2 层: baseURL 域名判定)
@@ -3501,6 +3618,7 @@ export function apply(ctx, config) {
             safeThreshold: runtimeConfig.safeThreshold,
             warnThreshold: runtimeConfig.warnThreshold,
             dailyLimit: runtimeConfig.dailyLimit,
+            alertRepeatHours: runtimeConfig.alertRepeatHours,
             overseasCurrency: runtimeConfig.overseasCurrency,
             whaleEnabled: !!runtimeConfig.whaleEnabled,
             showNoBalanceBrands: !!runtimeConfig.showNoBalanceBrands,
@@ -3563,6 +3681,8 @@ export function apply(ctx, config) {
             if (typeof body.safeThreshold === 'number' && body.safeThreshold >= 0) runtimeConfig.safeThreshold = body.safeThreshold
             // v1.6.2: 今日花销阈值(0 = 关闭) —— 负数/NaN 一律当关闭, 别让脏值进状态文件
             if (typeof body.dailyLimit === 'number' && Number.isFinite(body.dailyLimit) && body.dailyLimit >= 0) runtimeConfig.dailyLimit = body.dailyLimit
+            // v1.6.8: 重复提醒间隔(小时); 0 = 关闭。脏值走 clampAlertRepeatHours 一律落 0, 别进状态文件
+            if (body.alertRepeatHours !== undefined) runtimeConfig.alertRepeatHours = clampAlertRepeatHours(body.alertRepeatHours)
             if (typeof body.warnThreshold === 'number' && body.warnThreshold >= 0) runtimeConfig.warnThreshold = body.warnThreshold
             if (typeof body.currency === 'string' && body.currency.trim()) runtimeConfig.currency = body.currency.trim().toUpperCase()
             // v1.3.2: 海外模型独立计价货币, 只接受白名单三值 (脏值一律落回 follow, 不放行任意字符串)
@@ -3594,6 +3714,7 @@ export function apply(ctx, config) {
               safeThreshold: runtimeConfig.safeThreshold,
               warnThreshold: runtimeConfig.warnThreshold,
               dailyLimit: runtimeConfig.dailyLimit,
+              alertRepeatHours: runtimeConfig.alertRepeatHours,
               whaleEnabled: runtimeConfig.whaleEnabled,
               showNoBalanceBrands: runtimeConfig.showNoBalanceBrands,
               officialProviders: runtimeConfig.officialProviders,
@@ -3645,13 +3766,44 @@ export function apply(ctx, config) {
           channel: alertStatus.channel,   // 'unknown' | 'app-bridge' | 'none'
           checkedAt: alertStatus.checkedAt,
           sent: alertStatus.sent,
+          // v1.6.8: App 在前台时桥会跳过通知(FOREGROUND_SKIP, 也是 200) —— 那种情况我们改发
+          // App 内提示, 必须**单独计数**, 不能混进 sent, 否则面板又会显示"已送达"而用户什么都
+          // 没看见(2026-09-29 真机就是这么被假成功带偏的)。
+          skipped: alertStatus.skipped,
           failed: alertStatus.failed,
+          lastDelivery: alertStatus.lastDelivery,  // 'notify' | 'toast' | 'failed' | null
           last: alertStatus.last,
           safeThreshold: runtimeConfig.safeThreshold,
           warnThreshold: runtimeConfig.warnThreshold,
+          alertRepeatHours: runtimeConfig.alertRepeatHours,
         })
       },
     }), 'dsh-api-dashboard: alerts route')
+
+    /**
+     * v1.6.8: 「发送测试提醒」—— 设置面板那个按钮。
+     *
+     * 为什么要有它: 提醒能不能真正落到你眼前, 取决于**系统侧**(App 的通知权限, 部分机型还要在
+     * 「提醒方式 / 通知类别」里选一项), 插件这边怎么探都看不出来 —— 真机排查时只能反复等一条
+     * "余额告警"。给个按钮自测最直接。前台会被桥跳过 → deliverAlert 自动改发 App 内提示,
+     * 所以前/后台都有反馈。
+     */
+    webCtx.effect(() => webCtx.webServer.register({
+      kind: 'exact', path: '/api-dashboard/alerts/test',
+      async handler(req, res) {
+        if (!allowRequest(req, res)) return
+        if (req.method !== 'POST') { res.writeHead(405, { Allow: 'POST' }); res.end(); return }
+        const delivery = await deliverAlert('哦鲸鲸 · 测试提醒', '这是设置面板里点的测试提醒；能收到就说明余额告警也能送达。')
+        sendJson(res, 200, {
+          ok: true,
+          delivery,                    // 'notify' | 'toast' | 'failed'
+          channel: alertStatus.channel,
+          sent: alertStatus.sent,
+          skipped: alertStatus.skipped,
+          failed: alertStatus.failed,
+        })
+      },
+    }), 'dsh-api-dashboard: alerts test route')
 
     /**
      * v1.6.0: 打开某平台的开放平台 / 充值页 (「去充值」按钮)。

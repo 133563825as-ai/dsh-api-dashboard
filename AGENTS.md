@@ -296,7 +296,7 @@ DSH 启动时会把 profile 的 `dsh.profile.bundles` **逐个 import**，只要
 - **`parseProviderEntries` 必须把「有 `apiKeyEnv` 但没 `baseURL`」的 provider 也收进来**（本机 `xiaomi` / `opencode` 就是），否则设置面板没法如实告诉用户「这个没写 baseURL、不表态」。
 - 本机实测（8 个 provider）：入列 5 条 `dshzuoxhe` / `jiyuan` / `jiyuanlvdong` / `mimov` / `new`；`zhipu` 判 official 跳过；`xiaomi` / `opencode` 没写 baseURL 跳过。**`jiyuan` 与 `jiyuanlvdong` 共用同一个 baseURL 但 key 不同** —— 按「两个账号」处理、都保留，用户觉得重复可以自己关一个。
 
-### 🔒 五个「看着像小问题、其实有坑」的机制（v1.4.0，改前必读）
+### 🔒 六个「看着像小问题、其实有坑」的机制（v1.4.0 起，改前必读）
 
 #### ① 手机壳的「左边缘开侧边栏」手势会吃掉面板里的横滑（`.dshadb_swipeguard`）
 
@@ -435,6 +435,31 @@ horizontally scrollable container never reach this state at all*）：起手元�
 - ⚠️ **删临时埋点时逐块删、并要求"恰好命中一次"**（脚本里 assert 命中数，不符就整体中止不写盘）：
   本轮清理时匹配片段漏了 `{ ` 前缀，把 `className: "dshadb_barwrap"` 一起删掉 → `createElement("span", {  })`，
   **语法照过、其余断言照绿**，但列布局会失效。已加结构完整性断言钉住（类名必须在 + 不允许空属性对象）。
+
+#### ⑥ 余额告警的投递链路：**前台会被桥跳过**，收不到时该让用户去开什么（v1.6.8，改前必读）
+
+**链路**：服务端 `checkAlerts` → `deliverAlert` → 3090 桥 `/app/notify`（后台）→ 进通知栏。
+真机实测（2026-09-29）三种响应：
+
+| 场景 | 桥返回 | 含义 |
+|---|---|---|
+| App 在**后台** | `200 + {"result":"OK"}` | 真的进了通知栏 |
+| App 在**前台** | `200 + {"result":"FOREGROUND_SKIP"}` | **没投递**（桥主动跳过，免得打断你正在看的界面） |
+| 无 token / 桥不可达 | 非 2xx 或连不上 | 发不出去 |
+
+- 🔴 **红线：绝不能只看 HTTP 200 就记"已发送"**。`FOREGROUND_SKIP` 也是 200 —— v1.4.6~v1.6.7 就是这么把它
+  记进 `sent` 的，于是面板显示「通道可用 / 已送达」而用户屏幕上什么都没有。真机那条 15:30 的告警就是这么
+  "消失"的，排查时还被这个**假成功**带偏到系统通知设置方向。现在按响应体分类（`classifyBridgeReply`），
+  前台跳过 → **自动改发 App 内提示**（`/app/toast`），三种结果**分开计数**（sent / skipped / failed）。
+- 策略：跨档（正常→偏低 / 偏低→不足）**立即**提醒；停在低档时按 **`alertRepeatHours`**（默认 6 小时，0 = 关闭重复，
+  上限 168）重复提醒，文案带「（仍未处理，再次提醒）」。判定是纯函数 `planAlert`（`test/test-alert-plan.mjs` 钉住）。
+- 告警状态（上次档位 + 上次提醒时刻）**持久化**在状态文件的 `alertState`（已登记进 `OBJECT_FIELDS` 消毒表）——
+  否则每次重启都会把所有低余额平台重新提醒一遍，冷却也失去意义。
+- ⚠️ **探测通道只能用只读的 `/app/version`**，别拿 `/app/notify` 去"测通知"（会在用户手机上真弹一条）。
+- **系统侧是插件探不到的**：App 的通知权限、以及**部分机型还要在「提醒方式 / 通知类别」里选一项**
+  （真机实测：只开总开关、没选提醒方式时，通知栏一条都收不到）。所以 v1.6.8 加了
+  **「发送测试提醒」按钮**（`POST /api-dashboard/alerts/test`，前台自动落到 App 内提示）并把引导写在设置面板上：
+  **系统设置 → 应用 → DSHA → 通知：打开「允许通知」+ 选好「提醒方式」**。别把这类"用户没开通知"当成插件 bug 去改代码。
 
 ### 🧩 子代理消耗是怎么算出来的（v1.4.0 引入并修冷会话，改这块前必读）
 

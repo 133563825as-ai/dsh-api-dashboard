@@ -601,6 +601,12 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
 .dshadb_wf_segbtn_on{background:#4f7cff;border-color:#4f7cff;color:#ffffff}
 .dshadb_wf_disabled{opacity:.45;pointer-events:none}
 .dshadb_wf_tip{font-size:10.5px;color:#9ca0aa;line-height:1.5;padding:2px 4px 0}
+/* v1.6.8: 告警帮助区 —— 「发送测试提醒」按钮 + 系统通知开关引导。
+   引导文案要说清「部分机型还要选提醒方式」，否则用户开了总开关仍收不到，会以为插件坏了。 */
+.dshadb_alert_help{display:flex;align-items:flex-start;gap:10px;margin:-4px 0 12px;padding:0 4px}
+.dshadb_alert_help .dshadb_wf_segbtn{flex:none}
+.dshadb_alert_help .dshadb_wf_segbtn:disabled{opacity:.5}
+.dshadb_alert_help .dshadb_wf_tip{flex:1;min-width:0;padding-top:4px}
 .dshadb_wf_avatar{flex:none;width:34px;height:34px;object-fit:contain;object-position:center;display:block;-webkit-user-drag:none;filter:drop-shadow(0 2px 4px rgba(0,0,0,.12))}
 @media (prefers-color-scheme:dark){
 .dshadb_wf_row,.dshadb_wf_row_col{background:#262a33;border-color:#363c48}
@@ -760,9 +766,21 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
       "settings.dailyLimit": "今日花销提醒", "settings.dailyLimitHint": "今天全部会话花到这个数就让大肥鱼提醒你，0 = 关闭",
       "settings.alertChannel": "余额告警通知",
       "settings.alertChannelChecking": "正在检查通知通道…",
-      "settings.alertChannelBridge": "App 桥可用，余额低于阈值时会弹通知",
+      "settings.alertChannelBridge": "App 桥可用：App 在后台时进通知栏，你正在 App 里则弹 App 内提示",
       "settings.alertChannelNone": "通知发不出去 —— 当前平台没有可用的通知通道（手机版 DSHA 才提供），余额只会在看板上变红",
       "settings.alertChannelIdle": "尚未触发过告警，通道状态将在第一次告警时确认",
+      // v1.6.8: 投递结果如实分开 —— 前台被跳过(FOREGROUND_SKIP)不再算「已发送」
+      "settings.alertDeliveryNotify": "已进通知栏",
+      "settings.alertDeliveryToast": "App 内提示（当时 App 在前台）",
+      "settings.alertDeliveryFailed": "发送失败",
+      "settings.alertStats": "已送达 {sent} · 前台转内提示 {skipped} · 失败 {failed}",
+      "settings.alertTest": "发送测试提醒",
+      "settings.alertTestSending": "发送中…",
+      "settings.alertTestDone": "上次测试：{r}",
+      "settings.alertRepeat": "重复提醒间隔(小时)",
+      "settings.alertRepeatHint": "余额停在预警档时，每隔这么久再提醒一次；0 = 只在刚跌破时提醒一次",
+      // v1.6.8: 很多人不会特地去开通知 —— 把「去哪儿开、还要选提醒方式」写在面板上
+      "settings.alertPermHint": "收不到通知？去 系统设置 → 应用 → DSHA → 通知：打开「允许通知」；部分机型还要在「提醒方式 / 通知类别」里选一项（如横幅与声音），否则系统会把通知静默丢掉。",
       "settings.official": "官方直连 provider",
       "settings.officialHint": "逗号或换行分隔。写在这里的 provider 名一律按官方直连处理，状态条显示官方余额；留空则自动判定 —— 拿 baseURL 域名比对官方白名单，命中才算官方，其余一律按中转站（含没写 baseURL 的）",
       "settings.officialAuto": "自动判定结果",
@@ -836,9 +854,19 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
       "settings.dailyLimit": "Daily spend alert", "settings.dailyLimitHint": "Ping the whale once today's spend across all sessions passes this (0 = off)",
       "settings.alertChannel": "Balance alerts",
       "settings.alertChannelChecking": "Checking notification channel…",
-      "settings.alertChannelBridge": "App bridge available — an alert pops up when balance drops below the threshold",
+      "settings.alertChannelBridge": "App bridge available — a notification when the app is in the background, an in-app toast while you're inside the app",
       "settings.alertChannelNone": "Alerts cannot be delivered — no notification channel on this platform (only the mobile DSHA provides one); balances just turn red on the dashboard",
       "settings.alertChannelIdle": "No alert has fired yet — the channel is confirmed on the first alert",
+      "settings.alertDeliveryNotify": "delivered to the notification shade",
+      "settings.alertDeliveryToast": "in-app toast (the app was in the foreground)",
+      "settings.alertDeliveryFailed": "delivery failed",
+      "settings.alertStats": "Delivered {sent} · toast fallback {skipped} · failed {failed}",
+      "settings.alertTest": "Send a test alert",
+      "settings.alertTestSending": "Sending…",
+      "settings.alertTestDone": "Last test: {r}",
+      "settings.alertRepeat": "Repeat every (hours)",
+      "settings.alertRepeatHint": "While the balance sits in a warning band, remind again after this many hours; 0 = only once when it first drops",
+      "settings.alertPermHint": "Nothing showing up? System Settings → Apps → DSHA → Notifications: enable \"Allow notifications\"; on some phones you must also pick a \"notification style / category\" (e.g. banner + sound), otherwise the system silently drops them.",
       "settings.official": "Official-direct providers",
       "settings.officialHint": "Comma or newline separated. Providers listed here always count as official direct connections and show their official balance; leave empty to auto-detect against the official host allowlist — only an allowlist hit counts as official, everything else is treated as a relay (including providers with no baseURL)",
       "settings.officialAuto": "Auto-detected",
@@ -1828,6 +1856,10 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
       const [warn, setWarn] = react.useState(10);
       /** v1.6.2: 今日花销提醒阈值(主币种)。0 = 关闭。超了就弹一次「老大，今天花销已经超过 ¥# 啦」。 */
       const [dailyLimit, setDailyLimit] = react.useState(0);
+      // v1.6.8: 重复提醒间隔(小时), 0 = 只在跨档时提醒一次
+      const [alertRepeat, setAlertRepeat] = react.useState(6);
+      // v1.6.8: 测试提醒的按钮状态: '' | 'sending' | 'notify' | 'toast' | 'failed'
+      const [alertTest, setAlertTest] = react.useState("");
       const [currency, setCurrency] = react.useState("CNY");
       // v1.3.2: 海外模型独立计价货币 follow|USD|CNY
       const [overseasCurrency, setOverseasCurrency] = react.useState("follow");
@@ -1927,6 +1959,7 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
         setLoading(true);
         setSafe(config?.safeThreshold ?? 50);
         setDailyLimit(Number(config?.dailyLimit) > 0 ? Number(config.dailyLimit) : 0);
+        setAlertRepeat(Number(config?.alertRepeatHours) > 0 ? Number(config.alertRepeatHours) : 0);
         setWarn(config?.warnThreshold ?? 10);
         setCurrency(config?.currency ?? "CNY");
         setOverseasCurrency(config?.overseasCurrency ?? "follow");
@@ -1945,6 +1978,7 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
             if (typeof d.safeThreshold === "number") setSafe(d.safeThreshold);
             if (typeof d.warnThreshold === "number") setWarn(d.warnThreshold);
             if (typeof d.dailyLimit === "number") setDailyLimit(d.dailyLimit > 0 ? d.dailyLimit : 0);
+            if (typeof d.alertRepeatHours === "number") setAlertRepeat(d.alertRepeatHours > 0 ? d.alertRepeatHours : 0);
             if (typeof d.currency === "string") setCurrency(d.currency);
             if (typeof d.overseasCurrency === "string") setOverseasCurrency(d.overseasCurrency);
             if (typeof d.whaleEnabled === "boolean") setWhaleOn(d.whaleEnabled);
@@ -1997,6 +2031,35 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
         idle: " dshadb_bar_dot_warn",
       };
       const alertChannelDot = () => "dshadb_bar_dot" + (ALERT_DOT[alertState] ?? "");
+      // v1.6.8: 投递结果如实分开展示 —— 「已送达(通知栏)」和「前台被跳过、改弹 App 内提示」
+      // 是两件事。旧实现把后者也记成已发送, 于是面板说"发出去了"而用户什么也没看见。
+      const ALERT_DELIVERY_KEY = {
+        notify: "settings.alertDeliveryNotify",
+        toast: "settings.alertDeliveryToast",
+        failed: "settings.alertDeliveryFailed",
+      };
+      const alertDeliveryText = (r) => t(ALERT_DELIVERY_KEY[r] || "settings.alertDeliveryFailed");
+      const alertStats = alertInfo
+        ? { sent: alertInfo.sent || 0, skipped: alertInfo.skipped || 0, failed: alertInfo.failed || 0 }
+        : null;
+      const hasAlertStats = !!alertStats && (alertStats.sent + alertStats.skipped + alertStats.failed) > 0;
+      /** v1.6.8: 点「发送测试提醒」—— 前台自动落到 App 内提示, 前后台都能拿到反馈。 */
+      const sendAlertTest = async () => {
+        if (alertTest === "sending") return;
+        setAlertTest("sending");
+        try {
+          const r = await fetchT("/api-dashboard/alerts/test", { method: "POST" });
+          const d = await r.json();
+          setAlertTest(d && d.ok ? (d.delivery || "failed") : "failed");
+          // 顺手刷新统计与通道状态 (这次投递也会计入)
+          try {
+            const a = await fetchT("/api-dashboard/alerts", { cache: "no-store" }).then(x => x.json());
+            if (a && a.ok) setAlertInfo(a);
+          } catch (e) { /* 忽略 */ }
+        } catch (e) {
+          setAlertTest("failed");
+        }
+      };
       const save = async () => {
         // C-1 (v1.4.1): 原来这里夹的是 5 —— 输入框允许 1 秒、服务端 clampRefreshSec 也吃 1 秒,
         // 只有 save() 把它悄悄改回 5 秒(用户设 1 秒保存后变 5 秒)。四处下限现在一致。
@@ -2008,6 +2071,7 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
             customRelays: relays, customModels: models,
             safeThreshold: Number(safe), warnThreshold: Number(warn), currency, overseasCurrency,
             dailyLimit: Number(dailyLimit) > 0 ? Number(dailyLimit) : 0,
+            alertRepeatHours: Number(alertRepeat) > 0 ? Number(alertRepeat) : 0,
             refreshIntervalSec: nextRefreshSec,
             whaleEnabled: !!whaleOn,
             officialProviders: officialText,
@@ -2154,6 +2218,17 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
             }),
             react.createElement("span", { style: { fontSize: "10px", color: "var(--dsw-alias-label-tertiary)" }, key: "dl_h" }, t("settings.dailyLimitHint")),
           ]),
+          // v1.6.8: 重复提醒间隔(小时) —— 余额停在预警档时每隔这么久再提醒一次; 0 = 只在跨档时提醒一次
+          react.createElement("div", { key: "alertrep" }, [
+            react.createElement("label", { className: "dshadb_label", key: "ar_l" }, t("settings.alertRepeat")),
+            react.createElement("input", {
+              className: "dshadb_field", type: "number", min: 0, max: 168, step: 1,
+              value: alertRepeat,
+              onChange: (e) => setAlertRepeat(Math.min(Math.max(Math.round(Number(e.target.value) || 0), 0), 168)),
+              key: "ar_i",
+            }),
+            react.createElement("span", { style: { fontSize: "10px", color: "var(--dsw-alias-label-tertiary)" }, key: "ar_h" }, t("settings.alertRepeatHint")),
+          ]),
         ]),
         // v1.5.1: 告警通道状态 —— 可见降级 (issue #2 问题 3)。
         // 通路不可用时把话说在面板上，别让用户继续等一条永远不会来的通知。
@@ -2161,8 +2236,24 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
           react.createElement("div", { className: "dshadb_settings_row_main", key: "am" }, [
             react.createElement("span", { className: "dshadb_settings_row_title", key: "at" }, t("settings.alertChannel")),
             react.createElement("span", { className: "dshadb_settings_row_sub", key: "as" }, t(ALERT_SUB_KEY[alertState])),
+            // v1.6.8: 如实分开的投递统计（已进通知栏 / 前台转 App 内提示 / 失败）
+            hasAlertStats ? react.createElement("span", { className: "dshadb_settings_row_sub", key: "ast" }, t("settings.alertStats", alertStats)) : null,
+            // v1.6.8: 上一次「发送测试提醒」的结果
+            alertTest && alertTest !== "sending" ? react.createElement("span", { className: "dshadb_settings_row_sub", key: "atd" }, t("settings.alertTestDone", { r: alertDeliveryText(alertTest) })) : null,
           ]),
           react.createElement("span", { className: alertChannelDot(), key: "ad" }),
+        ]),
+        // v1.6.8: 测试按钮 + 系统通知开关引导。
+        // 为什么非要写这段引导: 提醒能不能落到眼前完全取决于**系统侧** —— App 的通知权限、
+        // 部分机型还得在「提醒方式 / 通知类别」里选一项，插件这边探不到；很多人根本不会特地
+        // 去开通知，于是"告警没反应"永远查不出来。把路径写在面板上，用户照着做就行。
+        react.createElement("div", { className: "dshadb_alert_help", key: "alerthelp" }, [
+          react.createElement("button", {
+            className: "dshadb_wf_segbtn", key: "testbtn", type: "button",
+            disabled: alertTest === "sending",
+            onClick: sendAlertTest,
+          }, t(alertTest === "sending" ? "settings.alertTestSending" : "settings.alertTest")),
+          react.createElement("span", { className: "dshadb_wf_tip", key: "perm" }, t("settings.alertPermHint")),
         ]),
         // 无余额模型品牌开关
         react.createElement("div", { className: "dshadb_settings_row", key: "brands", style: { margin: "2px 0 10px" } }, [
