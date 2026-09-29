@@ -16,6 +16,11 @@
 # 【发版方式】把 package.json 的 version 改好并提交后：
 #   git tag v1.3.2 && git push origin v1.3.2
 #   tag 必须是 v + package.json 里的版本号，不一致会被下面的校验拦住。
+#
+# 【GitHub Release 手工建（2026-09-29 起）】本流程**只发 npm**，不再建 Release：
+#   用内置 GITHUB_TOKEN 建的 Release 署名固定是 github-actions[bot]，维护者要求挂自己名下。
+#   发完 npm 后到该次 run 的 Summary 里复制现成的正文，再点
+#   https://github.com/133563825as-ai/dsh-api-dashboard/releases/new 建 Release（署名即本人）。
 
 name: publish
 
@@ -27,7 +32,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write # v1.5.0 起：正式版发完 npm 顺带建 GitHub Release（用内置 GITHUB_TOKEN，不引入额外 secrets）
+  contents: read # 只需要读源码；建 Release 已移出 CI（见文件末尾注释），所以不再申请 write
   id-token: write # 可信发布必需：没有它 npm 拿不到 OIDC 身份
 
 jobs:
@@ -164,24 +169,30 @@ jobs:
           npm config get //registry.npmjs.org/:_authToken || true
           npm publish --provenance --access public --registry=https://registry.npmjs.org
 
-      # v1.5.0 起：正式版发完 npm 之后**顺带建 GitHub Release**。
-      # 此前从未建过 —— 「发行版」页面永远停在最后一个手工建的版本（实测 v1.4.4），
-      # 而 tag 与 npm 其实都已到位：v1.4.5（09-22）与 v1.5.0（09-27）两版都栽在这。
-      # 用 runner 自带的 gh CLI + 内置 GITHUB_TOKEN，不需要任何额外 secrets；
-      # 预发行 tag 走同一条短路（只校验，不建 Release、不发 npm）。
-      - name: 创建 GitHub Release（仅正式版）
+      # ⚠️ 2026-09-29 维护者决定：**CI 不再创建 GitHub Release**。
+      # 原因：用内置 GITHUB_TOKEN 建出来的 Release，署名固定是 `github-actions[bot]`
+      # （GitHub 的规则，没有开关可改），而维护者希望发行版挂在自己名下 ——
+      # v1.5.0 及更早都是手工建的，署名就是本人；v1.6.1~v1.6.7 由本步骤自动建，署名全变成 bot。
+      # 想恢复自动建只有两条路：① 仓库里放一个 `contents: write` 的 PAT（与「仓库不存任何密钥」的设计相反）；
+      # ② 就是现在这样：**Release 由维护者手工建**。
+      # 这一步只把 CHANGELOG 里该版本的段落写进 Job Summary，手工建 Release 时直接复制 ——
+      # 不需要任何 token，也不再需要 `contents: write` 权限。
+      - name: 生成 Release 正文（供手工建 Release 用）
         if: steps.prerelease_guard.outputs.skip != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           V="$GITHUB_REF_NAME"; VV="${V#v}"
           # 正文取 CHANGELOG 里该版本的段落 —— 我们的 CHANGELOG 是"一版一行"的真源。
-          # 不用 --generate-notes：本项目直接推 main、没有 PR，gh 只能生成一行 compare
-          # 链接（实测 v1.5.0 的自动正文仅 95 字符、没有任何改动内容）。
+          # 不用 --generate-notes：本项目直接推 main、没有 PR，gh 只能生成一行 compare 链接。
           node -e 'const fs=require("fs");const v=process.argv[1];const L=fs.readFileSync("CHANGELOG.md","utf8").split("\n");const o=[];let on=false;for(const l of L){const h=/^- \*\*v[\d.]+/.test(l);if(h){if(on)break;if(l.startsWith("- **v"+v+"**")){on=true;o.push(l.replace(/^- \*\*/,"**"));continue}}if(on)o.push(l)}fs.writeFileSync("/tmp/notes.md",o.join("\n").trim())' "$VV"
           if [ -s /tmp/notes.md ]; then
-            gh release create "$V" --title "$V" --notes-file /tmp/notes.md --verify-tag
+            {
+              echo "## $V 的 Release 正文"
+              echo
+              echo "手工建 Release：https://github.com/$GITHUB_REPOSITORY/releases/new?tag=$V"
+              echo "（CI 建会署名 github-actions[bot]，所以这一步留给维护者本人）"
+              echo
+              cat /tmp/notes.md
+            } >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "::warning::CHANGELOG 里没有 v$VV 的段落，退回自动生成"
-            gh release create "$V" --title "$V" --generate-notes --verify-tag
+            echo "::warning::CHANGELOG 里没有 v$VV 的段落，手工建 Release 时请自行撰写正文"
           fi

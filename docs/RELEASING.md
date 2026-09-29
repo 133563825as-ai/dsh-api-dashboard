@@ -16,6 +16,23 @@ git tag v1.3.2 && git push origin v1.3.2
 「语法」「全套测试全绿」，全过才发布，并附带 provenance 溯源。
 首次使用需先在 npm 网页把本仓库配成 Trusted Publisher（详见该 workflow 顶部注释）。
 
+### GitHub Release：**手工建**（2026-09-29 起）
+
+CI **只发 npm、不建 Release**。原因：用内置 `GITHUB_TOKEN` 建的 Release 署名固定是
+`github-actions[bot]`（GitHub 的规则，没有开关可改），而发行版要挂在维护者本人名下 ——
+v1.5.0 及更早都是手工建的（署名本人），v1.6.1~v1.6.7 由 CI 自动建，署名全成了 bot。
+
+发版步骤：
+
+1. `git tag v<版本> && git push origin v<版本>`（触发 CI：校验 + 发 npm）
+2. 打开**那次 run 的 Summary 页面** —— workflow 最后一步已经把 CHANGELOG 里该版本的段落
+   整理好放在那里，直接复制
+3. 到 https://github.com/133563825as-ai/dsh-api-dashboard/releases/new 建 Release
+   （选对应 tag，标题 `v<版本>`，正文粘贴第二步的内容）→ 署名即本人
+
+> 想恢复「CI 自动建 Release」只有一条路：在仓库 Secrets 里放一个有 `contents: write` 的 PAT
+> 并把它接成 `GH_TOKEN`。那与「仓库不存任何密钥（npm 侧走 OIDC）」的设计相反，故未采用。
+
 v1.3.3 — **修复「一键更新」按钮无响应**（DSHA webview 拦截 `window.confirm` 导致点击后函数在第一行 return）：去掉确认弹窗，直接执行安装；更新结果改为醒目横幅（成功绿底/失败红底），不再只显示 11px 灰色字；`already up to date` 返回 200 而非 500
 
 v1.3.4 — **DeepSeek 价格表对齐官方 2026-09-10 调价 + 模型名收敛**（对照 [官方定价页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing) 与 `GET https://api.deepseek.com/models` 实测）：① **Flash 系列降价 60%** —— `deepseek-flash` 高峰 ¥2/¥8、空闲 ¥1/¥4（原 ¥3/¥9、¥1.5/¥4.5），**USD 表同步改为官方直发价**高峰 $0.3/$1.2、空闲 $0.15/$0.6（此前 USD 是 ÷7 近似，官方实际口径约 1 USD ≈ 6.67 CNY，差距不小）；`deepseek-v4-pro` 价未变动（¥9/¥27、¥4.5/¥13.5）。② **模型名收敛** —— 官方现役仅 `deepseek-flash` / `deepseek-v4-pro`（与 `/models` 返回一致），旧名 `deepseek-v4-flash` / `deepseek-v4-flash-vision-exp` 仍可调用但由 V4.1-Flash 服务、按 Flash 价计费，解析层统一映射到 flash 档（故价格卡不再单列旧名）；官方公告 2026-09-14 12:00 后 `deepseek-v4-pro` 请求将全部路由到 V4.1-Flash 并按 Flash 价计费。③ 新增 7 条 DeepSeek 回归断言（新旧名同价、chat/reasoner 不被劫持、缓存读低于输入价）。④ **通用价格表按用户自持中转站实时 `/v1/models` 报价校正**（tokenrhythm / mhsapi 等多平台交叉比对；国内厂商 CNY 价 ÷7 入 USD 基准）：**新增 7 个模型** —— `glm-5.3` / `glm-5.1`（¥8/¥28）、`kimi-k2.7-code`（¥6.5/¥27）、`seed-2.1-turbo` / `seed-2.1-pro`（¥3/¥15、¥6/¥30）、`minimax-m2.7`（¥2.1/¥8.4，无缓存报价→`cacheHit=cacheMiss`）、`longcat-2.0`（¥5/¥20）；**修正 5 处偏差 + 1 处缓存读** —— `glm-5.2`（¥9.8/¥30.8→¥8/¥28）、`glm-5.3-flash`（¥1.05/¥3.5→¥0.8/¥2.8）、`qwen3.8-flash`、`qwen3.8-27b`（输出虚高 43%）、`kimi-k2.6`，另 `qwen3.8-max` 缓存读 1.71→0.2143（实时 ¥1.5，原值缺缓存折扣）；`qwen3.7-max`（5 折促销）与 `qwen3.7-flash`（0-32k 档）保留原值并注明实时报价差异，待官方分档核实。⑤ 🔴 **修复小米 MiMo 系「除两次 7」严重错价** —— `mimo-v2.5` / `mimo-v2.5-pro` 原值（0.020/0.041、0.061/0.122）是把官方 ¥1/¥2、¥3/¥6 **又除了一次 7** 的结果，面板把 MiMo 消耗少算成实际的 **1/7**；经中转站实时报价（mimo-v2.5-pro ¥3/¥6）交叉印证后修正为 0.1429/0.2857 与 0.4286/0.8571。⑥ `DOMESTIC_MODEL_PREFIXES` 补 `seed-` / `longcat`（产地判定），`modelToPlatform` 补 `seed-*` → 豆包映射。全套 10 文件 **208 断言**

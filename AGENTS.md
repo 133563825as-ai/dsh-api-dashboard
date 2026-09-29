@@ -195,6 +195,12 @@ DSH 启动时会把 profile 的 `dsh.profile.bundles` **逐个 import**，只要
    ⚠️ **别再试 `npm publish` + token/OTP**：npm 已限制「绕过 2FA 的 token」用于直接发布
    (https://gh.io/npm-gat-bypass2fa-deprecation)，Granular / Automation token 加 `--otp` 在开启 2FA
    的账号上均实测失败（web 登录成功后 publish 仍报 EOTP）。
+   ⚠️ **GitHub Release 由维护者手工建，CI 不建（2026-09-29 起，维护者明确要求）**：用内置 `GITHUB_TOKEN`
+   建的 Release 署名固定是 `github-actions[bot]`（GitHub 规则，无开关），维护者要求发行版挂自己名下 ——
+   v1.5.0 及更早都是手工建（署名本人），v1.6.1~v1.6.7 自动建那一批署名全成了 bot。
+   现在 workflow 最后一步只把 CHANGELOG 段落写进 **run 的 Summary**，供手工建 Release 时复制；
+   别「顺手把 `gh release create` 加回去」，那会把署名又变成 bot。
+   要真正恢复自动建，只有「仓库里放 `contents: write` 的 PAT」这一条路，与零密钥设计冲突，**改前先问维护者**。
 8. **测试必须以退出码表达结果**：`test/*.mjs` 结尾都有 `if (fail > 0) process.exitCode = 1`。
    新增测试脚本别忘了加，否则 CI 里断言失败也会被当成通过。
    ⚠️ **测试不许读运行机器上的私有文件**：`test-provider-kinds.mjs` 原来直读 `~/.dsh/settings.yaml`，
