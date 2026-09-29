@@ -536,6 +536,18 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
    ⚠️ 想再紧/再松就只调这个值, 别动 28px 的 min-height(那是冷启动 LayoutShift 的钉子)。 */
 .dshadb_barwrap{display:flex;flex-direction:column;align-items:center;gap:0;width:fit-content;max-width:100%;min-width:0;margin:-8px auto 0}
 .dshadb_barrow{display:inline-flex;align-items:center;gap:2px;max-width:100%;min-width:0}
+/* v1.6.5: 窄屏溢出兜底 —— 真机反馈「状态条右侧的本会话消耗只剩个 ~ 被屏幕边缘切住」。
+   状态条整条是 nowrap 的 inline-flex 胶囊: 平台名 / 金额 / 峰谷 / 本会话消耗 四段全是
+   min-content, barrow 的 min-width:0 压不动它们 —— 内容一超过 composer dock 的宽度就直接
+   溢出, 再被 barwrap 的 margin:auto 居中, 溢出量左右均分, 右半截落到屏幕外被物理裁切。
+   这里让「包住胶囊的那层」与胶囊本体都允许收缩, 平台名先截断, 金额/消耗/峰谷保住不缩
+   (它们才是要读的数字)。截断次序: 平台名 → (名字缩到 0 才轮到) 无。
+   ⚠️ 别给 .dshadb_barrow 加 overflow-x:auto —— 会命中手机壳「真横向滚动容器让路」规则,
+   状态条的点击/长按行为会跟着变 (AGENTS.md ① 有详解)。 */
+.dshadb_barrow > span{max-width:100%;min-width:0}
+.dshadb_bar{max-width:100%;min-width:0}
+.dshadb_bar_name{overflow:hidden;text-overflow:ellipsis;min-width:0}
+.dshadb_bar_amount,.dshadb_bar_cost,.dshadb_bar_dot,.dshadb_bar_peak{flex:0 0 auto}
 .dshadb_subs{display:flex;flex-wrap:nowrap;align-items:center;gap:4px;margin:3px 0 0 0;max-width:100%;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-ms-overflow-style:none;-webkit-overflow-scrolling:touch}
 /* UI v1.4.1: 子代理行只在**真的溢出**时右侧渐隐(由 syncSubsOverflow 打类名),
    这样"被切一半"看起来是有意的可滑动提示, 而不是被屏幕齐口截断。 */

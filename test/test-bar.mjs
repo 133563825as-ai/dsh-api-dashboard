@@ -189,6 +189,14 @@ a('没写死 height(字体放大不裁字)', !/\.dshadb_bar\{[^}]*;height:/.test
 a('dock 容器保留 dshadb_barwrap 类名', src.includes('className: "dshadb_barwrap"'))
 a('设置面板保留 dshadb_drawer 类名', src.includes('className: "dshadb_drawer"'))
 a('没有空属性对象残留(createElement(x, {  }))', !/react\.createElement\("[a-z]+", \{\s{2,}\}/.test(src))
+// ===== v1.6.5 窄屏溢出兜底 (真机: 状态条右侧「本会话消耗」被挤出屏幕, 只剩个 ~) =====
+// 状态条是 nowrap 胶囊, 四段内容都不可压缩; 超过 composer dock 宽度就溢出、再被居中切掉。
+// 下面五条一起才兜得住, 少一条就复发。
+a('包住胶囊的那层可收缩', /\.dshadb_barrow > span\{[^}]*max-width:100%/.test(src))
+a('状态条本体可收缩', /\.dshadb_bar\{[^}]*max-width:100%[^}]*min-width:0/.test(src))
+a('平台名可截断', /\.dshadb_bar_name\{[^}]*text-overflow:ellipsis/.test(src))
+a('金额/消耗/峰谷保住不缩', /\.dshadb_bar_amount,\.dshadb_bar_cost,\.dshadb_bar_dot,\.dshadb_bar_peak\{[^}]*flex:0 0 auto/.test(src))
+a('没给 barrow 加横向滚动(会撞手机壳手势让路规则)', !/\.dshadb_barrow\{[^}]*overflow-x/.test(src))
 
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`)
 // v1.3.2: 断言失败时以非 0 退出, 否则 CI(GitHub Actions)拦不住回归 —— 原来一律 exit 0
