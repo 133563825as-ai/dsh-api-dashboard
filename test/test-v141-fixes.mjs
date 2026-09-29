@@ -215,7 +215,11 @@ a('H4b clampRefreshSec 下限 1 / 上限 60', (() => {
   a('C1 save() 不再夹到 5 秒', !/\|\| 5, 5\)/.test(cli))
   a('C1 save() 下限是 1 秒', /Number\(refreshSec\) \|\| 1, 1/.test(cli))
   a('C1 输入框 min=1', /min: 1, max: 60, step: 1/.test(cli))
-  a('C1 onChange 下限是 1 秒', /Number\(e\.target\.value\) \|\| 1, 1/.test(cli))
+  a('C1 onChange 下限是 1 秒', /Number\(e\.target\.value\) \|\| 1, 1/.test(cli) || /setRefreshSec\(settleNumber\(e\.target\.value, 1, 60, 5\)\)/.test(cli))
+  // v1.6.9: 输入期的 onChange **不许**再当场夹取 —— Number("")===0 会把"删空"立刻回填成 1,
+  // 旧数字于是删不掉(真机体验: 得先写新数字再删旧的)。夹取改在失焦/保存时做, 下限仍是 1。
+  a('C1 输入期 onChange 不夹取(只留数字、允许空串)', /onChange: \(e\) => setRefreshSec\(numberDraft\(e\.target\.value, 3\)\)/.test(cli))
+  a('C1 失焦时夹取, 下限仍是 1 秒', /onBlur: \(e\) => setRefreshSec\(settleNumber\(e\.target\.value, 1, 60, 5\)\)/.test(cli))
   a('C1 服务端 clampRefreshSec 是 1~60', /Math\.min\(Math\.max\(Math\.round\(Number\(v\) \|\| 1\), 1\), 60\)/.test(src))
 }
 

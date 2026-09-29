@@ -773,6 +773,9 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
       "settings.alertDeliveryNotify": "已进通知栏",
       "settings.alertDeliveryToast": "App 内提示（当时 App 在前台）",
       "settings.alertDeliveryFailed": "发送失败",
+      // v1.6.9: 「接口本身没打到」= 服务端还是旧版本（插件文件更新了、dsh 没重启）。
+      // 真机上的表现就是点测试 → 显示"发送失败"，用户于是去翻系统通知设置 —— 方向全错。
+      "settings.alertTestStale": "服务端仍是旧版本（重启 dsh 后这个按钮才可用）",
       "settings.alertStats": "已送达 {sent} · 前台转内提示 {skipped} · 失败 {failed}",
       "settings.alertTest": "发送测试提醒",
       "settings.alertTestSending": "发送中…",
@@ -860,6 +863,7 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
       "settings.alertDeliveryNotify": "delivered to the notification shade",
       "settings.alertDeliveryToast": "in-app toast (the app was in the foreground)",
       "settings.alertDeliveryFailed": "delivery failed",
+      "settings.alertTestStale": "the server is still on the old version (restart dsh to enable this button)",
       "settings.alertStats": "Delivered {sent} · toast fallback {skipped} · failed {failed}",
       "settings.alertTest": "Send a test alert",
       "settings.alertTestSending": "Sending…",
@@ -1303,6 +1307,34 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
      * @param {null|{channel?: string}} info /api-dashboard/alerts 的响应体
      * @returns {'checking'|'bridge'|'none'|'idle'}
      */
+    /**
+     * v1.6.9: 数字输入框的「编辑期草稿」。
+     *
+     * 旧写法在 onChange 里当场夹取（`Math.min(Math.max(Number(e.target.value) || 0, 0), 168)`），
+     * 而 `Number("") === 0` —— 用户把旧数字删空的那一瞬间就被回填成 `0`，光标被顶到末尾，
+     * **旧数字根本删不掉**。真机上的体验就是维护者说的「要先写后一个数字才能把前面的数字去掉」。
+     * 现在输入期只剔掉非数字字符、并允许空串（空 = 你正在改），数值夹取推迟到失焦/保存。
+     * @param {string|number} v 输入框原值
+     * @param {number} maxLen 最多保留几位（防长数字撑爆面板；**不是**数值上限）
+     * @returns {string} 草稿（'' = 空）
+     */
+    function numberDraft(v, maxLen) {
+      const s = String(v ?? "").replace(/[^\d]/g, "");
+      if (s === "") return "";
+      return s.replace(/^0+(?=\d)/, "").slice(0, maxLen);
+    }
+    /**
+     * v1.6.9: 把草稿规范化成合法数值（失焦时 / 保存前调用）。
+     * 空串走 `fallback` —— 别把"清空了"静默当成 0：对余额告警的重复间隔来说 0 = 关闭提醒，
+     * 那是比"填错"更严重的静默后果。
+     */
+    function settleNumber(v, min, max, fallback) {
+      const raw = String(v ?? "").trim();
+      if (raw === "") return fallback;
+      const n = Number(raw);
+      if (!Number.isFinite(n)) return fallback;
+      return Math.min(Math.max(n, min), max);
+    }
     function alertChannelState(info) {
       if (info === null || info === undefined) return "checking";
       if (info.channel === "app-bridge") return "bridge";
@@ -2037,6 +2069,8 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
         notify: "settings.alertDeliveryNotify",
         toast: "settings.alertDeliveryToast",
         failed: "settings.alertDeliveryFailed",
+        // v1.6.9: 接口没打到（404 / 响应不是 JSON）—— 与"桥发不出去"分开说
+        stale: "settings.alertTestStale",
       };
       const alertDeliveryText = (r) => t(ALERT_DELIVERY_KEY[r] || "settings.alertDeliveryFailed");
       const alertStats = alertInfo
@@ -2049,8 +2083,18 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
         setAlertTest("sending");
         try {
           const r = await fetchT("/api-dashboard/alerts/test", { method: "POST" });
-          const d = await r.json();
-          setAlertTest(d && d.ok ? (d.delivery || "failed") : "failed");
+          let d = null;
+          try { d = await r.json(); } catch (e) { d = null; }
+          /**
+           * v1.6.9: 三件事必须分开说 ——
+           *   · 接口没打到（404 / 响应不是 JSON）→ 'stale'：插件文件已更新、dsh 还没重启,
+           *     服务端仍是旧版本, 那个路由根本不存在。真机上这里写成"发送失败", 把人带偏到系统通知设置。
+           *   · 打到了但桥发不出去 → 'failed'（真的投递失败, 该去查通知权限）
+           *   · 打到了且送到某个视觉出口 → 'notify' / 'toast'
+           */
+          if (!d) setAlertTest("stale");
+          else if (!d.ok) setAlertTest(r && r.status === 404 ? "stale" : "failed");
+          else setAlertTest(d.delivery || "failed");
           // 顺手刷新统计与通道状态 (这次投递也会计入)
           try {
             const a = await fetchT("/api-dashboard/alerts", { cache: "no-store" }).then(x => x.json());
@@ -2065,13 +2109,28 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
         // 只有 save() 把它悄悄改回 5 秒(用户设 1 秒保存后变 5 秒)。四处下限现在一致。
         const nextRefreshSec = Math.min(Math.max(Number(refreshSec) || 1, 1), 60)
         setRefreshSec(nextRefreshSec)
+        /**
+         * v1.6.9: 保存前把数字草稿统一规范化 —— 输入框现在允许空串(见 numberDraft)，
+         * 空串再也不能被 Number("") → 0 静默吞掉。对这两项尤其要紧：
+         *   · alertRepeatHours=0 = **关掉重复提醒**，静默归 0 等于用户永远等不到第二次提醒；
+         *   · dailyLimit=0 = 关掉今日花销提醒。
+         * 空串一律回落到字段默认值（重复间隔 6 小时 / 今日阈值关闭 / 刷新 5 秒 / 阈值 50、10）。
+         */
+        const nextDailyLimit = settleNumber(dailyLimit, 0, 999999, 0)
+        setDailyLimit(nextDailyLimit)
+        const nextAlertRepeat = settleNumber(alertRepeat, 0, 168, 6)
+        setAlertRepeat(nextAlertRepeat)
+        const nextSafe = settleNumber(safe, 0, 1e9, 50)
+        setSafe(nextSafe)
+        const nextWarn = settleNumber(warn, 0, 1e9, 10)
+        setWarn(nextWarn)
         setSaving(true);
         try {
           await fetchT("/api-dashboard/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
             customRelays: relays, customModels: models,
-            safeThreshold: Number(safe), warnThreshold: Number(warn), currency, overseasCurrency,
-            dailyLimit: Number(dailyLimit) > 0 ? Number(dailyLimit) : 0,
-            alertRepeatHours: Number(alertRepeat) > 0 ? Number(alertRepeat) : 0,
+            safeThreshold: nextSafe, warnThreshold: nextWarn, currency, overseasCurrency,
+            dailyLimit: nextDailyLimit,
+            alertRepeatHours: nextAlertRepeat,
             refreshIntervalSec: nextRefreshSec,
             whaleEnabled: !!whaleOn,
             officialProviders: officialText,
@@ -2175,12 +2234,12 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
         react.createElement("div", { className: "dshadb_grid2", key: "thresh" }, [
           react.createElement("div", { key: "safe" }, [
             react.createElement("label", { className: "dshadb_label", key: "l1" }, t("settings.safe")),
-            react.createElement("input", { className: "dshadb_field", type: "number", value: safe, onChange: (e) => setSafe(e.target.value), key: "i1" }),
+            react.createElement("input", { className: "dshadb_field", type: "number", value: safe, onChange: (e) => setSafe(e.target.value), onBlur: (e) => setSafe(settleNumber(e.target.value, 0, 1e9, 50)), key: "i1" }),
             react.createElement("span", { style: { fontSize: "10px", color: "var(--dsw-alias-label-tertiary)" }, key: "h1" }, t("settings.safeHint")),
           ]),
           react.createElement("div", { key: "warn" }, [
             react.createElement("label", { className: "dshadb_label", key: "l2" }, t("settings.warn")),
-            react.createElement("input", { className: "dshadb_field", type: "number", value: warn, onChange: (e) => setWarn(e.target.value), key: "i2" }),
+            react.createElement("input", { className: "dshadb_field", type: "number", value: warn, onChange: (e) => setWarn(e.target.value), onBlur: (e) => setWarn(settleNumber(e.target.value, 0, 1e9, 10)), key: "i2" }),
             react.createElement("span", { style: { fontSize: "10px", color: "var(--dsw-alias-label-tertiary)" }, key: "h2" }, t("settings.warnHint")),
           ]),
         ]),
@@ -2204,7 +2263,14 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
           ]),
           react.createElement("div", { key: "refresh" }, [
             react.createElement("label", { className: "dshadb_label", key: "rf_l" }, t("settings.refresh")),
-            react.createElement("input", { className: "dshadb_field", type: "number", min: 1, max: 60, step: 1, value: refreshSec, onChange: (e) => setRefreshSec(Math.min(Math.max(Number(e.target.value) || 1, 1), 60)), key: "rf_i" }),
+            react.createElement("input", {
+              className: "dshadb_field", type: "number", min: 1, max: 60, step: 1,
+              value: refreshSec,
+              // v1.6.9: 输入期只留数字、允许空串；夹取推迟到失焦（旧写法当场夹取 → 旧数字删不掉）
+              onChange: (e) => setRefreshSec(numberDraft(e.target.value, 3)),
+              onBlur: (e) => setRefreshSec(settleNumber(e.target.value, 1, 60, 5)),
+              key: "rf_i",
+            }),
             react.createElement("span", { style: { fontSize: "10px", color: "var(--dsw-alias-label-tertiary)" }, key: "rf_h" }, t("settings.refreshHint")),
           ]),
           // v1.6.2: 今日花销提醒 —— 超了让大肥鱼弹一句「再花要变成穷光蛋啦...」。0 = 关闭。
@@ -2213,7 +2279,8 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
             react.createElement("input", {
               className: "dshadb_field", type: "number", min: 0, step: 1,
               value: dailyLimit,
-              onChange: (e) => setDailyLimit(Math.max(Number(e.target.value) || 0, 0)),
+              onChange: (e) => setDailyLimit(numberDraft(e.target.value, 6)),
+              onBlur: (e) => setDailyLimit(settleNumber(e.target.value, 0, 999999, 0)),
               key: "dl_i",
             }),
             react.createElement("span", { style: { fontSize: "10px", color: "var(--dsw-alias-label-tertiary)" }, key: "dl_h" }, t("settings.dailyLimitHint")),
@@ -2224,7 +2291,8 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
             react.createElement("input", {
               className: "dshadb_field", type: "number", min: 0, max: 168, step: 1,
               value: alertRepeat,
-              onChange: (e) => setAlertRepeat(Math.min(Math.max(Math.round(Number(e.target.value) || 0), 0), 168)),
+              onChange: (e) => setAlertRepeat(numberDraft(e.target.value, 3)),
+              onBlur: (e) => setAlertRepeat(settleNumber(e.target.value, 0, 168, 6)),
               key: "ar_i",
             }),
             react.createElement("span", { style: { fontSize: "10px", color: "var(--dsw-alias-label-tertiary)" }, key: "ar_h" }, t("settings.alertRepeatHint")),

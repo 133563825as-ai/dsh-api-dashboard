@@ -58,7 +58,7 @@ const cli = fs.readFileSync(path.join(ROOT, 'client/client.js'), 'utf8')
 const srv = fs.readFileSync(path.join(ROOT, 'src/index.js'), 'utf8')
 
 a('C1 客户端有「重复提醒间隔」输入框', cli.includes('t("settings.alertRepeat")') && cli.includes('className: "dshadb_field", type: "number", min: 0, max: 168'))
-a('C2 客户端把 alertRepeatHours 一起保存', /alertRepeatHours:\s*Number\(alertRepeat\)/.test(cli))
+a('C2 客户端把 alertRepeatHours 一起保存(用规范化后的值)', /alertRepeatHours:\s*nextAlertRepeat/.test(cli) && /const nextAlertRepeat = settleNumber\(alertRepeat, 0, 168, 6\)/.test(cli))
 a('C3 客户端有「发送测试提醒」按钮并打 /alerts/test', cli.includes('settings.alertTest') && cli.includes('"/api-dashboard/alerts/test"'))
 a('C4 客户端有系统通知开关引导(含"提醒方式"这句)', cli.includes('settings.alertPermHint') && cli.includes('提醒方式'))
 a('C5 面板如实分开展示 已送达/前台转内提示/失败', cli.includes('settings.alertDeliveryToast') && cli.includes('settings.alertStats'))
@@ -68,6 +68,10 @@ a('C8 服务端 alerts 响应含 skipped(不能混进 sent)', /skipped:\s*alertS
 a('C9 服务端前台跳过改发 App 内提示', srv.includes('ALERT_BRIDGE_TOAST') && srv.includes("first.kind === 'foreground-skip'"))
 a('C10 alertState 已登记进持久化形状消毒表', /OBJECT_FIELDS = \[[^\]]*'alertState'/.test(srv))
 a('C11 alertRepeatHours 已登记进数字字段消毒表', /NUMBER_FIELDS[\s\S]{0,600}'alertRepeatHours'/.test(srv))
+// v1.6.9: 「接口没打到」和「投递失败」必须分开报 —— 前者是插件文件已更新、dsh 还没重启
+// （服务端仍是旧版本, 那个路由根本不存在）, 后者才是通知发不出去要去查系统权限。
+a('C12 客户端区分「没打到接口」与「投递失败」', cli.includes('settings.alertTestStale') && /if \(!d\) setAlertTest\("stale"\)/.test(cli) && /r\.status === 404 \? "stale"/.test(cli))
+a('C13 stale 文案中英成对', (cli.split('"settings.alertTestStale"').length - 1) >= 2)
 
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`)
 if (fail > 0) process.exitCode = 1
