@@ -167,6 +167,17 @@ DSH 启动时会把 profile 的 `dsh.profile.bundles` **逐个 import**，只要
 >   `docs.claude.com` 返回 *"App unavailable in region"*、`platform.openai.com/docs/pricing` 403（但这两家已从别的官方入口拿到，见上）。
 >   **要取 Gemini 官方原文必须有代理/VPN；没拿到官方页就别改它的值**（红线：不许编造）。
 
+> - 📊 **「今日总结」是跨会话汇总，去重全靠 `seen`（v1.6.7 血泪，改前必读）**：
+>   `collectTodayCost`（`src/index.js`）依次取 ① 自己（`selfState`）→ ② 宿主常驻会话 `sessions.list()` → ③ 投影缓存目录里的冷会话。
+>   ⚠️ **`sessions.list()` 返回的是「全部常驻会话」，当前这个会话就在里面**（`SessionStore.list()` = `[...store.values()].map(e => e.session)`）；
+>   而当前会话的投影缓存文件**也同时在 ③ 的目录里**。所以 ②/③ 两处都必须先查 `seen` 再累加：
+>   v1.6.2~v1.6.6 的 ② 只写了 `seen.add(id)` 却没 `continue`，当前会话被算两次 → **今日花销 = 本会话 ×2.000**
+>   （真机：状态条 ~¥1.26 / 今日总结 ¥2.53）。`seen` 是**去重账本**，登记与累加必须是同一个判断的两个分支。
+>   ⚠️ 兜底那条也别删：`state.sessionId` 拿不到时按 **对象身份**（`st === selfState`）认自己，否则同样翻倍。
+>   ⚠️ 这个数字**没有任何 UI 能自证对错**（只跟状态条对比才看得出 ×2），必须靠 `test/test-today-cost.mjs` 钉住；
+>   写这类夹具时计价桩**只能用当日桶里的数字**，别用对象身份做映射 —— 冷会话是 JSON 读回来的，身份过不了序列化，
+>   金额会静默变 0 而 token 照加，夹具看起来还在跑、其实已经失真。
+
 ---
 
 ## 四、维护铁律（改代码前必读）

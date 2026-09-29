@@ -2316,7 +2316,11 @@ const add2 = (acc, priceDay, state, day) => {
   }
 }
 
-const collectTodayCost = (services, priceDay, selfState) => {
+/**
+ * v1.6.7: 导出是为了让 `test/test-today-cost.mjs` 能直接钉住「当前会话只算一次」——
+ * 这个数字以前没有任何测试覆盖, 于是 1.6.2 起一直把当前会话算两次(今日 = 本会话 ×2)。
+ */
+export const collectTodayCost = (services, priceDay, selfState) => {
   const day = bjtParts(Date.now()).ymd
   const acc = {
     byCurrency: {},
@@ -2324,7 +2328,7 @@ const collectTodayCost = (services, priceDay, selfState) => {
     byModel: {},
   }
   const seen = new Set()
-  // ① 先算自己, 并登记 id —— 免得下面遍历常驻会话时把自己再加一遍
+  // ① 先算自己, 并登记 id —— 下面遍历常驻会话时靠 seen 跳过它
   add2(acc, priceDay, selfState, day)
   const selfId = typeof selfState?.sessionId === 'string' && selfState.sessionId !== '' ? selfState.sessionId : null
   if (selfId !== null) seen.add(selfId)
@@ -2337,8 +2341,19 @@ const collectTodayCost = (services, priceDay, selfState) => {
     if (Array.isArray(list)) {
       for (const s of list) {
         const id = typeof s?.id === 'string' ? s.id : null
+        // ⚠️ v1.6.7 修: 这里**必须**用 seen 挡住, 不能只 seen.add(id) 了事。
+        //   宿主 sessions.list() 返回的是**全部常驻会话**, 当前这个会话就在里面
+        //   (SessionStore.list: [...store.values()].map(e => e.session))。① 已经把它算过了,
+        //   旧写法只登记 id 却照样 add() → 当前会话被算两次, 今日花销正好是本会话的 2 倍
+        //   (真机: 状态条 ~¥1.26, 今日总结 ¥2.53)。seen 同时顺手挡掉列表里的重复条目。
+        if (id !== null && seen.has(id)) continue
+        let st
+        try { st = projections?.stateOf?.(s, 'queryBalanceCost') } catch { continue /* 单个会话失败不影响整体 */ }
+        if (st === undefined || st === null) continue
+        // 兜底: 万一 state.sessionId 缺失(拿不到 id), 按对象身份认自己 —— 别再翻一次倍
+        if (st === selfState) continue
         if (id !== null) seen.add(id)
-        try { add(projections?.stateOf?.(s, 'queryBalanceCost')) } catch { /* 单个会话失败不影响整体 */ }
+        add(st)
       }
     }
   } catch { /* 宿主没给 list() → 只靠缓存目录 */ }
