@@ -197,6 +197,16 @@ a('状态条本体可收缩', /\.dshadb_bar\{[^}]*max-width:100%[^}]*min-width:0
 a('平台名可截断', /\.dshadb_bar_name\{[^}]*text-overflow:ellipsis/.test(src))
 a('金额/消耗/峰谷保住不缩', /\.dshadb_bar_amount,\.dshadb_bar_cost,\.dshadb_bar_dot,\.dshadb_bar_peak\{[^}]*flex:0 0 auto/.test(src))
 a('没给 barrow 加横向滚动(会撞手机壳手势让路规则)', !/\.dshadb_barrow\{[^}]*overflow-x/.test(src))
+// ===== v1.6.6 状态条独占一行 (真机: 跟宿主自带的统计行并排, 右端被屏幕切掉) =====
+// 宿主 uV2eYG_dock 把 composer.dock 槽位的所有贡献者排在同一条 nowrap flex 行里, 于是我们的胶囊
+// 紧贴宿主统计药丸。修法 = 对**装着本插件槽位的那个 dock** 打开换行 + 让宿主统计行占满一行。
+// 三条一起钉: 作用域(必须是 :has 钉住的这一个 dock) / 换行开了 / 统计行独占一行。
+a('dock 换行的作用域用 :has 钉在装了本插件槽位的那个 dock 上',
+  /\[class\*="_dock"\]:has\(> \[data-slot="conversation\.composer\.dock"\]\)\{[^}]*flex-wrap:wrap/.test(src))
+a('宿主统计行占满一行(状态条自然落到下一行)',
+  /\[data-slot="conversation\.composer\.dock"\] > \[data-composer-stats\]\{[^}]*flex:0 0 100%/.test(src))
+a('没给 dock 加 overflow(会撞手机壳横向滚动容器让路规则)',
+  !/\[class\*="_dock"\]:has\([^)]*\)\{[^}]*overflow/.test(src))
 
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`)
 // v1.3.2: 断言失败时以非 0 退出, 否则 CI(GitHub Actions)拦不住回归 —— 原来一律 exit 0

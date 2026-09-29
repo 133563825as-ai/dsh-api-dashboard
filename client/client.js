@@ -545,6 +545,23 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
    ⚠️ 别给 .dshadb_barrow 加 overflow-x:auto —— 会命中手机壳「真横向滚动容器让路」规则,
    状态条的点击/长按行为会跟着变 (AGENTS.md ① 有详解)。 */
 .dshadb_barrow > span{max-width:100%;min-width:0}
+/* v1.6.6: 余额条独占一行 —— 真机反馈「跟输入框下面那个系统自带的并在一起了」。
+   宿主把 composer.dock 槽位里的**所有**贡献者排在同一条 flex 行里
+   (uV2eYG_dock: display:flex; justify-content:center; align-items:center; gap:12px, 默认 nowrap):
+   槽位锚点是 display:contents, 于是宿主的统计药丸(「N 轮 N 步 · tok/s」「缓存命中」,
+   div[data-composer-stats])和我们的胶囊成了同一条行上的两个弹性子项 —— 看着就是被并进去了。
+   窄屏更糟: 手机壳(dsh-web-mobile)把宿主那行钉成 width:100%!important 的 28px 统计条,
+   我们的胶囊被挤到只剩 ~140px, 平台名先被压没, 右端的本会话消耗溢出胶囊之外被屏幕右缘切掉
+   (真机截图: 只剩 「~¥0.c」)。
+   修法: 只对「直接装着本插件槽位锚点」的那个 dock 打开换行, 并让宿主的统计行自己占满一行;
+   我们的 barwrap 仍是 fit-content, 于是自然落到第二行(桌面端与上下文环同行, 手机端环已被
+   手机壳绝对定位搬走, 我们独占一行) —— 与设计稿「输入框下方一条独立胶囊」一致。
+   ⚠️ 子元素自己换不了行: flex 行默认 nowrap, 不动容器的 flex-wrap 就只能被挤。
+   ⚠️ 作用域必须靠 :has() 钉在这一个 dock 上(队列/待办等其它 _dock 不受影响);
+     统计行靠宿主自己的 data-composer-stats 属性点名, 不用哈希类名。
+   ⚠️ 别给 dock 加 overflow —— 会撞手机壳「真·横向滚动容器让路」规则(AGENTS.md ①)。 */
+[class*="_dock"]:has(> [data-slot="conversation.composer.dock"]){flex-wrap:wrap}
+[data-slot="conversation.composer.dock"] > [data-composer-stats]{flex:0 0 100%}
 .dshadb_bar{max-width:100%;min-width:0}
 .dshadb_bar_name{overflow:hidden;text-overflow:ellipsis;min-width:0}
 .dshadb_bar_amount,.dshadb_bar_cost,.dshadb_bar_dot,.dshadb_bar_peak{flex:0 0 auto}
