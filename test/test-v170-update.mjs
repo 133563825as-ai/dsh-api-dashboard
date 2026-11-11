@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
+import { createRequire } from 'node:module'
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dshadb-update170-'))
 const oldHome = process.env.DSH_HOME, oldFetch = globalThis.fetch
 process.env.DSH_HOME = home
@@ -36,7 +37,17 @@ try {
   globalThis.fetch = fetchMock
   const info = await m.getUpdateStatus(true)
   assert.equal(info.ok, true); assert.equal(info.remote, '9.9.9'); assert.equal(info.hasUpdate, true)
-  assert.equal(info.compatibility.runtimeVersion, '0.2.0-rc.2')
+  // 宿主版本随环境升级（0.2.0-rc.2 → 0.2.1-rc.2 …），写死会随环境必红：
+  // 改为「必须等于真实安装值」，并按 semver 形状兜底，防止 runtimeVersion 被写成任意字符串。
+  const installedDsh = (() => {
+    const require = createRequire(import.meta.url)
+    for (const spec of ['@deepseek-ai/dsh-client-connection/package.json', '@deepseek-ai/dsh-app-boot/package.json']) {
+      try { return JSON.parse(fs.readFileSync(require.resolve(spec), 'utf8')).version } catch { /* 下一个 */ }
+    }
+    return null
+  })()
+  assert.match(info.compatibility.runtimeVersion, /^0\.\d+\.\d+(?:-rc\.\d+)?$/)
+  assert.equal(info.compatibility.runtimeVersion, installedDsh, '运行时版本必须等于已安装的 DSH 版本')
   assert.equal(info.canInstall, true); assert.ok(info.summary.includes('新增功能'))
   assert.equal(info.compatibility.targets[0], 'DSHA Web / 手机 / 桌面')
   assert.match(info.confirmationToken, /^[a-f0-9]{64}$/)

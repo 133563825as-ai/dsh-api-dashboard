@@ -279,24 +279,34 @@ window.__ModuleLoader__.load({
 
 /* ===== 状态条（顶部小条） ===== */
 /* v1.4.1: 定住高度下限 —— 空态(18px 内容)与有数据态(20px 内容)差 2px, 钱数/平台名一进来
-   状态条就从 26px 变 28px, 把上面的会话区顶 2px(真机实测 CLS 0.00094+0.00053)。
+   状态条就会把上面的会话区顶一下(真机实测 CLS 0.00094+0.00053)。
    用 min-height 而不是 height: 系统字体放大时仍可自然增高, 不会裁字。
-   28px = 有数据态的实测总高(20px 内容 + 4px 上下 padding), 所以有数据时外观完全不变。 */
-.dshadb_bar{display:inline-flex;align-items:center;gap:5px;font-size:11px;min-height:28px;box-sizing:border-box;padding:4px 10px 4px 6px;border-radius:10px;background:var(--dshadb-panel,#f5f6f8);border:1px solid var(--dshadb-border,#e7e8ec);color:var(--dshadb-muted,#777b84);cursor:pointer;white-space:nowrap;user-select:none;-webkit-tap-highlight-color:transparent}
+   数值 = 有数据态的实测总高, 所以有数据时外观完全不变。
+   v1.7.0+ (维护者 2026-10-16 要求「上下宽度缩一点」): 总高 28px → 24px
+   (内容 20px + 上下 padding 各 2px)。padding 与 min-height 必须同时改 ——
+   只改一个, 空态/有数据态就又差 2px, 上面那条 CLS 修复立刻失效。
+
+   v1.7.1 (维护者要求「边缘自定义 + 整体可调大小」): 24px / 2px 这些基准值全部乘
+   var(--dshadb-bar-scale,1), 边框宽度改由 var(--dshadb-bar-edge-w,1px) 驱动。
+   ⚠️ scale 必须同时作用在 font-size / padding / min-height 三者上 ——
+   只缩放字号会让 padding 保持原值, 两个态的高度差重新出现(同一个 CLS 坑)。
+   ⚠️ 边框用 border-width 而不是 border 简写: 0 值时 border-style 仍为 solid,
+   border-width:0 不绘制 —— 这就是「无边框」档, 不需要再写一条 border:none 分支。 */
+.dshadb_bar{display:inline-flex;align-items:center;gap:calc(5px * var(--dshadb-bar-scale,1));font-size:calc(11px * var(--dshadb-bar-scale,1));min-height:calc(24px * var(--dshadb-bar-scale,1));box-sizing:border-box;padding:calc(2px * var(--dshadb-bar-scale,1)) calc(10px * var(--dshadb-bar-scale,1)) calc(2px * var(--dshadb-bar-scale,1)) calc(6px * var(--dshadb-bar-scale,1));border-radius:10px;background:var(--dsw-alias-bg-base,var(--dshadb-surface,#ffffff));border-style:solid;border-color:var(--dshadb-bar-edge,rgba(0,0,0,.022));border-width:var(--dshadb-bar-edge-w,1px);color:var(--dshadb-muted,#777b84);cursor:pointer;white-space:nowrap;user-select:none;-webkit-tap-highlight-color:transparent}
 .dshadb_bar:active{opacity:0.8}
-.dshadb_bar_logo{width:16px;height:16px;border-radius:5px;background:var(--dshadb-logo,#eef2ff);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;color:#4f7cff}
-.dshadb_bar_name{font-weight:700;color:var(--dshadb-text,#17181c);font-size:11px}
+.dshadb_bar_logo{width:calc(16px * var(--dshadb-bar-scale,1));height:calc(16px * var(--dshadb-bar-scale,1));border-radius:calc(5px * var(--dshadb-bar-scale,1));background:var(--dshadb-logo,#eef2ff);display:flex;align-items:center;justify-content:center;font-size:calc(9px * var(--dshadb-bar-scale,1));font-weight:800;color:#4f7cff}
+.dshadb_bar_name{font-weight:700;color:var(--dshadb-text,#17181c);font-size:calc(11px * var(--dshadb-bar-scale,1))}
 .dshadb_bar_amount{font-weight:800;font-variant-numeric:tabular-nums;color:var(--dshadb-text,#17181c)}
 /* C-4a (v1.4.1): .dshadb_bar_ok/warn/err 以前只有使用处、没有 CSS 规则(死类名),
    于是"负余额/低余额金额变红"从来没生效过, 只有小圆点变色。 */
 .dshadb_bar_ok{color:#2e9e5b}
 .dshadb_bar_warn{color:#c8891a}
 .dshadb_bar_err{color:#d8443f}
-.dshadb_bar_dot{width:6px;height:6px;border-radius:50%;flex:none}
+.dshadb_bar_dot{width:calc(6px * var(--dshadb-bar-scale,1));height:calc(6px * var(--dshadb-bar-scale,1));border-radius:50%;flex:none}
 .dshadb_bar_dot_ok{background:#35b56b}
 .dshadb_bar_dot_warn{background:#e6a72f}
 .dshadb_bar_dot_err{background:#e05252}
-.dshadb_bar_peak{font-size:10px;padding:2px 7px;border-radius:999px;font-weight:700}
+.dshadb_bar_peak{font-size:calc(10px * var(--dshadb-bar-scale,1));padding:calc(2px * var(--dshadb-bar-scale,1)) calc(7px * var(--dshadb-bar-scale,1));border-radius:999px;font-weight:700}
 .dshadb_bar_peak.peak{background:rgba(230,167,47,0.12);color:#b07d1a;border:1px solid rgba(230,167,47,0.2)}
 .dshadb_bar_peak.valley{background:rgba(79,124,255,0.10);color:#3d5fcc;border:1px solid rgba(79,124,255,0.18)}
 
@@ -543,7 +553,7 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
 .dshadb_price_seg_val{font-size:10.5px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--dshadb-text,#17181c)}
 
 /* ===== 补缺失CSS ===== */
-.dshadb_bar_cost{display:inline-flex;align-items:center;margin-left:2px;padding-left:8px;border-left:1px solid var(--dshadb-border,#e7e8ec);color:var(--dshadb-secondary,#9ca0aa);font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.dshadb_bar_cost{display:inline-flex;align-items:center;margin-left:calc(2px * var(--dshadb-bar-scale,1));padding-left:calc(8px * var(--dshadb-bar-scale,1));border-left:1px solid var(--dshadb-bar-edge,rgba(0,0,0,.022));color:var(--dshadb-secondary,#9ca0aa);font-size:calc(11px * var(--dshadb-bar-scale,1));font-variant-numeric:tabular-nums;white-space:nowrap}
 /* ===== v1.4.0 子代理消耗行 =====
    设计约束: 无论几个子代理都**只占一行高度**(约 20px), 绝不换行挤压输入框。
    做法 = 固定 flex-wrap:nowrap + 横向滚动(隐藏滚动条) + 名字截断到 72px。
@@ -589,8 +599,27 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
    ⚠️ 作用域必须靠 :has() 钉在这一个 dock 上(队列/待办等其它 _dock 不受影响);
      统计行靠宿主自己的 data-composer-stats 属性点名, 不用哈希类名。
    ⚠️ 别给 dock 加 overflow —— 会撞手机壳「真·横向滚动容器让路」规则(AGENTS.md ①)。 */
-[class*="_dock"]:has(> [data-slot="conversation.composer.dock"]){flex-wrap:wrap}
-[data-slot="conversation.composer.dock"] > [data-composer-stats]{flex:0 0 100%}
+/* v1.7.3: v1.6.6 那两条「让 composer dock 换行、统计行独占一行」的规则在 0.2.2 上必须删掉 ——
+   我们的胶囊已经不在 dock 里了，而这条 flex-wrap 会反过来把宿主的 ContextMeter 挤到第二行：
+   真机实测 dock 变成 52px 高（统计条 28 + 空出来的环位 22），统计行与胶囊之间凭空多出一条空带。 */
+/* v1.7.3（DSH 0.2.2-rc.1 适配，真机四轮诊断）—— 宿主把 composer.dock 这一圈容器换了三轮语义，
+   旧的两条 :has() 规则在 0.2.2 上一条都不成立：
+   ① slot 锚点 [data-slot="conversation.composer.dock"] 不再是 display:contents，而是真实 flex 盒子，
+      并且被 dsh-web-mobile 标成 [data-mobile-nav="stats"]（height/max-height 28px + overflow:hidden +
+      flex-flow:nowrap，全 !important）—— 胶囊作为它的子节点被压成 ~92~106px 并上下裁切。
+   ② composer dock（uV2eYG_dock）不能放：dsh-web-mobile 的 locateRing() 把 dock 里唯一的非统计子节点
+      当作「上下文环」，会给它挂 [data-mobile-nav="stats-ring"] 并 absolute 搬走（实测胶囊被搬成 92x28）。
+   ③ 输入卡 uV2eYG_root（dock 的父节点，flex-direction:column; align-items:center; padding:0 …4px）
+      才是落点：不在统计条里、不是 dock 的子节点、天然在卡片内部且紧挨统计行。
+   落地方式：窄屏时组件把 .dshadb_barwrap 用 createPortal 挂进输入卡，并给容器打 data-dshadb-host；
+   这组规则只描述「挂进去之后」的尺寸与贴边，不参与选容器。
+   ⚠️ margin-top 一律不加 !important —— 组件写行内 margin-top 做实测贴边，行内样式打不过
+      作者样式表的 !important（真机踩过：mt 写进去、computed 仍是 0px）。
+   ⚠️ 不要给 host 加 flex-wrap：输入卡是 column，wrap 会变成换列。 */
+[data-dshadb-host] > .dshadb_barwrap{flex:0 0 auto;width:100%;max-width:100%;min-width:0;margin-right:0;margin-bottom:0;margin-left:0;box-sizing:border-box;margin-top:0}
+/* 兜底：连输入卡都拿不到、只能退回 composer dock 时，独占一整行 */
+[data-dshadb-host="dock"]{flex-wrap:wrap}
+[data-dshadb-host="dock"] > .dshadb_barwrap{flex:0 0 100%}
 .dshadb_bar{max-width:100%;min-width:0}
 .dshadb_bar_name{overflow:hidden;text-overflow:ellipsis;min-width:0}
 .dshadb_bar_amount,.dshadb_bar_cost,.dshadb_bar_dot,.dshadb_bar_peak{flex:0 0 auto}
@@ -699,6 +728,14 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
 .dshadb-whale-l-p{font-size:18px;font-weight:800;line-height:1.2;white-space:nowrap}
 .dshadb-whale-l-c{font-size:11px;font-weight:600;color:var(--dshadb-secondary,#9ca0aa);line-height:1.4;white-space:nowrap}
 .dshadb-whale-wrap{white-space:normal;word-break:break-word}
+/* v1.7.2: 桌宠剩余余额徽标。贴在鱼下方, 水平位置由 JS 按「探头后的可见区」算好(贴边缩回时不至于一半在屏外) */
+.dshadb-whale-badge{position:absolute;top:calc(100% - 2px);left:50%;transform:translateX(-50%);padding:3px 7px;border-radius:8px;font-size:11px;font-weight:700;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-sizing:border-box;background:var(--dshadb-surface,#fff);color:var(--dshadb-text,#17181c);border:1px solid var(--dshadb-border,#e7e8ec);box-shadow:0 4px 12px rgba(0,0,0,.14);pointer-events:none;z-index:3;font-variant-numeric:tabular-nums}
+.dshadb-whale-badge-ok{color:#2a8f54;border-color:rgba(53,181,107,.35)}
+.dshadb-whale-badge-warn{color:#b7791f;border-color:rgba(224,169,63,.4)}
+.dshadb-whale-badge-err{color:#c0392b;border-color:rgba(224,82,82,.4)}
+body[data-dshadb-theme="dark"] .dshadb-whale-badge-ok,body[data-ds-dark-theme] .dshadb-whale-badge-ok{color:#4fd08a}
+body[data-dshadb-theme="dark"] .dshadb-whale-badge-warn,body[data-ds-dark-theme] .dshadb-whale-badge-warn{color:#e8b95f}
+body[data-dshadb-theme="dark"] .dshadb-whale-badge-err,body[data-ds-dark-theme] .dshadb-whale-badge-err{color:#ff8080}
 
 .dshadb_subtip{pointer-events:auto;white-space:normal;width:300px;max-width:calc(100vw - 32px);background:var(--dshadb-surface,#fff);color:var(--dshadb-text,#17181c);border:1px solid var(--dshadb-border,#e7e8ec);font-size:12px;padding:14px;line-height:1.5}
 .dshadb_subtip>strong{display:block;font-size:14px;margin-bottom:10px;overflow-wrap:anywhere}.dshadb_subtip_row{display:grid;grid-template-columns:66px minmax(0,1fr);gap:8px;margin:7px 0;align-items:start}.dshadb_subtip_row>span{color:var(--dshadb-muted,#777b84);font-weight:500}.dshadb_subtip_row>b{font-weight:600;overflow-wrap:anywhere}.dshadb_subtip>button{border:0;border-radius:8px;background:#4176e6;color:#fff;padding:7px 14px;margin-top:6px;float:right}
@@ -707,8 +744,8 @@ body:has(.dshadb_scrim) [class*="sidebarCol"]{border-right-color:transparent !im
 body.dshadb-whale-preview .dshadb-whale{z-index:100003}
 .dshadb_save_error{color:#e05252;margin:4px 4px 12px;overflow-wrap:anywhere;font-size:12px;line-height:1.5}
 /* Complete host theme; light defaults also override a dark OS when DSH is manually light. */
-body{--dshadb-panel:#f5f6f8;--dshadb-surface:#ffffff;--dshadb-text:#17181c;--dshadb-muted:#777b84;--dshadb-secondary:#9ca0aa;--dshadb-border:#e7e8ec;--dshadb-divider:#eef0f4;--dshadb-tab:#e9eaf0;--dshadb-tabtext:#686c76;--dshadb-logo:#eef2ff;--dshadb-active:#f0f4ff;--dshadb-soft:#f0f2f8;--dshadb-handle:#c9cad0;--dshadb-bubbletext:#3b4356;}
-body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;--dshadb-surface:#292d35;--dshadb-text:#f2f4f8;--dshadb-muted:#aeb5c2;--dshadb-secondary:#9099aa;--dshadb-border:#3a414d;--dshadb-divider:#343b47;--dshadb-tab:#303641;--dshadb-tabtext:#c0c7d2;--dshadb-logo:#303e5e;--dshadb-active:#273a60;--dshadb-soft:#303641;--dshadb-handle:#505968;--dshadb-bubbletext:#d3d7e0;}
+body{--dshadb-panel:#f5f6f8;--dshadb-surface:#ffffff;--dshadb-text:#17181c;--dshadb-muted:#777b84;--dshadb-secondary:#9ca0aa;--dshadb-border:#e7e8ec;--dshadb-divider:#eef0f4;--dshadb-tab:#e9eaf0;--dshadb-tabtext:#686c76;--dshadb-logo:#eef2ff;--dshadb-active:#f0f4ff;--dshadb-soft:#f0f2f8;--dshadb-handle:#c9cad0;--dshadb-bubbletext:#3b4356;--dshadb-bar-edge:rgba(0,0,0,.022);}
+body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;--dshadb-surface:#292d35;--dshadb-text:#f2f4f8;--dshadb-muted:#aeb5c2;--dshadb-secondary:#9099aa;--dshadb-border:#3a414d;--dshadb-divider:#343b47;--dshadb-tab:#303641;--dshadb-tabtext:#c0c7d2;--dshadb-logo:#303e5e;--dshadb-active:#273a60;--dshadb-soft:#303641;--dshadb-handle:#505968;--dshadb-bubbletext:#d3d7e0;--dshadb-bar-edge:rgba(255,255,255,.055);}
 .dshadb_drawer{background:var(--dshadb-panel,#f5f6f8);color:var(--dshadb-text,#17181c)}.dshadb_body{min-height:0;overscroll-behavior:contain;overflow-anchor:none}.dshadb_update_dialog{color:var(--dshadb-text,#17181c)}.dshadb_field_select{background-color:var(--dshadb-surface,#fff)}.dshadb_switch_knob{background:#fff}.dshadb_tab_active,.dshadb_save_btn{color:#fff}.dshadb_save_btn{background:#4176e6}.dshadb_sub{font-family:inherit;cursor:pointer}.dshadb_bar_ok{color:#2e9e5b}.dshadb_bar_warn{color:#c8891a}.dshadb_bar_err{color:#d8443f}
 `
 
@@ -726,7 +763,7 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
       "status.nokey": "未配置", "status.loading": "查询中", "status.noBalance": "未开放",
       "status.auth": "认证失败", "status.local": "本地", "amount.free": "免费",
       "all.ok": "{n} 正常", "all.attention": "{n} 需关注", "domestic": "国内平台", "abroad": "海外平台", "local": "本地", "relay": "中转站", "custom": "自定义模型",
-      "selectedTag": "当前", "add.relay": "添加中转站", "add.custom": "添加自定义模型", "settings.title": "哦鲸鲸设置",
+      "selectedTag": "当前", "add.custom": "添加自定义模型", "settings.title": "哦鲸鲸设置",
       "detail.total": "当前余额", "detail.topup": "总充值", "detail.used": "总使用", "detail.note": "类型",
       "detail.recharge": "去充值 ↗",
       // v1.6.0: 充值入口页 / 抽屉底部提示
@@ -737,6 +774,9 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
       "topup.entryHint": "余额不够？各平台充值入口",
       "detail.sessionCost": "本会话消耗", "detail.noBalance": "该平台未开放余额查询",
       "settings.safe": "安全阈值(绿)", "settings.warn": "预警阈值(黄)", "settings.currency": "计价货币",
+      "settings.barEdge": "状态条边框", "settings.barEdgeNone": "无边框", "settings.barScale": "状态条大小",
+      "settings.barReset": "状态条位置", "settings.barResetHint": "桌面/平板上拖动状态条可换位置；手机上固定不动", "settings.barResetBtn": "放回原位",
+      "settings.saveFailed": "保存失败：",
       "settings.overseasCurrency": "海外模型计价", "settings.overseasFollow": "跟随主货币", "settings.overseasHint": "海外厂商官方价本就是美元, 选美元可免去 ×7 折算误差",
       "settings.safeHint": "余额高于此值显示绿色(安全)",
       "settings.warnHint": "余额低于此值显示黄色(偏低)，再低显示红",
@@ -759,13 +799,13 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
       "preview.body": "供电脑与平板试用：≥1024px 宽时面板变成居中对话框（卡片两列），768~1023px 收成居中 560px 面板；手机与手机横屏保持原样。预览版只在预览分支内自更新，不会被正式版覆盖。",
       "update.previewHint": "预览版不参与一键更新（避免被 main 上的正式版覆盖）",
       "update.previewChannelHint": "预览频道自更新：只会更新到该分支上的新预览版，不会被 main 的正式版覆盖 ·",
-      "settings.section.basic": "基础设置", "settings.section.relays": "中转站", "settings.section.models": "自定义模型",
+      "settings.section.basic": "基础设置", "settings.section.models": "自定义模型",
       "settings.section.whale": "大肥鱼",
       "settings.section.topup": "充值入口",
-      "whale.enable": "收养大肥鱼", "whale.enableHint": "在屏幕边缘养一只会探头的大肥鱼（纯互动，不显示余额）",
+      "whale.enable": "收养大肥鱼", "whale.enableHint": "在屏幕边缘养一只会探头的大肥鱼；可让它顺带显示剩余余额",
       "whale.scale": "身体大小", "whale.peek": "探出多少",
       "whale.sound": "按压音效", "whale.soundSet": "音效组", "whale.volume": "音量",
-      "whale.bubble": "台词气泡", "whale.peakMode": "峰谷文案", "whale.snap": "自动靠边",
+      "whale.bubble": "台词气泡", "whale.balance": "显示剩余余额", "whale.balanceHint": "显示当前选中平台的剩余余额，数字与状态条同源；余额未开放或没有数字时自动隐藏", "whale.peakMode": "峰谷文案", "whale.snap": "自动靠边",
       "whale.snapHint": "松手后吸附到最近的屏幕边缘；关掉就停在你放的位置",
       "whale.on": "开", "whale.off": "关",
       "whale.duck": "小黄鸭", "whale.fx1": "音效1", "whale.fx2": "音效2", "whale.fx3": "音效3",
@@ -826,7 +866,7 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
       "status.nokey": "No Key", "status.loading": "Loading", "status.noBalance": "No API",
       "status.auth": "Auth", "status.local": "Local", "amount.free": "Free",
       "all.ok": "{n} OK", "all.attention": "{n} need attention", "domestic": "Domestic", "abroad": "Global", "local": "Local", "relay": "Relay", "custom": "Custom",
-      "selectedTag": "Now", "add.relay": "Add Relay", "add.custom": "Add Custom", "settings.title": "哦鲸鲸 Settings",
+      "selectedTag": "Now", "add.custom": "Add Custom", "settings.title": "哦鲸鲸 Settings",
       "detail.total": "Balance", "detail.topup": "Top-up", "detail.used": "Used", "detail.note": "Type",
       "detail.recharge": "Recharge ↗",
       "today.title": "Today", "today.tokens": "{n} tokens total", "today.others": "Others",
@@ -836,6 +876,9 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
       "topup.entryHint": "Low on balance? Top-up pages",
       "detail.sessionCost": "Session cost", "detail.noBalance": "No balance API",
       "settings.safe": "Safe (green)", "settings.warn": "Warn (yellow)", "settings.currency": "Currency",
+      "settings.barEdge": "Status bar border", "settings.barEdgeNone": "No border", "settings.barScale": "Status bar size",
+      "settings.barReset": "Status bar position", "settings.barResetHint": "Drag the status bar to move it on desktop/tablet; it stays fixed on phones", "settings.barResetBtn": "Reset",
+      "settings.saveFailed": "Save failed: ",
       "settings.overseasCurrency": "Overseas models", "settings.overseasFollow": "Follow main", "settings.overseasHint": "Overseas vendors price in USD; picking USD avoids the x7 conversion error",
       "settings.safeHint": "Above this = green (safe)",
       "settings.warnHint": "Below this = yellow, lower = red",
@@ -858,13 +901,13 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
       "preview.body": "For desktop and tablet: at 1024px and wider the panel becomes a centred dialog with a two-column card grid, at 768-1023px a centred 560px sheet. Phones and phone-landscape keep the original layout. Preview builds update only within the preview branch, never to the stable release.",
       "update.previewHint": "Preview build: one-click update is off, so the stable line on main cannot overwrite it.",
       "update.previewChannelHint": "Preview-channel update: only newer previews on this branch, never the stable release on main ·",
-      "settings.section.basic": "Basic", "settings.section.relays": "Relays", "settings.section.models": "Custom Models",
+      "settings.section.basic": "Basic", "settings.section.models": "Custom Models",
       "settings.section.whale": "Whale",
       "settings.section.topup": "Top-up",
-      "whale.enable": "Adopt Big Whale", "whale.enableHint": "Keep a peeking whale on the screen edge (interactive only)",
+      "whale.enable": "Adopt Big Whale", "whale.enableHint": "Keep a peeking whale on the screen edge; it can also show the remaining balance",
       "whale.scale": "Body size", "whale.peek": "Peek amount",
       "whale.sound": "Press sound", "whale.soundSet": "Sound set", "whale.volume": "Volume",
-      "whale.bubble": "Speech bubble", "whale.peakMode": "Peak wording", "whale.snap": "Snap to edge",
+      "whale.bubble": "Speech bubble", "whale.balance": "Show remaining balance", "whale.balanceHint": "Shows the selected platform's remaining balance, same source as the status pill; hidden when there is no number", "whale.peakMode": "Peak wording", "whale.snap": "Snap to edge",
       "whale.snapHint": "Snaps to the nearest edge on release; turn off to keep it where you drop it",
       "whale.on": "On", "whale.off": "Off",
       "whale.duck": "Duck", "whale.fx1": "FX 1", "whale.fx2": "FX 2", "whale.fx3": "FX 3",
@@ -1254,6 +1297,18 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
       if (current.status === "ok") {
         const cur = current.currency || "USD";
         const num = typeof current.total === "number" ? current.total : 0;
+        // issue #4（2026-11-11）: 只有百分比、没有剩余的套餐账号（如智谱 Coding Plan Max），
+        // 服务端会下发 windows（各限流窗口的已用%）。状态条并排显示【剩余%】在前、
+        // 各窗口已用%在后，例如「剩12% · 5小时窗口已用28% · 周配额已用88%」。
+        // 三色灯仍由 total(=最紧窗口的剩余%) 驱动，方向不变：剩得越少越黄/红。
+        if (Array.isArray(current.windows) && current.windows.length > 0) {
+          const head = String(cur).trim() === "%" ? formatMoney(num, "%") : formatMoney(num, cur);
+          const rest = current.windows
+            .filter((w) => w && typeof w.percent === "number")
+            .map((w) => `${w.label || "窗口"}已用${Math.round(w.percent)}%`)
+            .join(" · ");
+          return rest ? head + " · " + rest : head;
+        }
         if (String(cur).trim() === "%") return formatMoney(num, "%");
         if (String(cur).trim() === "tokens") return formatMoney(num, "tokens");
         return formatMoney(num, cur);
@@ -1291,6 +1346,10 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
       }
       // 第 3 层: 官方插件后缀约定
       if (p.endsWith("-official") || p.endsWith("_official")) return false;
+      // 第 4 层（v1.7.5）: DSH 的「官方账号登录」provider —— deepseek-account / deepseek-account-platform。
+      // 它没有 API Key、也不是中转站；余额由账号接口读到（balance.source === "account"）。
+      // 不认这条会被判成中转站 → 状态条永远显示「—」，用户以为读不到余额。
+      if (p === "deepseek-account" || p.startsWith("deepseek-account")) return false;
       return true;
     }
     /** v0.5.3: 模型名 → 平台 id 映射 (仅强特征匹配, 避免误切; 自定义/中转由调用方按名称二次匹配)
@@ -1403,8 +1462,9 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
       const balances = data.balances || [];
       let current = balances.find(b => b.platform === selectedId);
       if (!current) current = balances.find(b => b.status === "ok") || balances[0];
-      // 当前走中转站时不显示官方余额 (中转站没有余额接口)
-      const viaRelay = isRelayProvider(provider, config);
+      // 当前走中转站时不显示官方余额 (中转站没有余额接口)。
+      // v1.7.5: 但「账号登录」读到的余额带 source:"account"，那是官方余额，必须显示。
+      const viaRelay = isRelayProvider(provider, config) && !(current && current.source === "account");
       // 选中项与当前平台不同步时, commit 后再同步 (render 阶段调用会触发 React 18 警告)
       react.useEffect(() => {
         if (current && selectedId !== current.platform && current.status === "ok") onSelect(current.platform);
@@ -1435,6 +1495,15 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
         const raf = requestAnimationFrame(() => setDisplayAmount((prev) => (prev === txt ? prev : txt)));
         return () => cancelAnimationFrame(raf);
       });
+
+      // v1.7.2: 把「当前平台余额」推给桌宠徽标。
+      // 用的是同一个 displayAmount / getLevel, 所以鱼身上的数字与胶囊永远一致;
+      // 没有当前平台时推空值, 让徽标隐藏, 而不是继续挂着上一个平台的旧数字。
+      react.useEffect(() => {
+        if (!current) { updateWhaleBalance({ text: "", level: "ok" }); return; }
+        updateWhaleBalance({ text: displayAmount, level: viaRelay ? "ok" : getLevel(current, config) });
+      }, [displayAmount, viaRelay, current && current.platform, current && current.status,
+        config && config.safeThreshold, config && config.warnThreshold]);
 
       // v1.6.3: 峰谷标记只在**当前模型真的走峰谷表**时显示。
       // 旧写法只判 config.isPeak —— 那是个恒真的全局时段布尔, 于是 glm/claude 这类
@@ -1513,7 +1582,7 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
     //#endregion
 
     //#region 二层 看板面板
-    function DashboardDrawer({ isOpen, onClose, t, selectedId, onSelect, onOpenDetail, onAddRelay, onAddCustom, onOpenSettings, config, currentModel, today, subagentCost }) {
+    function DashboardDrawer({ isOpen, onClose, t, selectedId, onSelect, onOpenDetail, onAddCustom, onOpenSettings, config, currentModel, today, subagentCost }) {
       const data = react.useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
       const [isRefreshing, setRefreshing] = react.useState(false);
       const [openGroups, setOpenGroups] = react.useState({ domestic: false, abroad: false, relay: false, custom: false, nobalance: false });
@@ -1712,9 +1781,8 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
           subagentSection,
           groups.relay.length ? react.createElement(GroupSection, { label: t("relay"), count: groups.relay.length, open: openGroups.relay, onToggle: () => toggle("relay"), key: "g_relay" }, groups.relay.map(card)) : null,
           groups.custom.length ? react.createElement(GroupSection, { label: t("custom"), count: groups.custom.length, open: openGroups.custom, onToggle: () => toggle("custom"), key: "g_custom" }, groups.custom.map(card)) : null,
-          // ③ 添加按钮居中两边对齐
-          react.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginTop: "6px" }, key: "add_btns" }, [
-            react.createElement("button", { type: "button", className: "dshadb_add_btn", key: "add_relay", onClick: onAddRelay }, react.createElement(IconPlus, null), t("add.relay")),
+          // ③ 添加按钮（v1.7.1: 「添加中转站」入口已并入「添加自定义模型」，只留一个按钮）
+          react.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr", gap: "10px", marginTop: "6px" }, key: "add_btns" }, [
             react.createElement("button", { type: "button", className: "dshadb_add_btn", key: "add_custom", onClick: onAddCustom }, react.createElement(IconPlus, null), t("add.custom")),
           ]),
           react.createElement("div", { style: { fontSize: "10px", color: "var(--dshadb-secondary,#9ca0aa)", padding: "8px 2px 2px", lineHeight: "1.5", textAlign: "center" }, key: "hint" }, [
@@ -1993,7 +2061,7 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
     //#endregion
 
     //#region 设置面板 (安全阈值 + 中转站)
-    function SettingsModal({ isOpen, onClose, onBack, t, config, initialSection, underScrim }) {
+    function SettingsModal({ isOpen, onClose, onBack, t, config, initialSection, underScrim, barEdge, barScale, onBarEdge, onBarScale, barFloating, onResetBarPos }) {
       const [section, setSection] = react.useState(initialSection || "basic");
       react.useEffect(() => {
         document.body?.classList?.toggle("dshadb-whale-preview", isOpen && section === "whale");
@@ -2019,6 +2087,49 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
       const [subsSaving, setSubsSaving] = react.useState(false);
       const subsDirty = react.useRef(false);
       const [subsSaveError, setSubsSaveError] = react.useState("");
+      /**
+       * v1.7.1: 状态条外观 —— 维护者要求「边缘自定义(可无边框 / 可调厚) + 整体可调大小」。
+       * 两者都只驱动 CSS 变量(--dshadb-bar-edge-w / --dshadb-bar-scale), 由 barwrap 上的
+       * style 下发, 里面两个态的胶囊都继承 —— 不需要在每处渲染点重复接线。
+       *
+       * v1.7.1 (修): 值不再由这里 useState 持有 —— 滑块改的是父组件(DashboardSlot)的 state,
+       * 因为下发变量的 barwrap 在父组件里。这里只负责显示与回传, 自己不再存一份(存了也传不下去)。
+       * 父组件首帧可能是 null(配置还没拉回来), 显示层用兜底值 1px/100%。
+       */
+      const barEdgeVal = typeof barEdge === "number" ? barEdge : 1;
+      const barScaleVal = typeof barScale === "number" ? barScale : 1;
+      /**
+       * v1.7.1: 状态条外观是**即改即存**的滑块(与大肥鱼页 patchWf 同一套做法),
+       * 但多两层保护:
+       *  · 累积 pending —— 连拖两个滑块时, 后一次不会把前一次还没发出的改动挤掉;
+       *  · 防抖 250ms —— range 在拖动过程中会连续触发 onChange, 不防抖会连打几十个请求
+       *    (轻量通道虽快也没必要); 松手后 250ms 落盘, 体感仍是「立刻」。
+       * 失败必须写在界面上, 不静默 —— 存不上而界面又不报, 用户只会以为"这功能没用"。
+       */
+      const [barSaveError, setBarSaveError] = react.useState("");
+      const barPending = react.useRef({});
+      const barSaveTimer = react.useRef(null);
+      const barSaveChain = react.useRef(Promise.resolve());
+      const saveBarLook = (patch) => {
+        Object.assign(barPending.current, patch);
+        if (barSaveTimer.current) clearTimeout(barSaveTimer.current);
+        setBarSaveError("");
+        barSaveTimer.current = setTimeout(() => {
+          const body = barPending.current;
+          barPending.current = {};
+          const task = barSaveChain.current.catch(() => {}).then(() =>
+            fetchT("/api-dashboard/config", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            }));
+          barSaveChain.current = task;
+          task.then(() => setBarSaveError(""))
+              .catch((e) => setBarSaveError(t("settings.saveFailed") + e.message));
+        }, 250);
+      };
+      // 卸载时清掉待发定时器, 免得面板关掉之后还去打一次接口
+      react.useEffect(() => () => { if (barSaveTimer.current) clearTimeout(barSaveTimer.current); }, []);
       // 官方直连 provider 名单 (第 1 层判定): 多行文本, 逗号/换行分隔
       const [officialText, setOfficialText] = react.useState(
         Array.isArray(config && config.officialProviders) ? config.officialProviders.join(", ") : "");
@@ -2059,9 +2170,8 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
       const wfDirty = react.useRef(new Set());
       const [wf, setWf] = react.useState({
         scale: 1, peekRatio: 0.5, soundOn: true, soundSet: "duck",
-        volume: 0.5, bubbleOn: true, peakMode: "default", snapOn: true,
+        volume: 0.5, bubbleOn: true, showBalance: false, peakMode: "default", snapOn: true,
       });
-      const [form, setForm] = react.useState({ name: "", baseUrl: "", apiKey: "", queryType: "auto" });
       const [mform, setMform] = react.useState({ name: "", apiUrl: "", apiKey: "", queryType: "auto", totalPath: "", usedPath: "", currency: "" });
       const [loading, setLoading] = react.useState(false);
       const [saving, setSaving] = react.useState(false);
@@ -2265,6 +2375,9 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
             officialProviders: officialText,
             // v1.4.0「真自动」: 关掉的 DSH provider (空数组 = 全部启用)
             dshProviderOptOut: dshOff,
+            // v1.7.1: 状态条外观 **故意不在这里** —— 那两个滑块是即改即存的(saveBarLook),
+            // 不归底部「保存」按钮管。服务端按 patch 语义合并, 少发这两个字段不会把它们清掉;
+            // 反过来在这里补发一次也只会写入同样的值, 徒增困惑。
           }) });
           // v1.1.0: 保存后立刻强拉一次, 让开关类设置(大肥鱼)即时生效, 不必等下一轮轮询
           try { await store.forceRefresh(); } catch (e) { /* 忽略 */ }
@@ -2273,11 +2386,14 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
           onClose();
         } finally { setSaving(false); }
       };
-      const addRelay = () => {
-        if (!form.name || !form.baseUrl) return;
-        setRelays([...relays, { id: Math.random().toString(36).slice(2), name: form.name, baseUrl: form.baseUrl.replace(/\/+$/, ''), apiKey: form.apiKey, queryType: form.queryType }]);
-        setForm({ name: "", baseUrl: "", apiKey: "", queryType: "auto" });
-      };
+      /**
+       * v1.7.1: 「中转站」页签已删除 —— 与「自定义模型」功能重叠：
+       *  · 填 Base URL 让插件自己探端点(旧中转站页) ⊂ 直接给余额接口 URL + 解析方式(自定义模型页)；
+       *  · 而且 DSH 的 provider 从 v1.4.0 起会**自动入列**，手填这条路基本用不上了。
+       * 但**旧数据不能变成删不掉的僵尸条目**：服务端仍支持 customRelays、也仍在查它们的余额，
+       * 所以这里保留删除能力（只在真有旧条目时，才在「自定义模型」页底部露出，见 relayLegacy）。
+       * 服务端 POST 是 patch 语义(不发 customRelays 就不动它)，新增入口全部移除后不会误清空。
+       */
       const removeRelay = (id) => setRelays(relays.filter(r => r.id !== id));
       const addModel = () => {
         if (!mform.name || !mform.apiUrl) return;
@@ -2333,7 +2449,6 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
       const tab = (id, label) => react.createElement("button", { type: "button", className: "dshadb_tab" + (section === id ? " dshadb_tab_active" : ""), onClick: () => setSection(id), key: id }, label);
       const tabsNode = react.createElement("div", { className: "dshadb_tabs", key: "tabs" }, [
         tab("basic", t("settings.section.basic")),
-        tab("relays", t("settings.section.relays")),
         tab("models", t("settings.section.models")),
         tab("topup", t("settings.section.topup")),
         tab("whale", t("settings.section.whale")),
@@ -2366,6 +2481,34 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
       ]);
 
       // 基础设置: 阈值 / 币种 / 刷新间隔
+      // v1.1.0 起给大肥鱼页用的行/滑块/分段控件 (v1.7.1 起基础设置页的状态条外观也在用,
+      // 所以从大肥鱼页上移到所有 section 之前 —— 原本定义在后面, 前面的 section 引用会踩 TDZ)。
+      const wfRow = (key, label, control, sub) => react.createElement("div", { className: "dshadb_wf_row", key }, [
+        react.createElement("div", { key: "n", style: { minWidth: 0 } }, [
+          react.createElement("span", { className: "dshadb_wf_name", key: "t" }, label),
+          sub ? react.createElement("span", { className: "dshadb_wf_sub", key: "s" }, sub) : null,
+        ]),
+        control,
+      ]);
+      const wfSlider = (key, label, valText, min, max, step, value, onCommit) =>
+        react.createElement("div", { className: "dshadb_wf_row_col", key }, [
+          react.createElement("div", { className: "dshadb_wf_head", key: "h" }, [
+            react.createElement("span", { className: "dshadb_wf_name", key: "n" }, label),
+            react.createElement("span", { className: "dshadb_wf_val", key: "v" }, valText),
+          ]),
+          react.createElement("input", {
+            className: "dshadb_wf_range", type: "range", min, max, step, value, key: "r",
+            onChange: (e) => onCommit(Number(e.target.value)),
+          }),
+        ]);
+      const wfSeg = (key, label, options, value, onPick) =>
+        wfRow(key, label, react.createElement("div", { className: "dshadb_wf_seg", key: "seg" },
+          options.map(([v, lb]) => react.createElement("button", {
+            type: "button", key: String(v),
+            className: "dshadb_wf_segbtn" + (value === v ? " dshadb_wf_segbtn_on" : ""),
+            onClick: () => onPick(v),
+          }, lb))));
+
       const basicSection = react.createElement("div", { className: "dshadb_settings_section", key: "s_basic" }, [
         react.createElement("div", { className: "dshadb_settings_row", key: "subagents" }, [
           react.createElement("div", { className: "dshadb_settings_row_main", key: "text" }, [
@@ -2376,6 +2519,31 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
 
         ]),
         subsSaveError ? react.createElement("p", { role: "alert", className: "dshadb_save_error", key: "subsError" }, subsSaveError) : null,
+        /**
+         * v1.7.1: 状态条(余额胶囊)外观 —— 维护者要求「边缘自定义 + 整体可调大小」。
+         * 与大肥鱼页一致: **即改即存**(先本地 state 立刻见效, 再后台落盘),
+         * 不等底部「保存」按钮 —— 维护者原话「为什么还要保存?」。
+         */
+        wfSlider("barEdge", t("settings.barEdge"),
+          barEdgeVal === 0 ? t("settings.barEdgeNone") : barEdgeVal + "px",
+          0, 3, 0.5, barEdgeVal,
+          (v) => { onBarEdge(v); saveBarLook({ barEdgeWidth: v }); }),
+        wfSlider("barScale", t("settings.barScale"), Math.round(barScaleVal * 100) + "%",
+          0.8, 1.5, 0.05, barScaleVal,
+          (v) => { onBarScale(v); saveBarLook({ barScale: v }); }),
+        // v1.7.2: 胶囊在桌面/平板可以拖走 —— 给出一个明确的「放回去」入口,
+        // 不然拖到角落里就只能改 localStorage 才能复位。
+        barFloating ? react.createElement("div", { className: "dshadb_settings_row", key: "barpos" }, [
+          react.createElement("div", { className: "dshadb_settings_row_main", key: "m" }, [
+            react.createElement("span", { className: "dshadb_settings_row_title", key: "t" }, t("settings.barReset")),
+            react.createElement("span", { className: "dshadb_settings_row_sub", key: "s" }, t("settings.barResetHint")),
+          ]),
+          react.createElement("button", {
+            type: "button", className: "dshadb_add_btn", key: "b",
+            onClick: () => { if (typeof onResetBarPos === "function") onResetBarPos(); },
+          }, t("settings.barResetBtn")),
+        ]) : null,
+        barSaveError ? react.createElement("p", { role: "alert", className: "dshadb_save_error", key: "barErr" }, barSaveError) : null,
         react.createElement("div", { className: "dshadb_grid2", key: "thresh" }, [
           react.createElement("div", { key: "safe" }, [
             react.createElement("label", { className: "dshadb_label", key: "l1" }, t("settings.safe")),
@@ -2532,29 +2700,23 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
           : null,
       ]);
 
-      // 中转站区块
-      const relaySection = react.createElement("div", { className: "dshadb_settings_section", key: "s_relays" }, [
-        react.createElement("div", { style: { marginTop: "2px", marginBottom: "8px" }, key: "relay_form" }, [
-          react.createElement("label", { className: "dshadb_label", key: "r1" }, "中转站名称"),
-          react.createElement("input", { className: "dshadb_field", value: form.name, placeholder: "我的中转站", onChange: (e) => setForm({ ...form, name: e.target.value }), key: "ri1" }),
-          react.createElement("label", { className: "dshadb_label", key: "r2" }, "Base URL"),
-          react.createElement("input", { className: "dshadb_field", value: form.baseUrl, placeholder: "https://api.xxx.com", onChange: (e) => setForm({ ...form, baseUrl: e.target.value }), key: "ri2" }),
-          react.createElement("label", { className: "dshadb_label", key: "r3" }, "API Key"),
-          react.createElement("input", { className: "dshadb_field", value: form.apiKey, placeholder: "sk-xxx", onChange: (e) => setForm({ ...form, apiKey: e.target.value }), key: "ri3" }),
-          react.createElement("button", { type: "button", className: "dshadb_add_btn", onClick: addRelay, key: "addbtn" }, react.createElement(IconPlus, null), t("add.relay")),
-        ]),
-        relays.length > 0 ? react.createElement("div", { key: "list" }, [
-          react.createElement("div", { style: { fontSize: "11px", fontWeight: "700", color: "var(--dshadb-muted,#777b84)", padding: "4px 2px", margin: "4px 0 6px", display: "flex", alignItems: "center", gap: "6px" }, key: "gsec" }, t("relay")),
-          relays.map(r => react.createElement("div", { className: "dshadb_card", key: r.id }, [
-            react.createElement("span", { className: "dshadb_card_logo", key: "logo" }, renderLogo({platform:"relay"})),
-            react.createElement("div", { className: "dshadb_card_info", key: "info" }, [
-              react.createElement("div", { className: "dshadb_card_name", key: "name" }, r.name),
-              react.createElement("div", { className: "dshadb_card_status", key: "status" }, r.baseUrl),
-            ]),
-            react.createElement("button", { type: "button", className: "dshadb_icon_btn", onClick: () => removeRelay(r.id), key: "del", title: "删除" }, react.createElement(IconTrash, null)),
-          ])),
-        ]) : react.createElement("div", { className: "dshadb_empty", style: { padding: "14px" }, key: "empty" }, t("relay") + " —"),
-      ]);
+      /**
+       * v1.7.1: 「中转站」页签已删除（与「自定义模型」重复，且 DSH provider 会自动入列）。
+       * 但旧条目不清理会变成**删不掉的僵尸余额行** —— 服务端仍在查 customRelays。
+       * 所以保留一个只在 relays 非空时出现的删除块；新用户永远看不到它。
+       */
+      const relayLegacy = relays.length > 0 ? react.createElement("div", { key: "relay_legacy", style: { marginTop: "14px", paddingTop: "10px", borderTop: "1px solid var(--dshadb-border,#e7e8ec)" } }, [
+        react.createElement("div", { style: { fontSize: "11px", fontWeight: "700", color: "var(--dshadb-muted,#777b84)", margin: "0 0 6px" }, key: "lt" }, t("relay") + " · 旧版手填"),
+        react.createElement("div", { style: { fontSize: "10px", color: "var(--dshadb-secondary,#9ca0aa)", lineHeight: "1.5", marginBottom: "6px" }, key: "lh" }, "这些是旧版手动添加的中转站，插件仍会查询它们的余额。新增请改用上面的「添加自定义模型」，已有的可以直接删掉。"),
+        relays.map(r => react.createElement("div", { className: "dshadb_card", key: r.id }, [
+          react.createElement("span", { className: "dshadb_card_logo", key: "logo" }, renderLogo({ platform: "relay" })),
+          react.createElement("div", { className: "dshadb_card_info", key: "info" }, [
+            react.createElement("div", { className: "dshadb_card_name", key: "name" }, r.name),
+            react.createElement("div", { className: "dshadb_card_status", key: "status" }, r.baseUrl),
+          ]),
+          react.createElement("button", { type: "button", className: "dshadb_icon_btn", onClick: () => removeRelay(r.id), key: "del", title: "删除" }, react.createElement(IconTrash, null)),
+        ])),
+      ]) : null;
 
       // 自定义模型区块
       const modelSection = react.createElement("div", { className: "dshadb_settings_section", key: "s_models" }, [
@@ -2616,34 +2778,8 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
             react.createElement("button", { type: "button", className: "dshadb_icon_btn", onClick: () => removeModel(m.id), key: "del", title: "删除" }, react.createElement(IconTrash, null)),
           ])),
         ]) : null,
+        relayLegacy,
       ]);
-
-      // v1.1.0: 大肥鱼页 —— 总开关 + 全部细项, 全部即改即存, 不依赖底部保存按钮
-      const wfRow = (key, label, control, sub) => react.createElement("div", { className: "dshadb_wf_row", key }, [
-        react.createElement("div", { key: "n", style: { minWidth: 0 } }, [
-          react.createElement("span", { className: "dshadb_wf_name", key: "t" }, label),
-          sub ? react.createElement("span", { className: "dshadb_wf_sub", key: "s" }, sub) : null,
-        ]),
-        control,
-      ]);
-      const wfSlider = (key, label, valText, min, max, step, value, onCommit) =>
-        react.createElement("div", { className: "dshadb_wf_row_col", key }, [
-          react.createElement("div", { className: "dshadb_wf_head", key: "h" }, [
-            react.createElement("span", { className: "dshadb_wf_name", key: "n" }, label),
-            react.createElement("span", { className: "dshadb_wf_val", key: "v" }, valText),
-          ]),
-          react.createElement("input", {
-            className: "dshadb_wf_range", type: "range", min, max, step, value, key: "r",
-            onChange: (e) => onCommit(Number(e.target.value)),
-          }),
-        ]);
-      const wfSeg = (key, label, options, value, onPick) =>
-        wfRow(key, label, react.createElement("div", { className: "dshadb_wf_seg", key: "seg" },
-          options.map(([v, lb]) => react.createElement("button", {
-            type: "button", key: String(v),
-            className: "dshadb_wf_segbtn" + (value === v ? " dshadb_wf_segbtn_on" : ""),
-            onClick: () => onPick(v),
-          }, lb))));
 
       const whaleSection = react.createElement("div", { className: "dshadb_settings_section", key: "s_whale" }, [
         // 总开关 (从基础设置迁移过来); 图标用鲸鱼本体缩略图, 不用 emoji
@@ -2671,6 +2807,10 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
           react.createElement("div", { className: "dshadb_wf_tip", key: "snaphint", style: { margin: "-2px 0 8px" } }, t("whale.snapHint")),
           wfSeg("bubble", t("whale.bubble"), [[true, t("whale.on")], [false, t("whale.off")]], wf.bubbleOn,
             (v) => patchWf({ bubbleOn: v })),
+          // v1.7.2: 桌宠显示剩余余额 —— 数字跟状态条同源(同一个格式化 + 同一档位), 不是另查一次接口
+          wfSeg("balance", t("whale.balance"), [[true, t("whale.on")], [false, t("whale.off")]], wf.showBalance,
+            (v) => patchWf({ showBalance: v })),
+          react.createElement("div", { className: "dshadb_wf_tip", key: "balancehint", style: { margin: "-2px 0 8px" } }, t("whale.balanceHint")),
           wfSeg("peak", t("whale.peakMode"), [
             ["default", t("whale.peak.default")], ["liangwen", t("whale.peak.liangwen")], ["qiangqiang", t("whale.peak.qiangqiang")],
           ], wf.peakMode, (v) => patchWf({ peakMode: v })),
@@ -2713,7 +2853,9 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
               ])
             : null,
           tabsNode,
-          section === "basic" ? basicSection : section === "relays" ? relaySection : section === "whale" ? whaleSection : section === "topup" ? topupSection : modelSection,
+          // v1.7.1: "relays" 页签已删 —— 老入口(抽屉按钮/initialSection)若仍旧传进来, 一律落到「自定义模型」页,
+          // 不能落到 modelSection 之外导致白屏。
+          section === "basic" ? basicSection : section === "whale" ? whaleSection : section === "topup" ? topupSection : modelSection,
           // 大肥鱼页全部即改即存、充值入口页没有配置项 —— 两页都不需要「保存并生效」
           (section === "whale" || section === "topup") ? null : react.createElement("button", { type: "button", className: "dshadb_add_btn", onClick: save, disabled: saving, key: "save", style: { width: "100%", borderStyle: "solid", background: "#4176e6", color: "#fff", borderColor: "#4176e6" } }, saving ? t("refreshing") : t("settings.save")),
           // v0.6.0: 版本与更新区块
@@ -2788,8 +2930,43 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
 
     var WHALE_DEFAULTS = {
       scale: 1, soundOn: true, soundSet: "duck", volume: 0.5, bubbleOn: true,
+      showBalance: false,
       peakMode: "default", snapOn: true, peekRatio: 0.5, left: null, top: null, side: "right",
     };
+    /**
+     * 桌宠徽标要显示的余额 (v1.7.2)。
+     * 由状态条算出来后推过来 —— 两者用的是同一个 `barAmountText()` + `getLevel()`,
+     * 所以鲸鱼身上的数字与胶囊里的数字永远一致, 不会各算一套。
+     */
+    /**
+     * v1.7.2: 状态条胶囊的浮动位置 (只在大屏生效)。
+     * 需求：桌面/平板可拖动，手机固定 —— 手机空间小, 自由漂移会盖住输入框,
+     * 所以窄屏一律忽略这份坐标、回到 dock 里的原位。
+     */
+    const BAR_POS_KEY = "dsh-api-dashboard:barPos";
+    const BAR_DRAG_MIN_WIDTH = 900;
+    function isWideViewport() {
+      return typeof window !== "undefined" && (window.innerWidth || document.documentElement.clientWidth || 0) >= BAR_DRAG_MIN_WIDTH;
+    }
+    function readBarPos() {
+      try {
+        const o = JSON.parse(localStorage.getItem(BAR_POS_KEY) || "null");
+        if (o && Number.isFinite(o.x) && Number.isFinite(o.y)) return o;
+      } catch (e) { /* 隐私模式: 当作没存过 */ }
+      return null;
+    }
+    function writeBarPos(pos) {
+      try {
+        if (pos) localStorage.setItem(BAR_POS_KEY, JSON.stringify(pos));
+        else localStorage.removeItem(BAR_POS_KEY);
+      } catch (e) { /* 同上报错: 拖动本身仍然可用 */ }
+    }
+
+    var whaleBalance = { text: "", level: "ok" };
+    function updateWhaleBalance (info) {
+      whaleBalance = { text: (info && info.text) || "", level: (info && info.level) || "ok" };
+      if (whaleWidget && whaleWidget.applyBalance) whaleWidget.applyBalance(whaleBalance);
+    }
     var whaleCtxInfo = { isPeak: false, today: null, todayDay: "", dailyLimit: 0, mainCurrency: "CNY" };
     /**
      * v1.6.2: 「今日花销超限」的钥匙 —— 同一天只弹一次。
@@ -2963,6 +3140,12 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
       bubble.appendChild(bText);
       root.appendChild(bubble);
       root.appendChild(sprite);
+      // v1.7.2: 剩余余额徽标 —— 只在设置里打开「显示剩余余额」且真的拿到数字时才出现。
+      // 单独挂在 root 下 (不是 sprite 里): sprite 带翻转/探头位移, 徽标要跟着可见区走。
+      var badge = document.createElement("div");
+      badge.className = "dshadb-whale-badge";
+      badge.style.display = "none";
+      root.appendChild(badge);
       // 初始化时禁用 CSS transition, 避免 left:0 → 实际位置 的 300ms 滑动动画
       // (CSS 里写死了 left:0, JS 第一次设 left 时会触发 transition)
       root.style.transition = "none";
@@ -3090,17 +3273,43 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
 
       /** 探头位移: 只有吸在左右两侧时才把身子推出屏幕; 中间自由摆放时整只显示 */
       function applyPeek() {
-        if (full || !st.side) { root.style.transform = "translate(0px, 0px)"; return; }
+        if (full || !st.side) { root.style.transform = "translate(0px, 0px)"; applyBadge(); return; }
         var s = sizePx();
         var out = Math.round(s * (1 - st.peekRatio));
         var dx = st.side === "left" ? -out : st.side === "right" ? out : 0;
         root.style.transform = "translate(" + dx + "px, 0px)";
+        applyBadge();
+      }
+      /** 徽标贴在鱼下方, 并且跟着探头位移落到「可见区」的中心 (贴边缩回时不会一半在屏外) */
+      function applyBadge() {
+        var s = sizePx();
+        var dx = 0;
+        if (!full && st.side) {
+          var out = Math.round(s * (1 - st.peekRatio));
+          dx = st.side === "left" ? -out : st.side === "right" ? out : 0;
+        }
+        var visibleStart = Math.max(0, -dx);
+        var visibleWidth = Math.max(1, s - Math.abs(dx));
+        badge.style.left = Math.round(visibleStart + visibleWidth / 2) + "px";
+        badge.style.maxWidth = Math.round(visibleWidth - 4) + "px";
+      }
+      /** 余额徽标内容与配色; 关掉开关 / 没有数字 / 已断开平台 → 不渲染 */
+      function applyBalance(info) {
+        var text = info && typeof info.text === "string" ? info.text : "";
+        var level = (info && info.level) || "ok";
+        var muted = !text || text === "~—" || text === "—" || text === "-";
+        if (!st.showBalance || muted) { badge.style.display = "none"; return; }
+        badge.textContent = text;
+        badge.className = "dshadb-whale-badge dshadb-whale-badge-" + (level === "err" ? "err" : level === "warn" ? "warn" : "ok");
+        badge.title = text;
+        badge.style.display = "block";
+        applyBadge();
       }
       function applyFlip() {
         if (st.side === "left") root.classList.add("dshadb-whale-flip");
         else root.classList.remove("dshadb-whale-flip");
       }
-      function applyAll() { applyScale(); applyPos(); applyFlip(); applyPeek(); }
+      function applyAll() { applyScale(); applyPos(); applyFlip(); applyPeek(); applyBalance(whaleBalance); }
 
       // ---------- 持久化 ----------
       function saveSoon() {
@@ -3375,6 +3584,8 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
       if (whaleLocked) root.classList.add("dshadb-whale-locked");
       whaleWidget = {
         applyPatch: applyPatch,
+        /** v1.7.2: 状态条把余额推过来 (挂件创建时也会先补一次当前值) */
+        applyBalance: applyBalance,
         /**
          * v1.4.0: 我们自己的抽屉/面板开着时, 挂件**不能**再接收触摸。
          * 挂件是 document.body 的直接子元素 (z-index 9600), 而设置面板嵌在 DSH 的 composer dock 里 ——
@@ -3480,6 +3691,30 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
       const getSelected = () => { try { return localStorage.getItem("dsh-api-dashboard:selected") || ""; } catch { return ""; } };
       const setSelected = (id) => { try { localStorage.setItem("dsh-api-dashboard:selected", id); } catch {} };
 
+      /**
+       * v1.7.1: 状态条外观值的本地缓存。
+       * 只为解决一件事: 外观值在服务端, 首帧拿不到 —— 先按 1px/100% 画、配置回来再改真值,
+       * 会在每次加载时把输入框顶一下(AGENTS.md ⑤「别先用默认值画再异步改成真值」)。
+       * 所以用 localStorage 做同步初值, GET /config 回来再以服务端为准纠正。
+       * 带范围校验: 缓存是用户可改的, 脏值不许直接进 CSS。
+       */
+      const BAR_LOOK_CACHE_KEY = "dsh-api-dashboard:barLook";
+      const readBarLookCache = () => {
+        try {
+          const o = JSON.parse(localStorage.getItem(BAR_LOOK_CACHE_KEY) || "null");
+          if (!o || typeof o !== "object") return { edge: null, scale: null };
+          const edge = (typeof o.barEdgeWidth === "number" && o.barEdgeWidth >= 0 && o.barEdgeWidth <= 3) ? o.barEdgeWidth : null;
+          const scale = (typeof o.barScale === "number" && o.barScale >= 0.8 && o.barScale <= 1.5) ? o.barScale : null;
+          return { edge, scale };
+        } catch { return { edge: null, scale: null }; }
+      };
+      const writeBarLookCache = (patch) => {
+        try {
+          const o = JSON.parse(localStorage.getItem(BAR_LOOK_CACHE_KEY) || "{}");
+          localStorage.setItem(BAR_LOOK_CACHE_KEY, JSON.stringify({ ...(o && typeof o === "object" ? o : {}), ...patch }));
+        } catch { /* 隐私模式/配额满: 缓存只是锦上添花, 静默放弃 */ }
+      };
+
       ctx.slots.inject("conversation.composer.dock", () => {
         const dispose = ctx.slots.register({
           name: "conversation.composer.dock",
@@ -3508,8 +3743,48 @@ body[data-dshadb-theme="dark"],body[data-ds-dark-theme]{--dshadb-panel:#202329;-
           const [settingsSection, setSettingsSection] = react.useState("basic");
           const [detailId, setDetailId] = react.useState("");
           const [selectedId, setSelectedId] = react.useState(getSelected());
+          // v1.7.3: 窄屏落点。slot 锚点在 0.2.2 上被手机壳钉成 28px 统计条，胶囊必须搬出去 ——
+          // 用「哨兵 + portal 到输入卡」实现，见下方 barwrap 渲染处与 CSS 的 [data-dshadb-host]。
+          const sentinelRef = react.useRef(null);
+          const barwrapRef = react.useRef(null);
+          const [portalHost, setPortalHost] = react.useState(null);
           const dashData = react.useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
           const config = dashData.config;
+
+          /**
+           * v1.7.1 (修): 状态条外观值**必须在这里持有**。
+           *
+           * 之前把 barEdge/barScale 声明在 SettingsModal 内部, 而真正下发 CSS 变量
+           * (--dshadb-bar-edge-w / --dshadb-bar-scale) 的 barwrap 在这个 DashboardSlot 里 ——
+           * 两个兄弟组件, 词法作用域互不可见。更阴的是取值写成了 `typeof barEdge === "number"`:
+           * 未声明标识符在 typeof 下不会抛错, 只会恒返回 "undefined", 于是永远落到兜底 1px/100%,
+           * 拖滑块看起来"完全无效", 控制台一片安静, 测试也全绿。
+           * 设置面板显示 1px/100% 是同一个根因: /balances 下发的 config 里没有这两个字段,
+           * 面板初值只能拿到默认值, 于是"存进去了但显示没存"。
+           *
+           * 现在: 值由父组件持有 → 滑块回调改父 state → barwrap 立刻重渲(真正的即时预览),
+           * 面板关掉也照样生效。首帧用 GET /config 补真实值(那条接口会下发这两个字段)。
+           */
+          const [barEdge, setBarEdge] = react.useState(() => readBarLookCache().edge);
+          const [barScale, setBarScale] = react.useState(() => readBarLookCache().scale);
+          // 用户一旦动过滑块, 晚到的 GET 就不许再回填(否则拖到一半被服务端旧值盖掉)
+          const barLookTouched = react.useRef(false);
+          react.useEffect(() => {
+            let alive = true;
+            fetchT("/api-dashboard/config", { cache: "no-store" })
+              .then((r) => r.json())
+              .then((d) => {
+                if (!alive || !d || !d.ok || barLookTouched.current) return;
+                // 服务端为准: 回填 + 刷新缓存, 下次首帧直接按真值画(不跳)
+                if (typeof d.barEdgeWidth === "number") { setBarEdge(d.barEdgeWidth); writeBarLookCache({ barEdgeWidth: d.barEdgeWidth }); }
+                if (typeof d.barScale === "number") { setBarScale(d.barScale); writeBarLookCache({ barScale: d.barScale }); }
+              })
+              .catch(() => { /* 拉不到就用缓存/兜底值显示, 不阻塞状态条渲染 */ });
+            return () => { alive = false; };
+          }, []);
+          // 滑块改动: 立刻进 state(即时预览) + 写缓存(下次首帧不跳); 落盘交给设置面板的 saveBarLook
+          const applyBarEdge = (v) => { barLookTouched.current = true; setBarEdge(v); writeBarLookCache({ barEdgeWidth: v }); };
+          const applyBarScale = (v) => { barLookTouched.current = true; setBarScale(v); writeBarLookCache({ barScale: v }); };
 
           // v1.1.0: 大肥鱼互动挂件 — 设置里开启「收养大肥鱼」后挂载/卸载 (纯互动, 不含余额)
           const whaleOn = !!(config && config.whaleEnabled);
@@ -3634,20 +3909,156 @@ const openSettings = (section) => { setSettingsSection(section || "basic"); setS
           // 只计该子代理自身新用量，不含继承历史、兄弟或后代。
           const subRow = config?.showSubagentCapsules !== false ? buildSubagentRow(cost) : null;
 
-          return react.createElement("span", { className: "dshadb_barwrap" }, [
+          /**
+           * v1.7.1: 状态条外观变量在这里统一下发 —— 两个态的胶囊(空态/有数据态)都在这一层里面,
+           * 靠 CSS 继承生效, 不必在每处渲染点重复接线。
+           * --dshadb-bar-edge-w: 边框宽度, 0 时 border-style 仍是 solid 但宽度为 0 → 不绘制, 天然等于「无边框」。
+           */
+          /**
+           * v1.7.2: 胶囊拖动（仅桌面/平板）。
+           * 手机（<900px）永远 dock 在原位 —— 小屏上把余额胶囊拖到任意位置会盖住输入框，
+           * 也容易和手机壳的侧滑手势打架。宽屏才读 localStorage 里的坐标并允许浮动。
+           */
+          const [barPos, setBarPos] = react.useState(() => (isWideViewport() ? readBarPos() : null));
+          const barPosRef = react.useRef(barPos);
+          barPosRef.current = barPos;
+          const barDrag = react.useRef(null);
+          const suppressBarClick = react.useRef(false);
+          react.useEffect(() => {
+            const onResize = () => {
+              // 变窄 → 立刻回到 dock（坐标仍留在本地，放大后还能回原位）
+              setBarPos(isWideViewport() ? readBarPos() : null);
+            };
+            window.addEventListener("resize", onResize);
+            return () => window.removeEventListener("resize", onResize);
+          }, []);
+          const clampBarPos = (x, y) => {
+            const w = (barPosRef.current && barPosRef.current.w) || 160;
+            const maxX = Math.max(0, (window.innerWidth || 0) - w - 6);
+            const maxY = Math.max(0, (window.innerHeight || 0) - 34);
+            return { x: Math.min(Math.max(x, 6), maxX), y: Math.min(Math.max(y, 6), maxY), w };
+          };
+          const onBarPointerDown = (e) => {
+            if (!isWideViewport()) return;
+            if (e.pointerType === "mouse" && e.button !== 0) return;
+            const rect = e.currentTarget.getBoundingClientRect();
+            barDrag.current = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ox: barPos ? barPos.x : rect.left, oy: barPos ? barPos.y : rect.top, w: Math.round(rect.width) || 160, moved: false };
+          };
+          const onBarPointerMove = (e) => {
+            const d = barDrag.current;
+            if (!d || d.id !== e.pointerId) return;
+            const dx = e.clientX - d.sx;
+            const dy = e.clientY - d.sy;
+            if (!d.moved && Math.abs(dx) + Math.abs(dy) > 6) {
+              d.moved = true;
+              try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { /* 老 webview */ }
+            }
+            if (!d.moved) return;
+            setBarPos(clampBarPos(d.ox + dx, d.oy + dy));
+          };
+          const onBarPointerUp = (e) => {
+            const d = barDrag.current;
+            barDrag.current = null;
+            if (!d || !d.moved) return;
+            // 拖完那一下不能顺手打开看板
+            suppressBarClick.current = true;
+            setTimeout(() => { suppressBarClick.current = false; }, 400);
+            writeBarPos(barPosRef.current);
+          };
+          const onBarClickCapture = (e) => {
+            if (!suppressBarClick.current) return;
+            suppressBarClick.current = false;
+            e.stopPropagation();
+            e.preventDefault();
+          };
+          /** 设置面板里的「重置位置」：回到 dock，并清掉本地坐标 */
+          const resetBarPos = () => { writeBarPos(null); setBarPos(null); };
+
+          // v1.7.3 ①：给状态条找落点（窄屏才找）。优先级：输入卡 → composer stack → composer dock。
+          // 每一步都是「离统计条更远一点」：卡内部最理想；stack 是卡片外面；dock 只能靠换行兜底。
+          react.useEffect(() => {
+            const s = sentinelRef.current;
+            if (!s || typeof s.closest !== "function" || isWideViewport()) return;
+            const dock = s.closest("[data-composer-dock]");
+            const card = dock !== null ? dock.parentElement : null;
+            const stack = s.closest('[class*="_composerStack"]');
+            const found = card !== null ? card : (stack !== null ? stack : dock);
+            if (found !== null && found !== portalHost) setPortalHost(found);
+            if (found !== null) found.setAttribute("data-dshadb-host", found === card ? "card" : (found === stack ? "stack" : "dock"));
+          });
+
+          // v1.7.3 ②：贴紧统计行 —— 写死负 margin 换个宿主版本就错位（0.2.2 上还夹着 display:contents
+          // 空槽位的 gap），所以实测「上方最后一个有高度元素的底边 → 我们顶边」反算 margin-top，
+          // 净留白恒为 --dshadb-lift（默认 -3px，负值 = 咬进上一行）。几何签名不变就跳过，避免每帧强制排版。
+          const liftKey = react.useRef("");
+          react.useEffect(() => {
+            const el = barwrapRef.current;
+            const host = el && el.parentElement;
+            if (!host) return;
+            const bottomOf = (node) => {
+              let out = 0;
+              for (const child of node.children) {
+                if (child === el || child.contains(el)) continue;
+                const r = child.getBoundingClientRect();
+                if (r.height >= 1 && r.bottom > out) out = r.bottom;
+                const inner = bottomOf(child);
+                if (inner > out) out = inner;
+              }
+              return out;
+            };
+            const barTop = el.getBoundingClientRect().top;
+            const prevBottom = bottomOf(host);
+            if (!(prevBottom > 0)) return;
+            const key = Math.round(barTop) + ":" + Math.round(prevBottom);
+            if (liftKey.current === key) return;
+            liftKey.current = key;
+            const gap = barTop - prevBottom;
+            const rawLift = parseFloat(getComputedStyle(el).getPropertyValue("--dshadb-lift"));
+            const want = Number.isFinite(rawLift) ? rawLift : -3;
+            if (Math.abs(gap - want) < 0.5) return;
+            const cur = parseFloat(getComputedStyle(el).marginTop) || 0;
+            el.style.marginTop = (cur - (gap - want)) + "px";
+          });
+
+          const barLook = {
+            "--dshadb-bar-edge-w": (typeof barEdge === "number" ? barEdge : 1) + "px",
+            "--dshadb-bar-scale": String(typeof barScale === "number" ? barScale : 1),
+          };
+          const barWrapStyle = barPos
+            ? { ...barLook, position: "fixed", left: barPos.x + "px", top: barPos.y + "px", right: "auto", bottom: "auto", margin: "0", zIndex: 9500 }
+            : barLook;
+          const barNode = react.createElement("span", {
+            className: "dshadb_barwrap" + (barPos ? " dshadb_barwrap_float" : ""),
+            style: barWrapStyle,
+            ref: barwrapRef,
+            onPointerDown: onBarPointerDown,
+            onPointerMove: onBarPointerMove,
+            onPointerUp: onBarPointerUp,
+            onPointerCancel: onBarPointerUp,
+            onClickCapture: onBarClickCapture,
+          }, [
             react.createElement("span", { className: "dshadb_barrow", key: "row" }, [
               // v0.5.7: 本会话消耗并入同一个胶囊, 不再裸露在外
               react.createElement(BarReadout, { t, onOpen: openList, onOpenSettings: (sec) => openSettings(typeof sec === "string" ? sec : "basic"), selectedId, onSelect: handleSelect, config, cost: costDisp, provider: curProvider,
               peakValley: !!(cost && cost.peakValley), key: "bar" }),
-              view === "list" ? react.createElement(DashboardDrawer, { isOpen: true, onClose: closeList, t, selectedId, onSelect: handleSelect, onOpenDetail: (id) => { setDetailId(id); setView("detail"); }, onAddRelay: () => openSettings("relays"), onAddCustom: () => openSettings("models"), onOpenSettings: (sec) => openSettings(typeof sec === "string" ? sec : "basic"), config, currentModel, subagentCost: cost,
+              view === "list" ? react.createElement(DashboardDrawer, { isOpen: true, onClose: closeList, t, selectedId, onSelect: handleSelect, onOpenDetail: (id) => { setDetailId(id); setView("detail"); }, onAddCustom: () => openSettings("models"), onOpenSettings: (sec) => openSettings(typeof sec === "string" ? sec : "basic"), config, currentModel, subagentCost: cost,
               today: (cost && cost.todayTokens) ? { tokens: cost.todayTokens, byCurrency: cost.todayByCurrency || {}, byModel: cost.todayByModel || {} } : null,
               key: "drawer" }) : null,
               view === "detail" ? react.createElement(PlatformDetail, { isOpen: true, onClose: closeDetail, platformId: detailId, t, useProjection, config, key: "detail" }) : null,
               // 2026-09-22: underScrim —— view 是 list/detail 时下层已有全屏遮罩, 设置面板不再叠加第二层 (见 SettingsModal)
-              isSettingsOpen ? react.createElement(SettingsModal, { isOpen: true, underScrim: view !== "bar", onClose: () => { setSettingsOpen(false); setView("bar"); }, onBack: () => { setSettingsOpen(false); setView("list"); }, t, config, initialSection: settingsSection, key: "settings" }) : null,
+              isSettingsOpen ? react.createElement(SettingsModal, { isOpen: true, underScrim: view !== "bar", onClose: () => { setSettingsOpen(false); setView("bar"); }, onBack: () => { setSettingsOpen(false); setView("list"); }, t, config, initialSection: settingsSection, barEdge, barScale, onBarEdge: applyBarEdge, onBarScale: applyBarScale, barFloating: !!barPos, onResetBarPos: resetBarPos, key: "settings" }) : null,
             ]),
             subRow,
           ]);
+
+          // v1.7.3: 落点三段式 —— 浮动中(桌面拖走了)/宽屏：维持原位原样；
+          // 窄屏：搬到输入卡里（统计行正下方，卡片内部）。
+          const sentinel = react.createElement("span", { key: "dshadb-sentinel", ref: sentinelRef, style: { display: "none" } });
+          const canPortal = !barPos && !isWideViewport() && typeof document !== "undefined" && reactDom !== null && typeof reactDom.createPortal === "function";
+          if (!canPortal) return barNode;
+          const barTree = react.createElement(react.Fragment, null, sentinel,
+            portalHost === null ? barNode : reactDom.createPortal(barNode, portalHost));
+          return barTree;
         });
         return () => { dispose(); };
       });

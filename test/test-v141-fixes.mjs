@@ -284,7 +284,18 @@ a('H4b clampRefreshSec 下限 1 / 上限 60', (() => {
     /\.dshadb_barwrap\{[^}]*width:fit-content[^}]*margin:(-\d+px|0) auto( 0)?\}/.test(cli) &&
     !/\.dshadb_barwrap\{[^}]*margin:\d+px auto/.test(cli))
   a('UI 不再有容器化底色/边框', !/\.dshadb_barwrap\{[^}]*border-radius:12px/.test(cli))
-  a('UI 余额条恢复独立药丸（圆角+底色+边框）', /\.dshadb_bar\{display:inline-flex[^}]*border-radius:10px;background:var\(--dshadb-panel/.test(cli))
+  // 胶囊外观(维护者 2026-10-16 改口径): 从「独立色块药丸」改成「贴对话区底色 + 极淡边」——
+  // 维护者原话「颜色和对话颜色保持一致, 边缘细化, 减弱胶囊的痕迹」, 随后追加
+  // 「还是不够淡, 可以柔化一点」→ 边框从宿主 --dsw-alias-border-l1(4% 黑) 再降一档到自定义 --dshadb-bar-edge。
+  // v1.7.1 再追加「边缘自定义(可无边框/可调厚) + 整体可调大小」→ 边框宽度改由 --dshadb-bar-edge-w 驱动。
+  // 仍要钉住: ①它是圆角药丸且可点(不能退化成裸文字); ②「无边框」靠宽度归零实现, 不许把边框分支删掉
+  // (删了就没法再调厚); ③深浅色下都要有淡边变量。
+  a('UI 余额条贴对话区底色（不再是独立色块）', /\.dshadb_bar\{display:inline-flex[^}]*border-radius:10px;background:var\(--dsw-alias-bg-base/.test(cli))
+  a('UI 余额条边框宽度由设置驱动（0 即无边框）', /\.dshadb_bar\{[^}]*border-width:var\(--dshadb-bar-edge-w/.test(cli))
+  a('UI 无边框靠宽度归零实现（border-style 保留 solid, 不删分支）', /\.dshadb_bar\{[^}]*border-style:solid/.test(cli) && !/\.dshadb_bar\{[^}]*border:none/.test(cli))
+  a('UI 两个外观变量由 barwrap 下发（两个态的胶囊都继承）', cli.includes('"--dshadb-bar-edge-w"') && cli.includes('"--dshadb-bar-scale"'))
+  a('UI 淡边变量在浅色与深色下都已定义', /body\{[^}]*--dshadb-bar-edge:/.test(cli) && /body\[data-dshadb-theme="dark"\][^{]*\{[^}]*--dshadb-bar-edge:/.test(cli))
+  a('UI 余额条不再靠 --dshadb-panel 做底色', !/\.dshadb_bar\{display:inline-flex[^}]*background:var\(--dshadb-panel/.test(cli))
   a('UI 余额条不再是 flex:1 填充', !/\.dshadb_bar\{[^}]*flex:1 1 auto/.test(cli))
   a('UI 子代理行左右对称内边距', /\.dshadb_subs\{[^}]*margin:3px 0 0 0/.test(cli))
   a('UI 溢出渐隐类有 CSS', /\.dshadb_subs_overflow\{-webkit-mask-image/.test(cli))

@@ -197,7 +197,8 @@ a('G8 glm-4-flashx 官方 ¥0.1/¥0.1/缓存¥0.05', p('glm-4-flashx').cacheMiss
 a('G9 glm-4-flashx-250414 命中 FlashX 键(不再落默认价)', p('glm-4-flashx-250414').cacheMiss===0.1 && p('glm-4-flashx-250414').output===0.1)
 a('G10 未收录模型才落默认价(对照)', p('zzz-not-a-real-model').cacheMiss!==0.1)
 a('M1 minimax-m3 官方永久五折 ¥2.1/¥8.4/缓存¥0.42', p('minimax-m3').cacheMiss===2.1 && p('minimax-m3').output===8.4 && p('minimax-m3').cacheHit===0.42)
-a('S1 step-5-preview 官方 ¥7/¥20/缓存¥0.35', p('step-5-preview').cacheMiss===7 && p('step-5-preview').output===20 && p('step-5-preview').cacheHit===0.35)
+// v1.7.3: 阶跃官方明文 2026-10-14 00:30 起缓存读价 0.35 → 0.70（docs/PRICING-20261111.md）
+a('S1 step-5-preview 官方 ¥7/¥20/缓存¥0.70', p('step-5-preview').cacheMiss===7 && p('step-5-preview').output===20 && p('step-5-preview').cacheHit===0.70)
 a('S2 step-1o-turbo-vision 官方 ¥2.5/¥8/缓存¥0.5', p('step-1o-turbo-vision').cacheMiss===2.5 && p('step-1o-turbo-vision').output===8 && p('step-1o-turbo-vision').cacheHit===0.5)
 a('Q1 qwen3.8-max-prime 官方优速模式 ¥24/¥72', p('qwen3.8-max-prime').cacheMiss===24 && p('qwen3.8-max-prime').output===72)
 a('Q2 qwen3.8-omni-flash 官方 ¥0.8/¥2.7/缓存¥0.1', p('qwen3.8-omni-flash').cacheMiss===0.8 && p('qwen3.8-omni-flash').output===2.7 && p('qwen3.8-omni-flash').cacheHit===0.1)
@@ -218,7 +219,9 @@ a('AN5 既有四条 Anthropic 条目仍与官方一致(未被误改)', p('claude
 a('AN6 Anthropic 缓存读价一律低于输入价(官方口径 10%, Fable5.1 仅 2.5%)', ['claude-opus-5','claude-sonnet-5','claude-haiku-4-5','claude-fable-5.1','claude-fable-5','claude-opus-4-8','claude-sonnet-4-5'].every(k => p(k).cacheHit < p(k).cacheMiss))
 // ===== 缓存写入价 (2026-09-22 官方原文: Anthropic 一律 = 输入 ×125%) =====
 a('CW1 Anthropic 缓存写 = 输入 ×125%', ['claude-opus-5','claude-sonnet-5','claude-sonnet-4-6','claude-haiku-4-5','claude-fable-5.1','claude-fable-5','claude-opus-4-8','claude-sonnet-4-5'].every(k => Math.abs(m.MODEL_PRICES[k].cacheWrite - m.MODEL_PRICES[k].cacheMiss*1.25) < 1e-9))
-a('CW2 未给 cacheWrite 的条目保持 undefined (回落 cacheMiss, 旧行为不变)', m.MODEL_PRICES['glm-5.3'].cacheWrite === undefined && m.MODEL_PRICES['gpt-5.6-terra'].cacheWrite === undefined && m.MODEL_PRICES['kimi-k3'].cacheWrite === undefined)
+// v1.7.3: kimi-k3 自 2026-11-11 起官方给了缓存写入价（¥20 / 5min），不再适合当「无 cacheWrite」样例，
+// 换成同样没写 cacheWrite 的 minimax-m3；另两条样例含义不变。
+a('CW2 未给 cacheWrite 的条目保持 undefined (回落 cacheMiss, 旧行为不变)', m.MODEL_PRICES['glm-5.3'].cacheWrite === undefined && m.MODEL_PRICES['gpt-5.6-terra'].cacheWrite === undefined && m.MODEL_PRICES['minimax-m3'].cacheWrite === undefined)
 // ===== 阿里百炼缓存规则 (官方明文: 显式缓存命中 = 标准输入价 10%) =====
 a('Q4 qwen-plus cacheHit = 输入 ×10% → 0.08 (旧值 0.4=50% 无官方依据)', Math.abs(p('qwen-plus').cacheHit - 0.08) < 1e-9)
 a('Q5 qwen-turbo cacheHit = 输入 ×10% → 0.03 (旧值 0.15=50%)', Math.abs(p('qwen-turbo').cacheHit - 0.03) < 1e-9)

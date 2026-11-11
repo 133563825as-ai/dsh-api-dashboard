@@ -1,8 +1,40 @@
+## v1.7.2
+
+- **状态条在 DSH 0.2.2 上被宿主容器夹死的问题修好了**：窄屏时不再当统计条的子节点，改用 portal 挂进输入卡内部（统计行正下方）；拿不到输入卡会退回 `composerStack`，不会把状态条弄丢。胶囊与统计行的间距改成**实测反算**（`--dshadb-lift`，默认 -3px），不再写死负 margin。
+- **官方登录（非 API Key）也能看余额**：用 DeepSeek 官方账号登录的用户，状态条会显示账号里的余额（充值 + 赠送钱包）；显式 API Key 仍然优先。修掉「读到了余额却显示 `—`」——`deepseek-account*` 视为官方 provider，且 `source: "account"` 时不算中转站。
+- **智谱 Coding Plan 只有百分比时不再丢掉真正的限流窗口**（issue #4）：主显示改为「最紧窗口的剩余%」，后面并排列出各窗口已用%；`percentage` 仍按「已用」解释，不冒充余额。
+- **价格表 2026-11-11 复核**：新增 10 条、改价 1 条（`step-5-preview` 缓存读 0.35→0.70）、补 `cacheWrite` 1 条，证据分级见 `docs/PRICING-20261111.md`。
+- 桌宠（大肥鱼）可显示当前平台的剩余余额：设置 → 大肥鱼 → 「显示剩余余额」，数字与状态条同源，无数字时自动隐藏。
+- 状态条胶囊在**桌面 / 平板**可拖动换位置（≥900px），手机保持原位不动；设置里新增「放回原位」。
+
 # 更新日志
 
 > 一个版本一行。改动细节看 `git log`；红线与踩坑记录看 [`AGENTS.md`](AGENTS.md)。
 
 ## v1.x
+
+- **v1.7.2** — **DSH 0.2.2-rc.1 宿主适配 + 官方账号登录余额 + issue #4 + 价格表复核**。
+
+  **状态条落点（宿主 0.2.2 换了容器语义）**：`[data-slot="conversation.composer.dock"]` 不再是 `display:contents`，而是被 `dsh-web-mobile` 标成 `[data-mobile-nav="stats"]` 的真实 flex 盒子（`height/max-height:28px` + `overflow:hidden` + `nowrap`，全 `!important`）—— 挂在里面的胶囊被压到约 106px 并上下裁切；挂进 `composer dock` 又会被手机壳的 `locateRing()` 当成上下文环搬走。最终落点是**输入卡 `uV2eYG_root`**（dock 的父节点）：`createPortal` 挂进去，容器打 `data-dshadb-host`；回退链 `card → composerStack`，全拿不到就原地渲染，绝不让状态条消失。贴边改成**实测反算**：递归取上方最后一个有高度元素的底边（`display:contents` 空壳自身 0×0，必须往下钻），反算 `margin-top` 让净留白恒为 `--dshadb-lift`（默认 -3px），几何签名不变就跳过。
+  ⚠️ `margin-top` 不许加 `!important`：行内样式打不过作者样式表的 `!important`（真机踩过 `mt` 写进去、computed 仍是 0px）。
+
+  **官方账号登录余额**：DSH 账号凭据在 `~/.dsh/.credentials.yaml` 的 `deepseek-account-platform/default`（`kind: grant`），接口 `GET {issuer}/api/v0/users/get_user_summary`，头 `x-dsh-auth-token`（不是 Bearer）；`normal_wallets` + `bonus_wallets` 求和，钱包挑选复用 v1.4.2 的「主货币优先 → 有余额 → 首条」。token 只在内存用一次，不落盘不打印。**优先级**：显式 API Key 直接走原路径，账号凭据一次不读。失败矩阵：无 token → `no-key`；issuer 非法 → `no-balance-api`；401/403 或业务码 40003 → `auth-error`（不沿用 last-known-good）；404/405 → `no-balance-api`；网络/超时 → `error`；结构不符/金额非法/两数组皆空 → `no-balance-api`。
+  ⚠️ 未带 `x-client-*` 身份头（不伪造），真实账号上线前需确认服务端不强制校验。
+
+  **issue #4**：`TOKENS_LIMIT`（unit=3 五小时 / unit=6 周）只有 `percentage`、没有 `remaining` 时进入百分比模式 —— `total = 100 - 最紧窗口已用%`、`currency: '%'`、`used = 最紧窗口已用%`，并下发 `windows: [{label, percent}]`；客户端 `barAmountText` 并排显示。`queryPreset` 的返回是显式字段列表，`windows` 已手动加进透传。
+
+  **价格表**：`docs/PRICING-20261111.md` 记录逐条来源与证据等级（官方原文 / 第三方交叉一致），`gpt-5.6-sol` 的 $5/$30 与三家聚合 $4/$20 冲突按「不改值、标待核实」处理。
+
+- **v1.7.1** — **状态条外观（边框宽度 / 整体大小）+ 修「拖了没反应」+ 设置页瘦身**。
+
+  - 设置 → 基础新增「状态条边框」（0~3px，0 = 无边框）与「状态条大小」（80%~150%），即改即存，不经过底部保存按钮；两边只驱动 CSS 变量，空态/有数据态靠继承，不各接一次线。
+  - 落盘白名单支持按字段声明小数位：`barScale` 这类 0.8~1.5 的值不再被 `Math.round` 静默抹成 1；新增 `clampLook`（带小数位），`clampMs` 的整数语义一字未动。
+  - **修：两个滑块「拖了完全没反应」**。根因是 `barEdge`/`barScale` 声明在设置面板组件内，而下发 CSS 变量的 `barwrap` 在兄弟组件里——词法上取不到，`typeof` 对未声明标识符又不抛错（恒为 `"undefined"`），于是永远落到兜底 1px/100%：滑块能拖、配置能存，界面不动、控制台无错、原测试全绿。现由状态条组件持有并下发给面板，拖动即为真实预览。
+  - 面板初值同样走服务端 `/config` 补齐（`/balances` 的 config 不带这两个字段，旧写法只能显示默认值，造成「存进去了却显示没存」）。
+  - 首帧外观值额外用 localStorage 缓存同步起手，避免「先按默认值画、配置回来再跳」，符合 AGENTS.md ⑤。
+  - **设置页瘦身：删除「中转站」页签**（与「自定义模型」重复——后者能直接指定余额接口与解析方式，是前者的超集；且 DSH provider 自 v1.4.0 起自动入列，手填基本用不上）。看板抽屉里的「添加中转站」入口同步移除，只留「添加自定义模型」。
+  - 旧数据不丢：服务端 `customRelays` 支持原样保留（仍会查询余额、仍登记在落盘白名单），只有**已存在的**旧条目会在「自定义模型」页底部露出一个可删除的清理块；没有旧条目时整块不渲染。
+  - 回归钉子：`test-bar-look.mjs` 新增结构断言（声明必须落在下发变量的组件内、面板不许自留一份、渲染处必须接线），该组断言在修复前会红 4 条；新增 `test-settings-tabs.mjs` 钉住页签结构、旧数据清理入口与服务端不可回退的支持。
 
 - **v1.7.0** — **DSH 0.2.0 适配、更新保护、界面与设置保存修复、新模型补录**。
 

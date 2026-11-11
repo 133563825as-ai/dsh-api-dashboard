@@ -548,9 +548,17 @@ const NUMBER_FIELDS = [
   ['dailyLimit', 0, Number.MAX_SAFE_INTEGER],   // v1.6.2: 今日花销提醒阈值, 0=关闭
   ['alertRepeatHours', 0, ALERT_REPEAT_MAX_HOURS], // v1.6.8: 重复提醒间隔(小时), 0=只在跨档提醒一次
   ['configVersion', 0, Number.MAX_SAFE_INTEGER],
+  // v1.7.1: 状态条外观。
+  // ⚠️ 这两项带第 4 个元素 = **保留几位小数**。逐项 Math.round 会把 barScale 的 1.25
+  // 直接抹成 1(拖动滑块时看着像"没保存"), 所以它们必须显式声明小数位;
+  // 其余条目省略该参数即沿用旧的取整行为 —— 那些本来就是整数语义(毫秒/秒/阈值)。
+  ['barEdgeWidth', 0, 3, 1],
+  ['barScale', 0.8, 1.5, 2],
 ]
 
-const sanitizePersistedShape = (s) => {
+// v1.7.1: 导出仅供测试 —— 这张表是「小数被抹掉」那类事故的唯一防线,
+// 必须能对行为断言(而不是在测试里抄一份正则去比源码字符串)。
+export const sanitizePersistedShape = (s) => {
   const out = { ...s }
   for (const k of ARRAY_FIELDS) {
     if (k in out && !Array.isArray(out[k])) delete out[k]
@@ -558,11 +566,13 @@ const sanitizePersistedShape = (s) => {
   for (const k of OBJECT_FIELDS) {
     if (k in out && (out[k] === null || typeof out[k] !== 'object' || Array.isArray(out[k]))) delete out[k]
   }
-  for (const [k, min, max] of NUMBER_FIELDS) {
+  for (const [k, min, max, decimals] of NUMBER_FIELDS) {
     if (!(k in out)) continue
     const n = Number(out[k])
     if (!Number.isFinite(n)) { delete out[k]; continue }
-    out[k] = Math.min(Math.max(Math.round(n), min), max)
+    const clamped = Math.min(Math.max(n, min), max)
+    // decimals 缺省 = 整数语义(旧行为不变); 声明了就按位保留, 且**不加** Math.round
+    out[k] = decimals === undefined ? Math.round(clamped) : Number(clamped.toFixed(decimals))
   }
   return out
 }
@@ -865,6 +875,19 @@ export const clampRefreshSec = (v) => Math.min(Math.max(Math.round(Number(v) || 
 export const clampMs = (v, min, max, fallback) => {
   const n = Number(v)
   return Number.isFinite(n) ? Math.min(Math.max(Math.round(n), min), max) : fallback
+}
+
+/**
+ * v1.7.1: 状态条外观用的夹取 —— **不能复用 clampMs**：它带 Math.round，
+ * 会把 barScale 的 1.25 直接抹成 1（用户拖滑块看着像"存不上"）。
+ * decimals 显式声明保留位数；缺省 0 = 整数语义（与 clampMs 一致）。
+ * persisted 与 config 两条来源都要过这里，理由同 clampMs 的注释。
+ */
+export const clampLook = (v, min, max, fallback, decimals = 0) => {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return fallback
+  const clamped = Math.min(Math.max(n, min), max)
+  return decimals > 0 ? Number(clamped.toFixed(decimals)) : Math.round(clamped)
 }
 
 /**
@@ -1275,14 +1298,18 @@ export const MODEL_PRICES = {
   // 这里只采用 Standard 基础档；GPT-6/6.1 >272K、Haiku5.5 >100K 及 priority/ultrafast/Batch 不在本表覆盖。
   // 使用长上下文/快档应手动覆盖价格，不能把这些参考基础价当平台实际扣费。
   'gpt-6.1-sol':          { cacheHit: 0.10, cacheMiss: 2.00, cacheWrite: 2.50,  output: 10.00 },
+  'gpt-6.1-terra':        { cacheHit: 0.05, cacheMiss: 1.00, cacheWrite: 1.25,  output: 5.00 },  // 第三方交叉一致(未取得官方原文): models.dev(标 2026-10-26 发布) + LiteLLM + OpenRouter 三处数值相同 $1/$5/读$0.05/写$1.25; 2026-11-11 抓取, openai.com/api/pricing 仍 403
   'gpt-6-sol':            { cacheHit: 0.20, cacheMiss: 2.00, cacheWrite: 2.50,  output: 10.00 },
   'gpt-6-luna':           { cacheHit: 0.01, cacheMiss: 0.10, cacheWrite: 0.125, output: 0.50 },
   // 来源 https://github.com/sst/models.dev/tree/dev/providers/anthropic/models ，同上 LiteLLM 交叉核对。
+  // ✅ 2026-11-11 复核: 上面「未核实官方原文」对 Anthropic 已不成立 —— Opus/Sonnet/Haiku 5.5 三项
+  //    已由 anthropic.com/pricing 的 ApiTab(真实 DOM, 非内嵌 JSON) 官方原文确认, 与表逐项一致:
+  //    Opus 5.5 $4/$20 读$0.20 写$5、Sonnet 5.5 $2/$10 读$0.10 写$2.50、Haiku 5.5 ≤100K $0.10/$0.50 读$0.01 写$0.125。
   'claude-opus-5-5':      { cacheHit: 0.20, cacheMiss: 4.00, cacheWrite: 5.00,  output: 20.00 },
   'claude-sonnet-5-5':    { cacheHit: 0.10, cacheMiss: 2.00, cacheWrite: 2.50,  output: 10.00 },
   'claude-haiku-5-5':     { cacheHit: 0.01, cacheMiss: 0.10, cacheWrite: 0.125, output: 0.50 },
   'gpt-6-astra':          { cacheHit: 1.0,   cacheMiss: 10.0,  output: 50.0 },  // 官方 Input $10 / Cached input $1 / Output $50 (官方页当前最强档)
-  'gpt-5.6-sol':          { cacheHit: 0.5,   cacheMiss: 5.0,   output: 30.0 },  // 官方 $5 / $0.5 / $30
+  'gpt-5.6-sol':          { cacheHit: 0.5,   cacheMiss: 5.0,   output: 30.0 },  // 官方 $5 / $0.5 / $30; ⚠️ 2026-11-11: models.dev/LiteLLM/OpenRouter 三家聚合一致报 $4/$20, 与官方口径冲突且本轮拿不到官方原文 → 保留原值, 待核实
   'gpt-5.6-terra':        { cacheHit: 0.2,   cacheMiss: 2.0,   output: 12.0 },  // 2026-07-30 降价
   'gpt-5.6-luna':         { cacheHit: 0.02,  cacheMiss: 0.2,   output: 1.2 },   // 2026-07-30 降价
   'gpt-5.3-codex':        { cacheHit: 0.175, cacheMiss: 1.75,  output: 14.0 },  // ⚠️ 2026-09-22 复核: OpenAI 官方 API 定价页现**未列**此模型(页面只列 GPT-6 Astra / GPT-5.6 三档 / 图像 / Live / Realtime), 值仍为 radar 二手源, 未能取证
@@ -1297,6 +1324,7 @@ export const MODEL_PRICES = {
   //    Read 多数 = 输入价 ×10%(本表 cacheHit 口径), **Fable 5.1 例外仅 2.5%**。
   //    ⚠️ 现有 claude-opus-5 / sonnet-5 / sonnet-4-6 / haiku-4-5 四条经核对与官方逐项一致, 未改动。
   'claude-fable-5.1':     { cacheHit: 0.25,  cacheMiss: 10.0,  cacheWrite: 12.5,  output: 50.0 },  // 官方 $10 / $0.25(缓存读仅 2.5%) / $50; 缓存写 $12.50
+  'claude-fable-5.2':     { cacheHit: 0.20,  cacheMiss: 8.0,   cacheWrite: 10.0,  output: 40.0 },  // 官方原文(anthropic.com/pricing ApiTab, 2026-11-11 抓取): $8 / 读 $0.20 / 写 $10 / 输出 $40; fast 模式 ×2 未建模
   'claude-fable-5':       { cacheHit: 1.0,   cacheMiss: 10.0,  cacheWrite: 12.5,  output: 50.0 },  // 官方 $10 / $1 / $50; 缓存写 $12.50
   'claude-opus-4-8':      { cacheHit: 0.5,   cacheMiss: 5.0,   cacheWrite: 6.25,  output: 25.0 },  // 官方 $5 / $0.5 / $25; 缓存写 $6.25
   'claude-sonnet-4-5':    { cacheHit: 0.30,  cacheMiss: 3.0,   cacheWrite: 3.75,  output: 15.0 },  // 官方 $3 / $0.30 / $15; 缓存写 $3.75
@@ -1308,6 +1336,12 @@ export const MODEL_PRICES = {
   //    ⚠️ 促销价: 3.6/3.7/3.8 Flash 官方明文 "through December 31, 2026", 到期翻倍($1.50/$7.50/缓存 $0.15) —— 有到期日兜底才可入库。
   //    ⚠️ 分档: 3.1 Pro / 2.5 Pro 官方另有 >200k 档, 本表取主档(与 Claude 同口径), 更贵档见各条注释。
   'gemini-3.8-flash':     { cacheHit: 0.075, cacheMiss: 0.75,  output: 3.75 },  // 官方 $0.75/$3.75/缓存 $0.075; 促销至 2026-12-31, 之后 $1.50/$7.50
+  // ⚠️ 2026-11-11 新增两条 **第三方交叉一致、未取得官方原文** 的 Gemini 4 系。
+  //    ai.google.dev / devsite 生产后端 / cloud.google.com 本次全部连接失败(000), 只有三个独立聚合可对照:
+  //    models.dev(gemini-4-argon 标 2026-10-13 发布、gemini-4-carbon 标 2026-11-10)、LiteLLM、OpenRouter
+  //    三处一致(输入 $2 / 输出 $10 / 缓存读 $0.10); OpenRouter 另报缓写 $0.1875, 官方惯例不计缓写 → 不填 cacheWrite。
+  'gemini-4-argon':       { cacheHit: 0.10,  cacheMiss: 2.0,   output: 10.0 },  // 第三方交叉一致(未取得官方原文), 2026-11-11 抓取
+  'gemini-4-carbon':      { cacheHit: 0.10,  cacheMiss: 2.0,   output: 10.0 },  // 同上; models.dev 标 2026-11-10 发布
   'gemini-3.7-flash':     { cacheHit: 0.075, cacheMiss: 0.75,  output: 3.75 },  // 同上
   'gemini-3.6-flash':     { cacheHit: 0.075, cacheMiss: 0.75,  output: 3.75 },  // 同上
   'gemini-3.5-flash':     { cacheHit: 0.15,  cacheMiss: 1.5,   output: 9.0 },   // 官方 $1.50/$9.00/缓存 $0.15 ✚补录: 旧表无此键 → 落默认价($1/$2), 输出低估 4.5 倍
@@ -1353,7 +1387,7 @@ export const MODEL_PRICES = {
   'qwen3.7-flash':        { cacheHit: 0.02, cacheMiss: 0.2, output: 0.8 }, // v1.4.0: 官方 ¥0.2/¥0.8 (旧值 0.21/0.91 系中转站高档位, 已废)
   'qwen3.8-flash':        { cacheHit: 0.1,  cacheMiss: 0.8, output: 2.7 }, // 官方 ¥0.8/¥2.7; cacheHit ¥0.1 同 3.8-max 为控制台例外价
   // —— 2026-09-22 官方百炼定价页 (help.aliyun.com/zh/model-studio/model-pricing) 核对后补录 ——
-  'qwen3.8-max-prime':    { cacheHit: 2.4,  cacheMiss: 24,  output: 72 },  // 官方优速模式(Prime) ¥24/¥72; 官方未单列缓存价, 按"显式缓存命中=标准输入 10%"规则推
+  'qwen3.8-max-prime':    { cacheHit: 2.4,  cacheMiss: 24,  output: 72 },  // ⚠️ 2026-11-11 复核: 官方定价页现**已无 Prime/优速档**的表项(全页无「优速」字样), 未取得下线公告 → 原值保留; 官方未单列缓存价, cacheHit 系按 10% 规则推
   'qwen3.8-omni-flash':   { cacheHit: 0.1,  cacheMiss: 0.8, output: 2.7 }, // 官方 ¥0.8/¥2.7/缓存命中 ¥0.1 (3.8 系里唯一官方单列缓存价的)
   'qwen3.5-plus':         { cacheHit: 0.08, cacheMiss: 0.8, output: 4.8 }, // 官方 [0,128K) ¥0.8/¥4.8
   'qwen3.8-27b':          { cacheHit: 0.3,  cacheMiss: 3,   output: 12 },  // v1.4.0: 官方 ¥3/¥12; 缓存命中按官方 10% 规则 → ¥0.3 (旧值 ¥0.6 偏高 100%)
@@ -1368,6 +1402,10 @@ export const MODEL_PRICES = {
   // —— 2026-09-22 官方定价页 (docs.bigmodel.cn/cn/guide/start/pricing) 逐条核对后补录 ——
   //    分档口径 = 按**输入长度**在 32K 切开 ([0, 32K) / ≥32K); 分档模型一律取更贵的 ≥32K 档(保守)。
   'glm-5.3-flashx':       { cacheHit: 0.57, cacheMiss: 2,   output: 7 },    // 官方 ¥2/¥7/缓存 ¥0.57 (1M)
+  // ⚠️ 2026-11-11 复核 (docs.bigmodel.cn/cn/guide/start/pricing.md 原文): 上列 GLM-5.3/5.2/5.1/5-Turbo/5/5.3-Flash/
+  //    5.3-FlashX/4.7/4.7-FlashX/4.5-Air/4-Air/4-Long/4-FlashX/4-Plus 逐项与官方一致, 未改值; 同日补录两条未入表的在售型号:
+  'glm-5.3-flashx-legal': { cacheHit: 0.57, cacheMiss: 2,   output: 7 },    // 官方原文(2026-11-11 抓取): GLM-5.3-FlashX-Legal ¥2/¥7/缓存 ¥0.57, 与 FlashX 同价
+  'glm-5v-turbo':         { cacheHit: 1.8,  cacheMiss: 7,   output: 26 },   // 官方原文(2026-11-11 抓取): 视觉模型 GLM-5V-Turbo 按输入分档, 本键取 ≥32K 档 ¥7/¥26/缓存 ¥1.8 ([0,32K) 档为 ¥5/¥22/缓存 ¥1.2)
   'glm-5':                { cacheHit: 1.5,  cacheMiss: 6,   output: 22 },   // 官方 ≥32K 档 ¥6/¥22/缓存 ¥1.5 ([0,32K) 档为 ¥4/¥18/缓存 ¥1)
   'glm-4.7':              { cacheHit: 0.8,  cacheMiss: 4,   output: 16 },   // 官方 [32K,200K) 档 ¥4/¥16/缓存 ¥0.8 (低档 ¥2~3/¥8~14)
   'glm-4.7-flashx':       { cacheHit: 0.1,  cacheMiss: 0.5, output: 3 },    // 官方 ¥0.5/¥3/缓存 ¥0.1 (200K)
@@ -1379,7 +1417,13 @@ export const MODEL_PRICES = {
   //    'glm-4-flashx' 比 'glm-4-flash' 长, matchModelPrice 取最长键 → FlashX 现在能命中自己的价。
   'glm-4-flashx':         { cacheHit: 0.05, cacheMiss: 0.1, output: 0.1 },  // 官方 GLM-4-FlashX-250414 ¥0.1/¥0.1/缓存 ¥0.05
   // Kimi / Moonshot (platform.kimi.com/docs/pricing/* 2026-09-10 抓取, 均 CNY)
-  'kimi-k3':              { cacheHit: 2,    cacheMiss: 20,  output: 100 }, // v1.4.0: 官方 ¥2/¥20/¥100 (旧值全线 +5%)
+  // ✅ 2026-11-11 复核 (platform.kimi.com 定价页内嵌 DocTable 原文, 列: 输入/输出/缓存命中/缓存写(5min)/缓存写(1h)):
+  //    K3 系列**确有缓存写入费** —— kimi-k3 ¥20(5min)/¥40(1h), 此前表内缺 cacheWrite 会回落到按 cacheMiss 计。
+  //    新增 kimi-k3.1-pro / -highspeed (K3.1 系旗舰, 官方 2026-11-11 页在售; 腾讯 TokenHub 2026-11-09 同价交叉)。
+  //    ⚠️ K2 系官方公告: 2026-10-31 起停止向新注册用户开放, 计划 12 月底全线下线。
+  'kimi-k3':              { cacheHit: 2,    cacheMiss: 20,  cacheWrite: 20, output: 100 }, // 官方原文(2026-11-11): ¥2/¥20/¥100 + 缓存写 ¥20(5min)、¥40(1h), 本键取默认 5min 档
+  'kimi-k3.1-pro':        { cacheHit: 1.3,  cacheMiss: 13,  cacheWrite: 13, output: 68 },  // 官方原文(2026-11-11): ¥13/¥68/读 ¥1.3/写 ¥13(5min)、¥26(1h)
+  'kimi-k3.1-pro-highspeed': { cacheHit: 1.3, cacheMiss: 26, cacheWrite: 26, output: 136 }, // 官方原文(2026-11-11): 高速版 ¥26/¥136/读 ¥1.3/写 ¥26(5min)、¥52(1h)
   'kimi-k2.7-code':       { cacheHit: 1.3,  cacheMiss: 6.5, output: 27 },  // 官方 ¥1.3/¥6.5/¥27
   'kimi-k2.7-code-highspeed': { cacheHit: 2.6, cacheMiss: 13, output: 54 },// v1.4.0 新增: 官方高速版 ¥2.6/¥13/¥54
   'kimi-k2.6':            { cacheHit: 1.1,  cacheMiss: 6.5, output: 27 },  // v1.4.0: 官方缓存命中 ¥1.1 (旧值误抄成 k2.7-code 的 ¥1.3)
@@ -1405,9 +1449,12 @@ export const MODEL_PRICES = {
   'seed-2.1-turbo':       { cacheHit: 0.6,  cacheMiss: 3,   output: 15 },  // 实测 ¥3/¥15/缓存 ¥0.6
   'seed-2.1-pro':         { cacheHit: 1.2,  cacheMiss: 6,   output: 30 },  // 实测 ¥6/¥30/缓存 ¥1.2
   // MiniMax (platform.minimaxi.com/docs/guides/pricing-paygo 2026-09-10 抓取)
+  // ⚠️ 2026-11-11 复核 (platform.minimaxi.com/docs/pricing.md 原文): 官方页现只列 MiniMax-M3.1-Flash 与 MiniMax-M3,
+  //    **M2.7 系已整段不在页内** —— 未取得下线公告原文, 故不删键也不改值(腾讯 TokenHub 2026-11-09 仍按 ¥2.1/¥8.4/¥0.42 售卖)。
   'minimax-m2.7':           { cacheHit: 0.42, cacheMiss: 2.1, output: 8.4 },  // v1.4.0 修复: 官方缓存读 ¥0.42 (旧值拿 cacheMiss ¥2.1 顶替 → 长会话高估 5 倍, 同 AGENTS.md 红线 4)
   'minimax-m2.7-highspeed': { cacheHit: 0.42, cacheMiss: 4.2, output: 16.8 }, // v1.4.0 新增: 官方高速版
   'minimax-m3':             { cacheHit: 0.42, cacheMiss: 2.1, output: 8.4 },  // 2026-09-22 官方"永久五折" ≤512k 输入档 ¥2.1/¥8.4/缓存 ¥0.42 (>512k 档 ¥4.2/¥16.8/缓存 ¥0.84)
+  'minimax-m3.1-flash':     { cacheHit: 0.10, cacheMiss: 1.0, output: 4.0 },  // 官方原文(2026-11-11 抓取): ¥1/¥4/缓存读 ¥0.10; 腾讯 TokenHub 2026-11-09 同价
   // 美团 LongCat (中转站实测; 官方页未取到明文)
   'longcat-2.0':          { cacheHit: 0.1,  cacheMiss: 5,   output: 20 },  // 实测 ¥5/¥20/缓存 ¥0.1
   // 腾讯混元 —— ⚠️ 2026-09-22 复核: 官方计费页 (cloud.tencent.com/document/product/1729/97731) 与模型列表里
@@ -1417,10 +1464,17 @@ export const MODEL_PRICES = {
   'hunyuan-2.0-instruct-128k': { cacheHit: 4.347, cacheMiss: 4.347, output: 10.745 },
   'hunyuan-2.0-think-128k':    { cacheHit: 5.117, cacheMiss: 5.117, output: 20.468 },
   'hunyuan-turbo-s':           { cacheHit: 0.77,  cacheMiss: 0.77,  output: 1.932 },
+  // —— 2026-11-11 新增: 腾讯 TokenHub 模型价格页 (cloud.tencent.com/document/product/1823/130055, 页面标注 2026-11-09 更新) ——
+  //    该页是腾讯自家模型的官方价目(旧页 1729/97731 已明示能力迁移至 TokenHub, 且未列 Hy4)。
+  //    官方折扣说明: Hy4 自公告起至 2026-12-31 23:59:59(北京) 按目录价 **50%** 结算; 折扣期实际扣费为 ¥3/¥9/¥0.15。
+  //    本表按「宁高不低」取**目录价**(不打折), 折扣期用户可自行覆盖。
+  //    'hy4' 同时覆盖官方 model 名 hy4-preview(靠 SAFE_SUFFIX_RE 的 -preview 兜底, 两者官方同价)。
+  //    未入库: Hy3(¥1/¥4/¥0.25)、Hy-MT2 翻译系(¥0.5/¥2 等)、混元视觉系列 —— 与旧表口径一致, 只补文本主力。
+  'hy4':                  { cacheHit: 0.3,  cacheMiss: 6,   output: 18 },  // 官方原文(2026-11-11 抓取): Hy4 / hy4-preview ¥6/¥18/缓存命中 ¥0.3; 限时 5 折至 2026-12-31
   // 阶跃星辰 (platform.stepfun.com/docs/zh/guides/pricing/details 2026-09-10 抓取)
   'step-3.7-flash':       { cacheHit: 0.27, cacheMiss: 1.35, output: 8.1 }, // 官方 ¥1.35/¥8.1/缓存 ¥0.27
   'step-3.5-flash':       { cacheHit: 0.14, cacheMiss: 0.7,  output: 2.1 }, // 官方 ¥0.7/¥2.1/缓存 ¥0.14
-  'step-5-preview':       { cacheHit: 0.35, cacheMiss: 7,    output: 20 },  // 2026-09-22 官方新增 ¥7/¥20/缓存 ¥0.35
+  'step-5-preview':       { cacheHit: 0.70, cacheMiss: 7,    output: 20 },  // 官方原文(platform.stepfun.com/docs/zh/guides/pricing/details, 2026-11-11 抓取): ¥7/¥20; 缓存读自 2026-10-14 00:30 由 ¥0.35 上调至 ¥0.70(该时点前已按量调用过的用户仍按 0.35)
   'step-1o-turbo-vision': { cacheHit: 0.5,  cacheMiss: 2.5,  output: 8 },   // 2026-09-22 官方 ¥2.5/¥8/缓存 ¥0.5
   // 小米 MiMo — 官方 2026-05-27 起「永久降价」(最高降幅 99%), 取消上下文分档; 与中转站 tokenrhythm 实时报价一致。
   // v1.3.4 修的「除两次 7」结论正确, v1.4.0 起改为直接存官方 CNY 原值, 不再有 ÷7 环节。
@@ -1473,11 +1527,11 @@ export const MODEL_PRICES = {
   'glm-4-plus':           { cacheHit: 2.5,   cacheMiss: 5,    output: 5 },  // ✅ v1.4.0 修复: 官方 ¥2.5/¥5/¥5 (旧口径下显示 ¥17.5/¥35/¥35, 高 7 倍)
   'glm-4-flash':          { cacheHit: 0.05,  cacheMiss: 0.1,  output: 0.1 }, // ⚠️ 官方 GLM-4-Flash-250414 现为免费; 此处保留历史 ¥0.1 档(宁高不低, 中转站可能仍计费)
   // 通义千问 (官方 CNY; 2026-09-10 抓取)
-  'qwen-plus':            { cacheHit: 0.08,  cacheMiss: 0.8,  output: 2 },  // 官方 ¥0.8/¥2 ✅ (2026-09-22 核对: 现役 qwen-plus-2025-01-25 无阶梯计价);
+  'qwen-plus':            { cacheHit: 0.08,  cacheMiss: 0.8,  output: 2 },  // 官方 ¥0.8/¥2 ✅ (2026-11-11 复核: 官方别名现为 qwen-plus-2025-12-01, 该页确有 128K/256K 阶梯, 本键取 [0,128K) 基础档)
   //   ⚠️ cacheHit 原值 0.4(=输入 50%) **无官方依据** —— 官方明文「显式缓存命中按标准输入单价的 10% 计费」,
   //   同表其余 8 个 qwen 条目也都严格等于 10%, 只有 qwen-plus / qwen-turbo 是 50% → 已按官方规则改为 0.08 (旧值高估缓存读 5 倍)。
   'qwen-max':             { cacheHit: 0.24,  cacheMiss: 2.4,  output: 9.6 },// v1.4.0: 官方现价 ¥2.4/¥9.6 (旧值 20/60 是远古价)
-  'qwen-turbo':           { cacheHit: 0.03,  cacheMiss: 0.3,  output: 0.6 },// 官方 ¥0.3/¥0.6 (思考模式输出 ¥3) ✅; cacheHit 同上按官方 10% 规则改为 0.03 (旧值 0.15=50%)
+  'qwen-turbo':           { cacheHit: 0.03,  cacheMiss: 0.3,  output: 0.6 },// ⚠️ 2026-11-11 复核: 百炼官方定价页**已不再列 qwen-turbo**(全页 0 命中), 未取得下线公告 → 原值保留作旧会话估算, 非当前官方在售价
   'qwen2.5-72b-instruct': { cacheHit: 2,     cacheMiss: 4,    output: 12 }, // ⚠️ 官方 2026-05-13 已下线(百炼下线公告), 保留仅为旧会话估算占位
   // Kimi — ⚠️ 官方 **2026-08-31 已全平台下线 moonshot-v1 全系** (调用 404), 官方价目已撤, 无法取证。
   //    下列值与原 Moonshot 官方历史价(¥12/¥12 一档)对不上, 仅作旧会话估算占位, 别当官方价引用。
@@ -1502,7 +1556,9 @@ export const MODEL_PRICES = {
 // v1.4.0 起本判定还兼任 MODEL_PRICES 的「存储币种」判定 (见 nativeCurrencyOf), 见下方注释。
 // 判定按前缀, 与 MODEL_PRICES 的键同源; 未命中 → null (不表态, 走主货币, 保守)。
 const OVERSEAS_MODEL_PREFIXES = ['gpt-', 'gpt', 'o1', 'o3', 'o4', 'chatgpt', 'claude', 'gemini', 'grok', 'mistral', 'groq-', 'llama', 'command-', 'openrouter-']
-const DOMESTIC_MODEL_PREFIXES = ['deepseek', 'glm', 'kimi', 'moonshot', 'step-', 'qwen', 'mimo', 'doubao', 'seed-', 'hunyuan', 'minimax', 'longcat', 'abab', 'ernie', 'spark', 'yi-']
+// 2026-11-11: 追加 'hy4' —— 腾讯 TokenHub 的 Hy4 用短名 `hy4` 调用(不是 hunyuan-* 前缀),
+//   不登记则 modelRegion 返回 null、该键违背「所有键产地可判定」这条不变式(币种仍会按 CNY 兜底, 但判定不表态)。
+const DOMESTIC_MODEL_PREFIXES = ['deepseek', 'glm', 'kimi', 'moonshot', 'step-', 'qwen', 'mimo', 'doubao', 'seed-', 'hunyuan', 'minimax', 'longcat', 'abab', 'ernie', 'spark', 'yi-', 'hy4']
 
 /** 判定模型产地: '海外' | '国内' | null(未知, 不表态)。前缀匹配取最长, 避免短前缀误命中。 */
 export const modelRegion = (model) => {
@@ -1612,9 +1668,10 @@ export const resolveModelPrice = (configOrGetter, model, timestamp = Date.now(),
   return convertPrice(config?.defaultPrices ?? { cacheHit: 0.1, cacheMiss: 1, output: 2 }, 'USD', display)
 }
 
-/** 超时覆盖响应头和后续 body 读取，避免慢响应体卡死整轮刷新。 */
-async function fetchWithTimeout(url, headers, timeoutMs, method = 'GET') {
-  return fetch(url, { method, headers, signal: AbortSignal.timeout(timeoutMs) })
+/** 超时覆盖响应头和后续 body 读取，避免慢响应体卡死整轮刷新。
+ *  v1.7.4+account-login: 可注入 fetch 实现（单测用 fake fetch，不联网）。默认仍是全局 fetch。 */
+async function fetchWithTimeout(url, headers, timeoutMs, method = 'GET', fetchImpl = fetch) {
+  return fetchImpl(url, { method, headers, signal: AbortSignal.timeout(timeoutMs) })
 }
 
 /** 读取请求体并限制大小 (默认 256KB) —— 防持有 token 者灌大包打爆内存。超限抛错。 */
@@ -1790,10 +1847,24 @@ export const Config = Schema.object({
     soundSet: Schema.string().default('duck'),
     volume: Schema.number().min(0).max(1).default(0.5),
     bubbleOn: Schema.boolean().default(true),
+    /** v1.7.1: 桌宠额外显示「剩余余额」徽标 (跟随胶囊所选平台) */
+    showBalance: Schema.boolean().default(false),
     peakMode: Schema.string().default('default'),
     snapOn: Schema.boolean().default(true),
     peekRatio: Schema.number().min(0.15).max(0.9).default(0.5),
   }).default({}),
+  /**
+   * v1.7.1: 状态条(输入框下那枚余额胶囊)外观 —— 维护者要求在设置里可调。
+   * 维护者原话「余额显示胶囊边缘自定义, 可以直接调成无边框显示, 也可以调厚, 然后胶囊整体也可以调大小」。
+   *
+   * edgeWidth: 边框宽度 px。0 = 无边框(胶囊完全融入对话区背景, 只留文字)。
+   *   上限 3px —— 再厚就会盖过 11px 的字, 观感上不再是「胶囊」而是「框」。
+   * scale: 整体缩放, 同时作用于字号/内边距/高度下限。1 = 基准(内容 20px + 上下 padding 2px = 总高 24px)。
+   *   下限 0.8(再小 11px 字会糊), 上限 1.5(再大就会明显顶开会话区)。
+   *   两项都只影响客户端渲染, 服务端不参与计算。
+   */
+  barEdgeWidth: Schema.number().min(0).max(3).default(1),
+  barScale: Schema.number().min(0.8).max(1.5).default(1),
 })
 
 // ============================================================
@@ -2010,30 +2081,44 @@ function checkAlerts(balances, config, ctx) {
 // 余额解析适配器
 // ============================================================
 
+/**
+ * v1.4.2 多钱包挑选规则：主货币优先 → 有余额的 → 首条（与接口返回顺序无关）。
+ *
+ * H-4d 背景：`balance_infos` 是「一个币种钱包一条」—— 官方文档 currency 取值 CNY / USD。
+ * 旧代码盲取 infos[0]，而**数组顺序不保证**：真机实测同一 key 连打 5 次，第 4 次顺序翻成
+ * [USD=0.00, CNY=123.45] → 读到 USD 那条 → 有 123.45 元的账户显示成「$0.00 · 异常」。
+ * 更糟的是 `total_balance == null` 红线**拦不住**它 —— "0.00" 是合法字符串，
+ * 于是红线守卫被绕过、0 被当成真实余额渲染（与 v1.4.0 openai-credit-grants、
+ * v1.4.1 openrouter 是同一族漏洞：选错一条就当真实数字）。
+ *
+ * v1.7.4+account-login: 官方账号接口的 normal_wallets / bonus_wallets 归一成同构条目后
+ * **也走这一条**，不另写一套挑选逻辑。
+ * @param {Array<{currency?: string, total_balance?: unknown}>} infos
+ * @param {string} pref 主货币（config.currency）
+ * @returns {object|null} 选中的钱包条目；没有可用条目时 null
+ */
+function pickWalletInfo(infos, pref) {
+  const amountOf = (v) => {
+    if (v === null || v === undefined || v === '') return null
+    const n = Number(v)
+    return Number.isFinite(n) ? n : null
+  }
+  const list = Array.isArray(infos) ? infos : []
+  const want = String(pref ?? '').trim().toUpperCase()
+  const usable = list.filter((x) => x && amountOf(x.total_balance) !== null)
+  return (want ? usable.find((x) => String(x.currency || '').toUpperCase() === want) : undefined) ??
+    usable.find((x) => amountOf(x.total_balance) > 0) ??
+    usable[0] ?? null
+}
+
 // 纯函数, 导出便于单测 (不影响对外行为)
 export function parseResponse(queryType, json, pref) {
   if (!json || typeof json !== 'object' || Array.isArray(json)) return null
   switch (queryType) {
     case 'deepseek': {
       const infos = Array.isArray(json?.balance_infos) ? json.balance_infos : []
-      // H-4d (v1.4.2): balance_infos 是「一个币种钱包一条」—— 官方文档 currency 取值 CNY / USD。
-      // 旧代码盲取 infos[0]，而**数组顺序不保证**：真机实测同一 key 连打 5 次，第 4 次顺序翻成
-      // [USD=0.00, CNY=123.45] → 读到 USD 那条 → 有 123.45 元的账户显示成「$0.00 · 异常」。
-      // 更糟的是下面那道 `total_balance == null` 红线**拦不住**它 —— "0.00" 是合法字符串，
-      // 于是红线守卫被绕过、0 被当成真实余额渲染（与 v1.4.0 openai-credit-grants、
-      // v1.4.1 openrouter 是同一族漏洞：选错一条就当真实数字）。
-      // 现在按「主货币优先 → 余额 > 0 → 首条」确定性挑选，结果与接口返回顺序无关。
-      const amountOf = (v) => {
-        if (v === null || v === undefined || v === '') return null
-        const n = Number(v)
-        return Number.isFinite(n) ? n : null
-      }
-      const want = String(pref ?? '').trim().toUpperCase()
-      const usable = infos.filter((x) => x && amountOf(x.total_balance) !== null)
-      const p =
-        (want ? usable.find((x) => String(x.currency || '').toUpperCase() === want) : undefined) ??
-        usable.find((x) => amountOf(x.total_balance) > 0) ??
-        usable[0]
+      // 挑选规则见 pickWalletInfo（v1.4.2：主货币优先 → 余额 > 0 → 首条，顺序无关）
+      const p = pickWalletInfo(infos, pref)
       if (!p) return null
       // total_balance 当前余额, granted_balance 赠送, topped_up_balance 充值
       const total = toAmount(p.total_balance)
@@ -2141,6 +2226,31 @@ export function parseResponse(queryType, json, pref) {
       // 主显示优先: unit=3(5小时滚动窗口), 其次 unit=6(周配额), 再按剩余降序
       const score = (l) => (l.unit === 3 ? 0 : (l.unit === 6 ? 1 : 2))
       const sorted = limits.slice().sort((a, b) => score(a) - score(b) || (rem(b) ?? -1) - (rem(a) ?? -1))
+      // #4（2026-11-11，issue wbxhxjj）：Coding Plan Max 这类账号，两个真正的限流窗口
+      // （unit=3 五小时 / unit=6 周）**只有 percentage、没有 remaining**，唯一带 remaining 的
+      // 是 TIME_LIMIT（工具调用次数）。旧逻辑 `find(rem>0)` 会跳过 token 窗口、把工具月度剩余
+      // 当成主显示 —— 最该看的周配额（可能已用 88%）反而消失。
+      // 红线不变：percentage 仍是「已用」，绝不冒充余额；这里折算成「最紧窗口的剩余%」下发，
+      // 并把各窗口明细放进 windows 供客户端并排展示。
+      const tokenWindows = limits
+        .filter((l) => l.unit === 3 || l.unit === 6)
+        .map((l) => ({ label: UNIT_LABEL[l.unit] ?? '其他', percent: pctOf(l), resetAt: l.nextResetTime ?? null }))
+        .filter((w) => w.percent !== null)
+      const tokenHasRemaining = limits.some((l) => (l.unit === 3 || l.unit === 6) && rem(l) !== null)
+      if (!tokenHasRemaining && tokenWindows.length > 0) {
+        const tightest = tokenWindows.reduce((a, b) => (b.percent > a.percent ? b : a))
+        const remainPct = Math.max(0, Math.min(100, 100 - tightest.percent))
+        const toolLimit = limits.find((l) => l.unit === 5 && rem(l) !== null)
+        const detail = tokenWindows.map((w) => `${w.label}已用${w.percent}%`).join(' · ')
+        const toolNote = toolLimit ? ` · ${UNIT_LABEL[5]}剩${rem(toolLimit)}积分` : ''
+        const resetNote = tightest.resetAt ? '（' + new Date(tightest.resetAt).toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' 重置）' : ''
+        return {
+          total: remainPct, currency: '%', available: remainPct, used: tightest.percent, percent: remainPct,
+          note: `智谱 ${detail}${toolNote}${resetNote}`,
+          windows: tokenWindows.map((w) => ({ label: w.label, percent: w.percent })),
+          resetAt: tightest.resetAt,
+        }
+      }
       const main = sorted.find((l) => rem(l) !== null && rem(l) > 0)
       const usedUp = limits.filter((l) => rem(l) === 0 && pctOf(l) === 100)
       if (main) {
@@ -2222,9 +2332,205 @@ export function classifyBizError(queryType, json) {
 }
 
 // ============================================================
+// DeepSeek 官方账号登录余额 (v1.7.4+account-login)
+// ============================================================
+// 依据宿主 @deepseek-ai/dsh-deepseek-account-platform/lib/index.js（不猜字段）:
+//   · 凭据: ~/.dsh/.credentials.yaml 的 records["deepseek-account-platform/default"]
+//           = { kind: 'grant', payload: { version, token, issuer } }
+//   · 余额: queries.balance.path = '/api/v0/users/get_user_summary'
+//   · 头:   accountHeaders() 只加 `x-dsh-auth-token`，**不是** Authorization: Bearer
+//   · 外层: { code: 0, data: { biz_code: 0, biz_data: { normal_wallets, bonus_wallets } } }
+//   · 钱包: { currency: 'CNY' | 'USD', balance: '<数值字符串>' }（宿主 zod schema）
+// 红线: token 只在内存里用一次 —— 不落盘、不打印、不拼进任何错误文案。
+const ACCOUNT_CREDENTIAL_KEY = 'deepseek-account-platform/default'
+const ACCOUNT_BALANCE_PATH = '/api/v0/users/get_user_summary'
+const ACCOUNT_WALLET_CURRENCIES = new Set(['CNY', 'USD'])
+const ACCOUNT_NOTE = 'DeepSeek 账号余额'
+
+/** 读凭据文件里的 YAML 标量（只覆盖本项目所需的简单形态：去引号、去行尾注释）。 */
+function credentialScalar(raw) {
+  let s = String(raw ?? '').trim()
+  if (s === '') return ''
+  const quote = s[0]
+  if ((quote === '"' || quote === "'") && s.length >= 2) {
+    const end = s.lastIndexOf(quote)
+    if (end > 0) return s.slice(1, end)
+  }
+  const comment = s.search(/\s#/)
+  if (comment !== -1) s = s.slice(0, comment).trim()
+  return s
+}
+
+/** 归一化账号 grant: token 必须是非空可打印字符串；issuer 必须是纯 http(s) 源。 */
+export function normalizeAccountGrant(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const token = typeof value.token === 'string' ? value.token.trim() : ''
+  if (token === '' || !/^[\x21-\x7e]+$/.test(token)) return null
+  let issuer = ''
+  const raw = typeof value.issuer === 'string' ? value.issuer.trim() : ''
+  if (raw !== '') {
+    try {
+      const url = new URL(raw)
+      const pureOrigin = (url.pathname === '' || url.pathname === '/')
+        && url.search === '' && url.hash === '' && url.username === '' && url.password === ''
+      if ((url.protocol === 'https:' || url.protocol === 'http:') && url.hostname && pureOrigin) issuer = url.origin
+    } catch { /* 非法 issuer 视为缺失，不猜默认域名 */ }
+  }
+  return { token, issuer }
+}
+
+/**
+ * 从 `.credentials.yaml` 文本里读 `records["deepseek-account-platform/default"]`。
+ * 只认宿主写出的 `kind: grant` + `payload.{token,issuer}` 结构；任何不符都返回 null。
+ * @param {string} text 凭据文件内容
+ * @returns {{token: string, issuer: string}|null}
+ */
+export function parseAccountGrantText(text) {
+  if (typeof text !== 'string' || text === '') return null
+  const lines = text.split(/\r?\n/)
+  let inRecords = false
+  let start = -1
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const trimmed = line.trim()
+    if (trimmed === '' || trimmed.startsWith('#')) continue
+    if (!/^\s/.test(line)) {
+      inRecords = /^records:\s*(?:#.*)?$/.test(line)
+      continue
+    }
+    if (!inRecords) continue
+    if (/^ {2}["']?deepseek-account-platform\/default["']?:\s*(?:#.*)?$/.test(line)) { start = i; break }
+  }
+  if (start === -1) return null
+
+  let kind = ''
+  let token = ''
+  let issuer = ''
+  let inPayload = false
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i]
+    const trimmed = line.trim()
+    if (trimmed === '' || trimmed.startsWith('#')) continue
+    const indent = line.length - line.trimStart().length
+    if (indent <= 2) break // 下一个 record / 下一个顶层段
+    const idx = trimmed.indexOf(':')
+    if (idx <= 0) continue
+    const key = trimmed.slice(0, idx).trim()
+    const value = credentialScalar(trimmed.slice(idx + 1))
+    if (indent === 4) {
+      inPayload = key === 'payload' && value === ''
+      if (key === 'kind') kind = value
+      continue
+    }
+    if (inPayload && indent >= 6) {
+      if (key === 'token') token = value
+      else if (key === 'issuer') issuer = value
+    }
+  }
+  if (kind !== 'grant') return null
+  return normalizeAccountGrant({ token, issuer })
+}
+
+/**
+ * 读官方账号 grant：优先 DSH credentials 服务的 record 接口，失败/无此能力时
+ * 直接解析 `~/.dsh/.credentials.yaml`（与 API Key 的三层兜底同样的落盘位置）。
+ * @param {{credentials?: object, filePath?: string}} [options]
+ * @returns {Promise<{token: string, issuer: string}|null>}
+ */
+export async function readAccountGrant(options = {}) {
+  const credentials = options?.credentials ?? null
+  if (credentials && typeof credentials.readRecord === 'function') {
+    try {
+      const record = await credentials.readRecord(ACCOUNT_CREDENTIAL_KEY)
+      if (record && record.kind === 'grant') {
+        const grant = normalizeAccountGrant(record.payload)
+        if (grant) return grant
+      }
+    } catch { /* 凭据服务不可用 → 退回文件 */ }
+  }
+  try {
+    const home = process.env.DSH_HOME || join(homedir(), '.dsh')
+    const file = options?.filePath || join(home, '.credentials.yaml')
+    return parseAccountGrantText(readFileSync(file, 'utf8'))
+  } catch { return null }
+}
+
+/** 账号钱包金额：必须是宿主 schema 允许的数值字符串（或有限数字），否则 null。 */
+function accountAmountOf(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null
+  if (typeof value !== 'string') return null
+  const s = value.trim()
+  if (s === '' || !/^-?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(s)) return null
+  const n = Number(s)
+  return Number.isFinite(n) ? n : null
+}
+
+/**
+ * 把账号接口的两个钱包数组归一成与 `balance_infos` 同构的条目：
+ * 充值(normal_wallets) → topped_up_balance，赠送(bonus_wallets) → granted_balance，
+ * total_balance = 两者之和（同一币种可能多次出现 → 累加）。
+ * 结构不符（非数组 / 币种不在宿主枚举 / 金额非法 / 两个数组都为空）→ null，绝不编数。
+ * @returns {Array<{currency: string, total_balance: string, topped_up_balance: string, granted_balance: string}>|null}
+ */
+export function accountWalletsToBalanceInfos(normalWallets, bonusWallets) {
+  if (!Array.isArray(normalWallets) || !Array.isArray(bonusWallets)) return null
+  const byCurrency = new Map()
+  const collect = (wallets, field) => {
+    for (const wallet of wallets) {
+      if (!wallet || typeof wallet !== 'object' || Array.isArray(wallet)) return false
+      const currency = typeof wallet.currency === 'string' ? wallet.currency.trim().toUpperCase() : ''
+      if (!ACCOUNT_WALLET_CURRENCIES.has(currency)) return false
+      const amount = accountAmountOf(wallet.balance)
+      if (amount === null) return false
+      const slot = byCurrency.get(currency) ?? { currency, topup: 0, grant: 0 }
+      slot[field] += amount
+      byCurrency.set(currency, slot)
+    }
+    return true
+  }
+  if (!collect(normalWallets, 'topup')) return null
+  if (!collect(bonusWallets, 'grant')) return null
+  if (byCurrency.size === 0) return null
+  const round = (n) => Math.round(n * 1e6) / 1e6 // 0.1+0.2 之类浮点尾巴别显示出来
+  return [...byCurrency.values()].map((slot) => ({
+    currency: slot.currency,
+    total_balance: String(round(slot.topup + slot.grant)),
+    topped_up_balance: String(round(slot.topup)),
+    granted_balance: String(round(slot.grant)),
+  }))
+}
+
+/**
+ * 解析账号余额响应（宿主 envelope 内层 biz_data）。钱包挑选**复用** pickWalletInfo，
+ * 即 v1.4.2 的「主货币优先 → 有余额的 → 首条」。
+ * @returns {{total:number,currency:string,available:number,used:null,topup:number,grant:number,note:string}|null}
+ */
+export function parseAccountResponse(json, pref) {
+  if (!json || typeof json !== 'object' || Array.isArray(json)) return null
+  const envelope = json.data
+  if (json.code !== 0 || !envelope || typeof envelope !== 'object' || Array.isArray(envelope)) return null
+  if (envelope.biz_code !== 0) return null
+  const payload = envelope.biz_data
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null
+  const infos = accountWalletsToBalanceInfos(payload.normal_wallets, payload.bonus_wallets)
+  if (!infos) return null
+  const picked = pickWalletInfo(infos, pref)
+  if (!picked) return null
+  const total = toAmount(picked.total_balance)
+  const topup = toAmount(picked.topped_up_balance)
+  const grant = toAmount(picked.granted_balance)
+  return {
+    total, currency: picked.currency, available: total,
+    // 账号接口没有「已用」口径（不给 total_usage / total_credits）—— 如实留空，不拿充值额冒充
+    used: null, topup, grant,
+    note: ACCOUNT_NOTE,
+  }
+}
+
+// ============================================================
 // 查询单个预设平台
 // ============================================================
-async function queryPreset(platform, apiKey, config) {
+async function queryPreset(platform, apiKey, config, fetchImpl = fetch) {
   if (platform.noBalance) {
     return {
       platform: platform.id, name: platform.label, icon: platform.icon, color: platform.color,
@@ -2259,7 +2565,7 @@ async function queryPreset(platform, apiKey, config) {
   }
 
   try {
-    const res = await fetchWithTimeout(url, headers, config.timeoutMs || 8000, method)
+    const res = await fetchWithTimeout(url, headers, config.timeoutMs || 8000, method, fetchImpl)
     if (!res.ok) {
       const isAuth = res.status === 401 || res.status === 403
       return {
@@ -2291,6 +2597,8 @@ async function queryPreset(platform, apiKey, config) {
       category: platform.category, status: 'ok', total: parsed.total, currency: parsed.currency,
       available: parsed.available, used: parsed.used, topup: parsed.topup, grant: parsed.grant,
       note: parsed.note, percent: parsed.percent,
+      // queryPreset 末尾是**显式字段列表**（不是 spread）：新字段不在这里加一行就会被丢掉（issue #4 的提醒）
+      ...(Array.isArray(parsed.windows) ? { windows: parsed.windows } : {}),
       noBalance: false, fetchedAt: Date.now(),
     }
   } catch (error) {
@@ -2301,6 +2609,95 @@ async function queryPreset(platform, apiKey, config) {
       status: 'error', error: message.includes('abort') ? '请求超时' : '网络错误', noBalance: false,
     }
   }
+}
+
+// ============================================================
+// DeepSeek 账号登录余额查询 + API Key 优先级
+// ============================================================
+/**
+ * 用账号 grant 查余额。与 queryPreset 同构返回，但 token 走 `x-dsh-auth-token`。
+ *
+ * 不带的头（先在文档里记为未验证）：宿主 `platformClientHeaders()` 还会发
+ * `x-client-bundle-id` / `x-client-platform: web` / `x-client-version` /
+ * `x-client-locale` / `x-client-timezone-offset`。这些是**客户端身份**（版本、语言、
+ * 时区偏移），插件服务端拿不到真实值，猜一个等于伪造 —— 故一个都不带。
+ */
+async function queryDeepSeekAccountPreset(platform, grant, config, fetchImpl = fetch) {
+  const meta = {
+    platform: platform.id, name: platform.label, icon: platform.icon, color: platform.color,
+    category: platform.category,
+  }
+  const token = typeof grant?.token === 'string' ? grant.token : ''
+  if (!token) return { ...meta, status: 'no-key', error: '未配置 API Key', noBalance: false }
+  const issuer = typeof grant?.issuer === 'string' ? grant.issuer : ''
+  if (!issuer) {
+    return { ...meta, status: 'no-balance-api', error: 'DeepSeek 账号凭据缺少 issuer，无法查询账号余额', noBalance: true }
+  }
+
+  try {
+    const res = await fetchWithTimeout(issuer + ACCOUNT_BALANCE_PATH,
+      { Accept: 'application/json', 'x-dsh-auth-token': token },
+      config?.timeoutMs || 8000, 'GET', fetchImpl)
+    if (!res.ok) {
+      const isAuth = res.status === 401 || res.status === 403
+      const isMissing = res.status === 404 || res.status === 405
+      return {
+        ...meta,
+        status: isAuth ? 'auth-error' : (isMissing ? 'no-balance-api' : 'error'),
+        // ⚠️ 不读响应体、不把 URL/头/体拼进错误 —— token 绝不出现在任何文案里
+        // 不硬断言「token 已失效」：缺客户端身份头等原因也可能被平台拒成 401/403
+        error: isAuth ? `HTTP ${res.status} (DeepSeek 账号授权未通过，请重新登录账号)`
+          : isMissing ? `HTTP ${res.status} (账号余额接口未开放)` : `HTTP ${res.status}`,
+        noBalance: isMissing,
+      }
+    }
+
+    const text = await res.text()
+    let json = null
+    try { json = JSON.parse(text) } catch { json = null }
+    // 宿主对 401 与业务码 40003 都判「授权失效」；这里同样走中性 auth-error，不静默成功
+    if (json && typeof json === 'object' && !Array.isArray(json) && json.code === 40003) {
+      return { ...meta, status: 'auth-error', error: 'DeepSeek 账号授权已失效，请重新登录', noBalance: false }
+    }
+    const parsed = parseAccountResponse(json, config?.currency)
+    if (!parsed) {
+      return { ...meta, status: 'no-balance-api', error: '无法解析 DeepSeek 账号余额数据', noBalance: true }
+    }
+    return {
+      ...meta, status: 'ok', total: parsed.total, currency: parsed.currency,
+      available: parsed.available, used: parsed.used, topup: parsed.topup, grant: parsed.grant,
+      note: parsed.note, percent: null, source: 'account', noBalance: false, fetchedAt: Date.now(),
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return {
+      ...meta,
+      status: 'error', error: message.includes('abort') ? '请求超时' : '网络错误', noBalance: false,
+    }
+  }
+}
+
+/**
+ * 预设平台查询入口（v1.7.4+account-login）：
+ * **显式 API Key 永远优先**；只有完全没有 key 且平台是 DeepSeek 时，才懒加载账号 grant。
+ * `readAccount` 只会在需要时被调用 —— 有 key 的账户不会白读一次凭据文件。
+ * @param {object} platform PLATFORM_PRESETS 条目
+ * @param {string} apiKey resolvePresetKey 的结果
+ * @param {object} config runtimeConfig
+ * @param {{readAccount?: () => Promise<object|null>, fetchImpl?: Function}} [options]
+ */
+export async function queryPresetWithAccountFallback(platform, apiKey, config, options = {}) {
+  const fetchImpl = typeof options?.fetchImpl === 'function' ? options.fetchImpl : fetch
+  const key = typeof apiKey === 'string' ? apiKey : ''
+  if (key) return queryPreset(platform, key, config, fetchImpl)
+  if (!platform || platform.id !== 'deepseek') return queryPreset(platform, '', config, fetchImpl)
+
+  let grant = null
+  if (typeof options?.readAccount === 'function') {
+    try { grant = await options.readAccount() } catch { grant = null }
+  }
+  if (!grant || !grant.token) return queryPreset(platform, '', config, fetchImpl)
+  return queryDeepSeekAccountPreset(platform, grant, config, fetchImpl)
 }
 
 // ============================================================
@@ -2364,6 +2761,7 @@ async function queryCustomRelay(relay, config) {
           platform: id, name: name || '中转站', icon: 'relay', color: '#64748B', category: '中转站',
           status: 'ok', total: parsed.total, currency: parsed.currency, available: parsed.available,
           used: parsed.used, note: parsed.note || cand.type, percent: parsed.percent,
+          ...(Array.isArray(parsed.windows) ? { windows: parsed.windows } : {}),
           noBalance: false, queryType: cand.type, fetchedAt: Date.now(), fromDsh,
         }
       }
@@ -3226,8 +3624,11 @@ export function apply(ctx, config) {
     officialProviders: normalizeOfficialProviders(persisted.officialProviders ?? config.officialProviders ?? []),
     // v1.4.0「真自动」: 被用户关掉的 DSH provider (默认空 = 全部启用)。复用同一个名单规范化器。
     dshProviderOptOut: normalizeOfficialProviders(persisted.dshProviderOptOut ?? config.dshProviderOptOut ?? []),
+    // v1.7.1: 状态条外观(边框宽度 px / 整体缩放)。barScale 必须保留小数, 见 clampLook 注释。
+    barEdgeWidth: clampLook(persisted.barEdgeWidth ?? config.barEdgeWidth, 0, 3, 1, 1),
+    barScale: clampLook(persisted.barScale ?? config.barScale, 0.8, 1.5, 1, 2),
     whaleSettings: {
-      scale: 1, soundOn: true, soundSet: 'duck', volume: 0.5, bubbleOn: true,
+      scale: 1, soundOn: true, soundSet: 'duck', volume: 0.5, bubbleOn: true, showBalance: false,
       peakMode: 'default', snapOn: true, peekRatio: 0.5, left: null, top: null, side: 'right',
       ...(config.whaleSettings ?? {}),
       ...(persisted.whaleSettings ?? {}),
@@ -3305,6 +3706,13 @@ export function apply(ctx, config) {
   }
 
   /**
+   * v1.7.4+account-login: 读 DeepSeek 官方账号 grant（credentials 服务 → 凭据文件）。
+   * **只在没有显式 API Key 时**由 queryPresetWithAccountFallback 调用 —— 有 key 的用户
+   * 不会多读一次凭据文件；token 只在这个进程内用一次，不缓存、不落盘、不打印。
+   */
+  const resolveAccountGrant = async () => readAccountGrant({ credentials: ctx.get('credentials') })
+
+  /**
    * v1.4.0「真自动」: 把 DSH settings.yaml 里的 provider 合成为可查余额的中转站条目。
    * 挑选规则见模块级纯函数 `selectDshProviders` (可单测)。
    * 这里只多一步: 解析 key —— 要访问 credentials 服务, 所以必须是异步的。
@@ -3367,7 +3775,10 @@ export function apply(ctx, config) {
       ]
       const modelList = runtimeConfig.customModels
       const tasks = [
-        ...presetList.map(async (p) => queryPreset(p, await resolvePresetKey(p), runtimeConfig)),
+        // v1.7.4+account-login: 显式 API Key 优先；DeepSeek 没有 key 时才回退到账号 grant。
+        ...presetList.map(async (p) => queryPresetWithAccountFallback(
+          p, await resolvePresetKey(p), runtimeConfig, { readAccount: resolveAccountGrant },
+        )),
         ...relayList.map(async (r) => queryCustomRelay(r, runtimeConfig)),
         ...modelList.map(async (m) => queryCustomModel(m, runtimeConfig)),
       ]
@@ -3746,6 +4157,7 @@ export function apply(ctx, config) {
               soundSet: body.soundSet === 'fx1' ? 'fx1' : (body.soundSet === 'duck' ? 'duck' : cur.soundSet),
               volume: num(body.volume, 0, 1, cur.volume),
               bubbleOn: typeof body.bubbleOn === 'boolean' ? body.bubbleOn : cur.bubbleOn,
+              showBalance: typeof body.showBalance === 'boolean' ? body.showBalance : cur.showBalance,
               peakMode: ['default', 'liangwen', 'qiangqiang'].includes(body.peakMode) ? body.peakMode : cur.peakMode,
               snapOn: typeof body.snapOn === 'boolean' ? body.snapOn : cur.snapOn,
               peekRatio: num(body.peekRatio, 0.15, 0.9, cur.peekRatio),
@@ -3793,6 +4205,10 @@ export function apply(ctx, config) {
             whaleEnabled: !!runtimeConfig.whaleEnabled,
             showNoBalanceBrands: !!runtimeConfig.showNoBalanceBrands,
             showSubagentCapsules: !!runtimeConfig.showSubagentCapsules,
+            // v1.7.1: 状态条外观 —— 不下发的话设置面板冷启动会显示默认值 1/1,
+            // 用户一拖就把自己存过的值覆盖掉(与 C-2 补阈值下发是同一个坑)。
+            barEdgeWidth: runtimeConfig.barEdgeWidth,
+            barScale: runtimeConfig.barScale,
             officialProviders: runtimeConfig.officialProviders,
             // 只读: 供设置面板显示「自动判定结果」, 让用户知道哪些还需要手填
             providerKinds: readProviderKinds(),
@@ -3824,6 +4240,25 @@ export function apply(ctx, config) {
               Object.assign(runtimeConfig, body)
               cache.config = { ...cache.config, ...body }
               return sendJson(res, 200, { ok: true, ...body })
+            }
+            /**
+             * v1.7.1: 状态条外观也是「即改即存」的滑块, 同样要走轻量通道。
+             * 为什么不走下面的完整路径: 它末尾会 await 一轮余额刷新(最长 timeoutMs=8s),
+             * 用户每拖动一下滑块就卡一次 —— 而这两个值纯属客户端渲染参数, 服务端不参与计算,
+             * 没有任何理由等网络。范围与小数位在这里和 sanitizePersistedShape 各夹一次,
+             * 不依赖客户端守规矩。
+             */
+            const lookFields = { barEdgeWidth: [0, 3, 1], barScale: [0.8, 1.5, 2] }
+            if (keys.length && keys.every(k => k in lookFields && typeof body[k] === 'number' && Number.isFinite(body[k]))) {
+              const patch = {}
+              for (const k of keys) {
+                const [min, max, dec] = lookFields[k]
+                patch[k] = Number(Math.min(Math.max(body[k], min), max).toFixed(dec))
+              }
+              if (!savePersistedState(patch)) return sendJson(res, 500, { ok: false, error: 'settings-save-failed' })
+              Object.assign(runtimeConfig, patch)
+              cache.config = { ...cache.config, ...patch }
+              return sendJson(res, 200, { ok: true, ...patch })
             }
             // 数组规模上限: 状态文件与每次轮询都要带它们, 防垃圾数据无限膨胀
             const MAX_ITEMS = 64
@@ -3875,6 +4310,14 @@ export function apply(ctx, config) {
             // 显示无余额模型品牌
             if (typeof body.showNoBalanceBrands === 'boolean') runtimeConfig.showNoBalanceBrands = body.showNoBalanceBrands
             if (typeof body.showSubagentCapsules === 'boolean') runtimeConfig.showSubagentCapsules = body.showSubagentCapsules
+            // v1.7.1: 状态条外观。滑块单拖走上面的轻量通道; 这里兜住「一次提交全部字段」的调用
+            // (老客户端 / 别处脚本), 免得它们把用户调好的值又抹回默认。范围同 lookFields。
+            if (typeof body.barEdgeWidth === 'number' && Number.isFinite(body.barEdgeWidth)) {
+              runtimeConfig.barEdgeWidth = Number(Math.min(Math.max(body.barEdgeWidth, 0), 3).toFixed(1))
+            }
+            if (typeof body.barScale === 'number' && Number.isFinite(body.barScale)) {
+              runtimeConfig.barScale = Number(Math.min(Math.max(body.barScale, 0.8), 1.5).toFixed(2))
+            }
             // 官方直连 provider 名单 (第 1 层判定); 接受数组或逗号/换行分隔的字符串
             if (Array.isArray(body.officialProviders) || typeof body.officialProviders === 'string') {
               runtimeConfig.officialProviders = normalizeOfficialProviders(body.officialProviders)
@@ -3899,6 +4342,9 @@ export function apply(ctx, config) {
               whaleEnabled: runtimeConfig.whaleEnabled,
               showNoBalanceBrands: runtimeConfig.showNoBalanceBrands,
               showSubagentCapsules: runtimeConfig.showSubagentCapsules,
+              // v1.7.1: 状态条外观。savePersistedState 是**显式列字段**的, 漏一行就等于不落盘。
+              barEdgeWidth: runtimeConfig.barEdgeWidth,
+              barScale: runtimeConfig.barScale,
               officialProviders: runtimeConfig.officialProviders,
               dshProviderOptOut: runtimeConfig.dshProviderOptOut,
             })
@@ -3913,6 +4359,8 @@ export function apply(ctx, config) {
               whaleEnabled: !!runtimeConfig.whaleEnabled,
               showNoBalanceBrands: !!runtimeConfig.showNoBalanceBrands,
             showSubagentCapsules: !!runtimeConfig.showSubagentCapsules,
+              barEdgeWidth: runtimeConfig.barEdgeWidth,
+              barScale: runtimeConfig.barScale,
               officialProviders: runtimeConfig.officialProviders,
               providerKinds: readProviderKinds(),
               dshProviders: readDshProviderStatus(),

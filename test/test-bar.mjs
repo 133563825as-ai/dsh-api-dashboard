@@ -177,9 +177,14 @@ a('reveal 幂等(只露一次)', /if \(revealed\) return;/.test(src))
 a('reveal 里才恢复 transition', /function reveal\(\)[\s\S]{0,300}root\.style\.transition = ""/.test(src))
 
 // ===== 状态条定住高度下限 =====
-// 空态内容 18px、有数据态 20px → 钱数/平台名一进来状态条从 26px 变 28px, 把上面的会话区顶 2px
+// 空态内容 18px、有数据态 20px → 钱数/平台名一进来状态条会变高, 把上面的会话区顶一下
 // (真机实测 CLS 0.00094+0.00053)。用 min-height 定下限而非 height, 系统字体放大仍不裁字。
-a('状态条定住高度下限 28px', /\.dshadb_bar\{[^}]*min-height:28px/.test(src))
+// 维护者 2026-10-16 要求「上下宽度缩一点」→ 总高 28px 收紧到 24px(内容 20px + 上下 padding 各 2px)。
+// v1.7.1 又要求「整体可调大小」→ 这三个基准值统一乘 var(--dshadb-bar-scale)。
+// ⚠️ 三者必须同源缩放: 只缩字号不缩 padding, 空态与有数据态又差 2px, CLS 修复立刻失效。
+a('状态条定住高度下限（基准 24px × 缩放变量）', /\.dshadb_bar\{[^}]*min-height:calc\(24px \* var\(--dshadb-bar-scale/.test(src))
+a('上下 padding 与 min-height 同源缩放（否则重现 CLS）', /\.dshadb_bar\{[^}]*padding:calc\(2px \* var\(--dshadb-bar-scale/.test(src))
+a('字号也走同一个缩放变量（否则大小时字不跟着变）', /\.dshadb_bar\{[^}]*font-size:calc\(11px \* var\(--dshadb-bar-scale/.test(src))
 a('min-height 配 border-box(含 padding, 与实测总高一致)', /\.dshadb_bar\{[^}]*box-sizing:border-box/.test(src))
 a('没写死 height(字体放大不裁字)', !/\.dshadb_bar\{[^}]*;height:/.test(src))
 
@@ -197,14 +202,15 @@ a('状态条本体可收缩', /\.dshadb_bar\{[^}]*max-width:100%[^}]*min-width:0
 a('平台名可截断', /\.dshadb_bar_name\{[^}]*text-overflow:ellipsis/.test(src))
 a('金额/消耗/峰谷保住不缩', /\.dshadb_bar_amount,\.dshadb_bar_cost,\.dshadb_bar_dot,\.dshadb_bar_peak\{[^}]*flex:0 0 auto/.test(src))
 a('没给 barrow 加横向滚动(会撞手机壳手势让路规则)', !/\.dshadb_barrow\{[^}]*overflow-x/.test(src))
-// ===== v1.6.6 状态条独占一行 (真机: 跟宿主自带的统计行并排, 右端被屏幕切掉) =====
-// 宿主 uV2eYG_dock 把 composer.dock 槽位的所有贡献者排在同一条 nowrap flex 行里, 于是我们的胶囊
-// 紧贴宿主统计药丸。修法 = 对**装着本插件槽位的那个 dock** 打开换行 + 让宿主统计行占满一行。
-// 三条一起钉: 作用域(必须是 :has 钉住的这一个 dock) / 换行开了 / 统计行独占一行。
-a('dock 换行的作用域用 :has 钉在装了本插件槽位的那个 dock 上',
-  /\[class\*="_dock"\]:has\(> \[data-slot="conversation\.composer\.dock"\]\)\{[^}]*flex-wrap:wrap/.test(src))
-a('宿主统计行占满一行(状态条自然落到下一行)',
-  /\[data-slot="conversation\.composer\.dock"\] > \[data-composer-stats\]\{[^}]*flex:0 0 100%/.test(src))
+// ===== v1.7.3: v1.6.6 的两条规则**已删除**（在 0.2.2 上从「救命」变成了「有害」）=====
+// 0.2.2 起胶囊不再挂在 composer dock 里，而是 portal 进输入卡（见 test-dock-mount-022.mjs）。
+// 遗留的这两条会做两件坏事：
+//   ① `[class*="_dock"]:has(...){flex-wrap:wrap}` 把宿主的 ContextMeter 挤到第二行 ——
+//      真机实测 dock 高 52px（统计条 28 + 空出来的环位 22），统计行与胶囊之间凭空多出一条空白带；
+//   ② `[data-slot="conversation.composer.dock"] > [data-composer-stats]` 等的是一个
+//      0.2.2 里已经不存在的容器（统计行已拆成一颗颗 [data-composer-stat] 药丸）。
+a('v1.6.6 的 dock 换行规则已删除', !/\[class\*="_dock"\]:has\(> \[data-slot="conversation\.composer\.dock"\]\)\{flex-wrap:wrap\}/.test(src))
+a('v1.6.6 的统计行全宽规则已删除', !/\[data-slot="conversation\.composer\.dock"\] > \[data-composer-stats\]\{flex:0 0 100%\}/.test(src))
 a('没给 dock 加 overflow(会撞手机壳横向滚动容器让路规则)',
   !/\[class\*="_dock"\]:has\([^)]*\)\{[^}]*overflow/.test(src))
 

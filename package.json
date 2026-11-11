@@ -1,6 +1,6 @@
 {
   "name": "dsh-api-dashboard",
-  "version": "1.7.0",
+  "version": "1.7.2",
   "description": "DeepSeek Harness 多平台 API 余额 / 用量看板：输入框下方实时显示各平台余额与本会话估算消耗",
   "keywords": [
     "dsh",
@@ -25,7 +25,8 @@
     "LICENSE",
     "assets",
     "docs/PRICING-20261010.md",
-    "docs/MARKETPLACE.md"
+    "docs/MARKETPLACE.md",
+    "docs/交接-2026-11-11-官方账号登录余额.md"
   ],
   "repository": {
     "type": "git",
@@ -37,7 +38,7 @@
   "homepage": "https://github.com/133563825as-ai/dsh-api-dashboard#readme",
   "dsh": {
     "update": {
-      "summary": "适配DSH 0.2.0-rc.2；更新前展示适配范围并复检；修复设置保存和响应提前关闭、子代理与主题；补录GPT6.1等六个标准档参考价格。",
+      "summary": "1.7.4：官方登录（非 API Key）也能读 DeepSeek 余额；智谱 Coding Plan 只有百分比时按最紧窗口剩余%显示并列出各窗口已用%（issue #4）。状态条落点不变。",
       "targets": [
         "DSH / DSHA Web（0.1.x 与 0.2.x 声明范围）",
         "手机、平板、桌面"
@@ -57,7 +58,8 @@
       "dshReleases": {
         "0.2.0-rc.2": "compatible",
         "0.1.7-rc.2": "unknown",
-        "0.2.0": "unknown"
+        "0.2.0": "unknown",
+        "0.2.2-rc.1": "compatible"
       }
     }
   },
